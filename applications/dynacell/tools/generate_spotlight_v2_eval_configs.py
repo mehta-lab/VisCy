@@ -17,9 +17,10 @@ are keyed by ``(gene_cond, focus_slab.halfwidth)``; these leaves inherit the
 they read the same key rather than flipping it.
 
 Every pred-side artifact is force-recomputed (masks, instances, CP and all deep
-features) plus ``final_metrics``: the eval caches carry no prediction provenance,
-and later waves add stores (post-hoc clipped predictions) whose pixels could
-otherwise be served from a stale cache. ``gt_*`` stays cached.
+features) plus ``final_metrics``. The generator predates the per-position
+prediction sources the eval caches now record, and forcing keeps these waves
+independent of that check: later waves add stores (post-hoc clipped predictions)
+whose pixels must never be served from an earlier cache. ``gt_*`` stays cached.
 
 Buckets are keyed by ``(wave, organelle, test leaf)`` and named
 ``spotlight_v2_<organelle>_<leaf>__<wave>``. A wave is a set of models scored

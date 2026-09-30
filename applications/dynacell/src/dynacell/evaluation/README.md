@@ -118,7 +118,7 @@ Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI override
 
 Set `io.gt_cache_dir` to write/read GT-side artifacts. Set `io.pred_cache_dir` for prediction-side organelle masks + per-cell features. Sharing one root is rejected.
 
-GT caches are reusable across model checkpoints for the same `(gt_path, gt_channel_name, cell_segmentation_path)`. Prediction caches are reusable for repeated evals of the same `(pred_path, pred_channel_name, cell_segmentation_path)`.
+GT caches are reusable across model checkpoints for the same `(gt_path, gt_channel_name, cell_segmentation_path)`. Prediction caches are reusable for repeated evals of the same `(pred_path, pred_channel_name, cell_segmentation_path)` while the prediction in that store is unchanged (see [Force recompute](#force-recompute)).
 
 ### Layout
 
@@ -219,13 +219,15 @@ Each per-artifact flag invalidates that family for its side only:
 
 Without `io.gt_cache_dir` / `io.pred_cache_dir`, only `force_recompute.{final_metrics, all}` matter.
 
+A re-predict into the same `io.pred_path` needs none of these flags. The prediction side records, per cached position, the source it was built from: a hash of the position's writer marker (`viscy_prediction_complete` for `io.pred_channel_name`: checkpoint content hash, settings hash, depth handling, source shape) and the mtime of the first chunk of that channel at `t=0`. A position whose source no longer matches the store is an ordinary cache miss, recomputed and re-recorded (a `StaleCacheError` under `io.require_complete_cache=true`), so an interrupted rebuild resumes where it stopped and a code-only re-predict (same checkpoint and settings, new chunks) is caught. Writes to other channels or to position metadata do not count. Entries written before sources existed are upgraded on the first run, per position: a position is current iff its first stored chunk is no newer than the entry's `built_at`; a position with no stored chunk (a blank prediction) cannot be dated and is rebuilt once. The upgrade rewrites the manifest, so the cache directory must be writable even under `io.require_complete_cache=true`. `metrics_provenance.json` records a digest of all positions' sources, taken before scoring, and `_final_metrics_cache_valid` rejects saved metrics when it differs (an older sidecar: when any chunk is newer than the sidecar, or a position has no stored chunk). Metrics saved after a re-predict but scored from caches it had left stale are the one legacy case this cannot see. A missing prediction store raises `FileNotFoundError` wherever its sources are read, the final-metrics gate included. A zarr v2 store with `.`-separated chunk keys is scanned for its first chunk over at most 4096 directory entries and can read as unwritten beyond that; the current writer only writes zarr v3. The GT side is not tracked.
+
 ### Invalidation
 
 Three paths invalidate cached artifacts:
 
 1. **Soft auto-invalidate (default)** — bumping a tracked per-artifact param (spacing, patch_size, preprocess_version, etc.) on a normal full-walk run. `init_cache_context` warns, sets the matching `force_recompute.<side>_<kind>`, and the next FOV pass recomputes and rewrites the manifest entry. Identity mismatches (plate_path, channel_name, cell_segmentation_path, cache_schema_version) still hard-raise.
 2. **Manual `force_recompute.<side>_<kind>`** — bypass cache for a specific family without touching the manifest's recorded params.
-3. **Cache-dir wipe** — required when running with `limit_positions=N` or `io.require_complete_cache=true` and you need to change a tracked param, OR when zarr contents have been modified in place (no content fingerprinting).
+3. **Cache-dir wipe** — required when running with `limit_positions=N` or `io.require_complete_cache=true` and you need to change a tracked param, OR when zarr contents have been modified in place. Only the prediction store is tracked, per position, by its writer marker and the mtime of one chunk (see [Force recompute](#force-recompute)); voxel contents are never hashed.
 
 Bumping `cache_schema_version` in `cache.py` forces a wipe on every existing cache.
 

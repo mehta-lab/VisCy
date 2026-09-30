@@ -20,6 +20,8 @@ from dynacell.evaluation.cache import (  # noqa: E402
     cache_paths,
     feature_slug,
     load_manifest,
+    prediction_sources,
+    prediction_sources_sha256_12,
     read_features,
     read_instance_mask,
     read_mask,
@@ -83,6 +85,14 @@ def _make_config(**overrides: Any):
     for key, value in overrides.items():
         OmegaConf.update(cfg, key, value, merge=True)
     return cfg
+
+
+def _pred_store(tmp_path: Path) -> str:
+    """Write a two-position prediction store under *tmp_path*: a pred cache fingerprints ``io.pred_path`` on open."""
+    path = tmp_path / "pred.zarr"
+    if not path.exists():
+        _write_tiny_hcs_plate(path, [("A", "1", "0"), ("A", "1", "1")], n_t=1, channel="prediction")
+    return str(path)
 
 
 class _FakeSegModel:
@@ -184,10 +194,13 @@ def test_init_pred_cache_disabled_when_no_cache_dir() -> None:
 
 def test_init_pred_cache_seeds_identity_on_fresh_dir(tmp_path: Path) -> None:
     """Fresh pred cache dir gets pred/cell_segmentation identity fields seeded."""
-    ctx = init_cache_context(_make_config(**{"io.pred_cache_dir": str(tmp_path)}), side="pred")
+    pred_path = _pred_store(tmp_path)
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(tmp_path), "io.pred_path": pred_path}), side="pred"
+    )
     assert ctx.enabled
     assert ctx.manifest["gt"] is None
-    assert ctx.manifest["pred"] == {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"}
+    assert ctx.manifest["pred"] == {"plate_path": pred_path, "channel_name": "prediction"}
     assert ctx.manifest["cell_segmentation"] == {"plate_path": "/tmp/seg.zarr"}
 
 
@@ -693,12 +706,19 @@ def test_fov_gt_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> No
 
 
 def test_fov_pred_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> None:
-    """Cached prediction masks short-circuit prediction-side segmentation."""
+    """Cached prediction masks short-circuit prediction-side segmentation.
+
+    The first pass goes through the real writer: a prediction-side slot is served only
+    with the prediction source its manifest entry records for the position.
+    """
     import dynacell.evaluation.segmentation as segmentation
 
-    paths = cache_paths(tmp_path)
     masks = np.ones((2, 3, 4, 4), dtype=bool)
-    write_mask(paths, "er", "A/1/0", masks)
+    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path), "io.pred_path": _pred_store(tmp_path)})
+    monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
+    first = init_cache_context(cfg, side="pred")
+    fov_masks(first, "A/1/0", np.zeros((2, 3, 4, 4), dtype=np.float32), seg_model=_FakeSegModel())
+    flush_manifest(first)
 
     call_count = {"n": 0}
 
@@ -708,7 +728,6 @@ def test_fov_pred_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> 
 
     monkeypatch.setattr(segmentation, "segment", fail_segment)
 
-    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="pred")
     prediction = np.zeros((2, 3, 4, 4), dtype=np.float32)
     result = fov_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
@@ -768,6 +787,7 @@ def test_fov_pred_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypa
     cfg = _make_config(
         **{
             "io.pred_cache_dir": str(tmp_path),
+            "io.pred_path": _pred_store(tmp_path),
             "io.require_complete_cache": True,
         }
     )
@@ -810,7 +830,7 @@ def test_fov_pred_masks_writes_manifest_source(tmp_path: Path, monkeypatch) -> N
     import dynacell.evaluation.segmentation as segmentation
 
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
-    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
+    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path), "io.pred_path": _pred_store(tmp_path)})
     ctx = init_cache_context(cfg, side="pred")
     fov_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
     flush_manifest(ctx)
@@ -893,13 +913,19 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
     cfg = _make_config(
         **{
             "io.pred_cache_dir": str(tmp_path),
+            "io.pred_path": _pred_store(tmp_path),
             "compute_feature_metrics": True,
             "feature_extractor": {"dinov3": {"pretrained_model_name": "facebook/test-dinov3"}},
         }
     )
-    ctx = init_cache_context(cfg, side="pred", dinov3_model_name="facebook/test-dinov3")
-
     pos_name = "A/1/0"
+    prediction = np.zeros((2, 1, 4, 4), dtype=np.float32)
+    cell_seg = np.zeros((2, 1, 4, 4), dtype=np.int32)
+    # A real first pass (zero cells, so no extractor call) records the position's
+    # prediction source; the slots are then overwritten with known values.
+    first = init_cache_context(cfg, side="pred", dinov3_model_name="facebook/test-dinov3")
+    fov_deep_features(first, pos_name, prediction, cell_seg, None, "dinov3")
+    flush_manifest(first)
     paths = cache_paths(tmp_path)
     precomputed = np.arange(6, dtype=np.float32).reshape(3, 2)
     for t in (0, 1):
@@ -909,9 +935,7 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
         def extract_features(self, img):
             raise AssertionError("extractor should not be called on pred-cache hit")
 
-    prediction = np.zeros((2, 1, 4, 4), dtype=np.float32)
-    cell_seg = np.zeros((2, 1, 4, 4), dtype=np.int32)
-
+    ctx = init_cache_context(cfg, side="pred", dinov3_model_name="facebook/test-dinov3")
     results = fov_deep_features(ctx, pos_name, prediction, cell_seg, ExplodingExtractor(), "dinov3")
     assert len(results) == 2
     np.testing.assert_array_equal(results[0], precomputed)
@@ -954,7 +978,7 @@ def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> Non
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
 
-    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
+    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path), "io.pred_path": _pred_store(tmp_path)})
     ctx = init_cache_context(cfg, side="pred")
     prediction = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
     cell_seg = np.ones_like(prediction, dtype=np.int32)
@@ -987,7 +1011,11 @@ def test_fov_cp_features_excluded_walk_seeds_identity_on_fresh_cache(tmp_path: P
         return np.full((2, _CP_WIDTH), float(image.sum()), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
-    overrides = {f"io.{side}_cache_dir": str(tmp_path), "io.exclude_fov_names": ["A/1/1"]}
+    overrides = {
+        f"io.{side}_cache_dir": str(tmp_path),
+        "io.pred_path": _pred_store(tmp_path),
+        "io.exclude_fov_names": ["A/1/1"],
+    }
     ctx = init_cache_context(_make_config(**overrides), side=side)
     assert ctx.excluded_walk
     image = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
@@ -1034,7 +1062,14 @@ def test_fov_cp_features_excluded_refresh_does_not_certify_skipped_fovs(tmp_path
     paths = cache_paths(tmp_path)
 
     def config(p_lo: float, **extra: Any):
-        return _make_config(**{f"io.{side}_cache_dir": str(tmp_path), "feature_metrics.cp.norm.p_lo": p_lo, **extra})
+        return _make_config(
+            **{
+                f"io.{side}_cache_dir": str(tmp_path),
+                "io.pred_path": _pred_store(tmp_path),
+                "feature_metrics.cp.norm.p_lo": p_lo,
+                **extra,
+            }
+        )
 
     def recipe_on_disk(pos_name: str) -> float:
         return float(read_features(paths, "cp", pos_name, 0)[0, 0])
@@ -1101,7 +1136,10 @@ def test_fov_masks_excluded_walk_refuses_unknown_identity(tmp_path: Path, monkey
     def init(*, expect_mismatch: bool = False, **extra: Any):
         expect = pytest.warns(UserWarning, match="artifact param mismatch") if expect_mismatch else nullcontext()
         with expect:
-            return init_cache_context(_make_config(**{f"io.{side}_cache_dir": str(tmp_path), **extra}), side=side)
+            config = _make_config(
+                **{f"io.{side}_cache_dir": str(tmp_path), "io.pred_path": _pred_store(tmp_path), **extra}
+            )
+            return init_cache_context(config, side=side)
 
     ctx1 = init()
     for pos_name in ("A/1/0", "A/1/1"):
@@ -1150,7 +1188,10 @@ def test_fov_cp_features_excluded_walk_refuses_unknown_identity(tmp_path: Path, 
     def init(*, expect_mismatch: bool = False, **extra: Any):
         expect = pytest.warns(UserWarning, match="artifact param mismatch") if expect_mismatch else nullcontext()
         with expect:
-            return init_cache_context(_make_config(**{f"io.{side}_cache_dir": str(tmp_path), **extra}), side=side)
+            config = _make_config(
+                **{f"io.{side}_cache_dir": str(tmp_path), "io.pred_path": _pred_store(tmp_path), **extra}
+            )
+            return init_cache_context(config, side=side)
 
     ctx1 = init()
     for pos_name in ("A/1/0", "A/1/1"):
@@ -1412,6 +1453,8 @@ def test_precompute_excluded_fov_preserves_cache_identity(tmp_path: Path, side, 
         cfg = _make_config(
             **{
                 f"io.{side}_path": str(gt_path),
+                # The plate holds one channel, ``target``; the pred side reads its sources there.
+                f"io.{side}_channel_name": "target",
                 "io.cell_segmentation_path": str(seg_path),
                 f"io.{side}_cache_dir": str(cache_dir),
             }
@@ -1643,12 +1686,13 @@ def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> No
 
     cache_dir = tmp_path
     paths = cache_paths(cache_dir)
+    pred_path = _pred_store(tmp_path)
     save_manifest(
         paths,
         {
             "cache_schema_version": 1,
             "gt": None,
-            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "pred": {"plate_path": pred_path, "channel_name": "prediction"},
             "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
             "artifacts": {
                 "celldino_features": {
@@ -1665,7 +1709,7 @@ def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> No
     )
 
     ctx = init_cache_context(
-        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        _make_config(**{"io.pred_cache_dir": str(cache_dir), "io.pred_path": pred_path}),
         side="pred",
         celldino_weights_path=None,
         celldino_preprocess_version="self_normalize_v1",
@@ -1673,7 +1717,7 @@ def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> No
     # Without celldino_weights_sha12 we can't even reach the entry; provide it.
     # Re-init with the right sha so the entry lookup hits.
     ctx = init_cache_context(
-        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        _make_config(**{"io.pred_cache_dir": str(cache_dir), "io.pred_path": pred_path}),
         side="pred",
         celldino_weights_path=None,
         celldino_preprocess_version="self_normalize_v1",
@@ -1702,12 +1746,13 @@ def test_preprocess_version_mismatch_auto_invalidates(tmp_path: Path) -> None:
 
     cache_dir = tmp_path
     paths = cache_paths(cache_dir)
+    pred_path = _pred_store(tmp_path)
     save_manifest(
         paths,
         {
             "cache_schema_version": 1,
             "gt": None,
-            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "pred": {"plate_path": pred_path, "channel_name": "prediction"},
             "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
             "artifacts": {
                 "celldino_features": {
@@ -1724,7 +1769,7 @@ def test_preprocess_version_mismatch_auto_invalidates(tmp_path: Path) -> None:
     )
 
     ctx = init_cache_context(
-        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        _make_config(**{"io.pred_cache_dir": str(cache_dir), "io.pred_path": pred_path}),
         side="pred",
         celldino_preprocess_version="self_normalize_v1",
     )
@@ -1750,12 +1795,13 @@ def test_preprocess_version_match_is_noop(tmp_path: Path) -> None:
 
     cache_dir = tmp_path
     paths = cache_paths(cache_dir)
+    pred_path = _pred_store(tmp_path)
     save_manifest(
         paths,
         {
             "cache_schema_version": 1,
             "gt": None,
-            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "pred": {"plate_path": pred_path, "channel_name": "prediction"},
             "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
             "artifacts": {
                 "celldino_features": {
@@ -1772,7 +1818,7 @@ def test_preprocess_version_match_is_noop(tmp_path: Path) -> None:
     )
 
     ctx = init_cache_context(
-        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        _make_config(**{"io.pred_cache_dir": str(cache_dir), "io.pred_path": pred_path}),
         side="pred",
         celldino_preprocess_version="self_normalize_v1",
     )
@@ -2132,13 +2178,20 @@ def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
 
     save_dir = tmp_path / "out"
     save_dir.mkdir()
+    pred_path = _pred_store(tmp_path)
     # Reuse also requires the numeric-provenance stamp save_metrics writes.
-    write_metrics_provenance(save_dir, cp_reference_sha256=None, cp_space_sha256=None)
+    write_metrics_provenance(
+        save_dir,
+        cp_reference_sha256=None,
+        cp_space_sha256=None,
+        prediction_sources_sha256_12=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+    )
     np.save(save_dir / "pixel_metrics.npy", np.array([dict(_DUAL_SCALING_PIXEL_ROW)], dtype=object))
     cfg = _make_config(
         **{
             "compute_instance_ap": True,
             "compute_feature_metrics": False,
+            "io.pred_path": pred_path,
             "save": {
                 "save_dir": str(save_dir),
                 "pixel_metrics_filename": "pixel_metrics.npy",
@@ -2172,11 +2225,18 @@ def test_final_metrics_cache_gate_requires_both_pixel_scalings(tmp_path: Path) -
 
     save_dir = tmp_path / "out"
     save_dir.mkdir()
-    write_metrics_provenance(save_dir, cp_reference_sha256=None, cp_space_sha256=None)
+    pred_path = _pred_store(tmp_path)
+    write_metrics_provenance(
+        save_dir,
+        cp_reference_sha256=None,
+        cp_space_sha256=None,
+        prediction_sources_sha256_12=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+    )
     cfg = _make_config(
         **{
             "compute_instance_ap": False,
             "compute_feature_metrics": False,
+            "io.pred_path": pred_path,
             "save": {
                 "save_dir": str(save_dir),
                 "pixel_metrics_filename": "pixel_metrics.npy",

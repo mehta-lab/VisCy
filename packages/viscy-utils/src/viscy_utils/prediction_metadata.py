@@ -16,6 +16,7 @@ __all__ = [
     "completion_marker",
     "mark_complete",
     "mark_started",
+    "marker_identity",
     "outruns",
     "prediction_complete",
     "prediction_run",
@@ -250,8 +251,20 @@ def completion_marker(source_shape: list[int], run: dict[str, Any]) -> dict[str,
     return {"source_shape": list(source_shape), **run}
 
 
-def _identity(marker: Any) -> Any:
-    """Strip provenance-only fields so markers compare on what was predicted."""
+def marker_identity(marker: Any) -> Any:
+    """Strip provenance-only fields so markers compare on what was predicted.
+
+    Parameters
+    ----------
+    marker : Any
+        Recorded marker value, or None when the channel has no entry.
+
+    Returns
+    -------
+    Any
+        ``marker`` without its provenance-only keys when it is a dict, else
+        ``marker`` unchanged.
+    """
     if isinstance(marker, dict):
         return {key: value for key, value in marker.items() if key not in _PROVENANCE_KEYS}
     return marker
@@ -272,7 +285,7 @@ def same_marker(recorded: Any, marker: Any) -> bool:
     bool
         True when both describe the same prediction state.
     """
-    return _identity(recorded) == _identity(marker)
+    return marker_identity(recorded) == marker_identity(marker)
 
 
 def same_run(marker: Any, run: dict[str, Any]) -> bool:
@@ -293,7 +306,7 @@ def same_run(marker: Any, run: dict[str, Any]) -> bool:
     if not isinstance(marker, dict):
         return False
     recorded = {key: value for key, value in marker.items() if key != "source_shape"}
-    return _identity(recorded) == _identity(run)
+    return marker_identity(recorded) == marker_identity(run)
 
 
 def mark_complete(position: Position, channels: Iterable[str], marker: dict[str, Any]) -> None:

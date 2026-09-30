@@ -27,6 +27,8 @@ from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 
+from ._eval_fixtures import make_hcs_plate
+
 _DYNACELL_ROOT = Path(__file__).resolve().parents[1]
 _INTERNAL = _DYNACELL_ROOT / "configs" / "benchmarks" / "virtual_staining" / "_internal"
 _SHARED_EVAL = _INTERNAL / "shared" / "eval"
@@ -189,12 +191,14 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("dynacell.evaluation.pipeline.save_metrics", _fake_save_metrics)
 
     # Feature metrics off: evaluate_model would otherwise load the CP reference before
-    # evaluate_predictions, and this test is about the dataset_ref splice only.
+    # evaluate_predictions, and this test is about the dataset_ref splice only. The
+    # prediction store must exist: evaluate_model fingerprints it before scoring.
+    make_hcs_plate(tmp_path / "pred.zarr", "Structure_prediction", seed=0)
     cfg = _compose_eval_cfg(
         [
             "target=er_sec61b",
             "predict_set=ipsc_confocal",
-            "io.pred_path=/tmp/fake",
+            f"io.pred_path={tmp_path / 'pred.zarr'}",
             f"save.save_dir={tmp_path}",
             "compute_feature_metrics=false",
         ]

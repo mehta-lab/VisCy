@@ -18,11 +18,12 @@ import pytest
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
+from dynacell.evaluation.cache import prediction_sources, prediction_sources_sha256_12
 from dynacell.evaluation.cp_reference import payload_sha256
 from dynacell.evaluation.model_loader import EvalModels
 from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_provenance
 
-from ._eval_fixtures import N_POSITIONS, build_eval_config, live_pipeline_module, make_cp_reference
+from ._eval_fixtures import N_POSITIONS, build_eval_config, live_pipeline_module, make_cp_reference, make_hcs_plate
 
 D, H, W = 3, 8, 8
 
@@ -109,6 +110,8 @@ def _feature_cache_config(tmp_path: Path, **flags: bool):
     config.compute_feature_metrics = True
     if not (tmp_path / "gt.zarr").exists():  # the cache-hit path checks the GT store's positions
         _make_plate(tmp_path / "gt.zarr", "target", [2] * N_POSITIONS)
+    if not (tmp_path / "pred.zarr").exists():  # ... and fingerprints the prediction store
+        _make_plate(tmp_path / "pred.zarr", "prediction", [2] * N_POSITIONS)
     for name, value in flags.items():
         config.feature_metrics[name] = value
     return config, make_cp_reference(config, tmp_path / "cp_reference.json")
@@ -120,7 +123,14 @@ def _write_final_caches(pipeline, save_dir: Path, feature_row: dict, config) -> 
     np.save(save_dir / "mask_metrics.npy", [{"metric": "mask"}])
     np.save(save_dir / "feature_metrics.npy", [feature_row])
     space = pipeline.eval_cp_space(config)
-    write_metrics_provenance(save_dir, cp_reference_sha256=space.reference_sha256, cp_space_sha256=space.binding_sha256)
+    write_metrics_provenance(
+        save_dir,
+        cp_reference_sha256=space.reference_sha256,
+        cp_space_sha256=space.binding_sha256,
+        prediction_sources_sha256_12=prediction_sources_sha256_12(
+            prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+        ),
+    )
 
 
 def _dataset_row(prefixes: tuple[str, ...], families: tuple[str, ...]) -> dict:
@@ -272,8 +282,11 @@ def test_feature_less_cache_ignores_the_cp_reference(tmp_path: Path) -> None:
         executor="serial",
         fov_workers=1,
     )
+    # Non-blank, so its chunks are stored and date it; an all-fill store cannot be dated.
+    make_hcs_plate(tmp_path / "pred.zarr", "prediction", seed=0)
     np.save(tmp_path / "pixel_metrics.npy", [{"SI_PSNR": 1.0, "SI_SSIM": 1.0, "SI_NRMSE": 1.0}])
     np.save(tmp_path / "mask_metrics.npy", [{"metric": "mask"}])
+    # Written after the prediction store and before the stamp carried its fingerprint.
     (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
     assert pipeline._final_metrics_cache_valid(config)
 
