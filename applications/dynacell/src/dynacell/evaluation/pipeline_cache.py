@@ -665,9 +665,9 @@ def _check_prediction_sources(ctx: _CacheContext) -> None:
     ``built_at`` is the time of the family's LAST write, so upgrading after a partial
     write of this run would move it past the store's date. The same imprecision remains
     inside the legacy entry -- a position rebuilt after a re-predict moves ``built_at``
-    past positions still holding the old prediction -- and is accepted: a production
-    audit (2026-09-30; 1304 grouped store/cache pairs, dated per chunk) found every
-    legacy cache fresh except the 31 already being recomputed.
+    past positions still holding the old prediction -- so legacy dating is
+    approximate. It is accepted because legacy caches were audited against their
+    stores' chunks and the stale ones recomputed.
 
     Checks the families :func:`_artifact_entries` lists for this run. Entries with no
     identity yet (absent, or bookkeeping only) are left to the param check.
@@ -1448,12 +1448,11 @@ def _load_or_compute_feature_timepoints(
         return [np.asarray(compute_fn(t)) for t in range(t_count)], False
 
     force_recompute = ctx.force[force_key]
-    # A cached prediction-side position built from another prediction is read as a miss.
     reuse = not force_recompute and _source_current(ctx, manifest_keys, pos_name)
     per_t: list[np.ndarray | None] = [None] * t_count
 
-    # Lockless prefetch pass. Skipped under force_recompute because we'll
-    # rewrite every timepoint anyway.
+    # Lockless prefetch pass. Skipped when the position is rewritten anyway: forced,
+    # or cached from another prediction.
     if reuse:
         with open_features_group(ctx.paths, kind, mode="r", **cache_kwargs) as group:
             if group is not None:
@@ -1893,7 +1892,6 @@ class DeepFeatureBatcher:
         out: dict[FeatureKind, list[int]] = {}
         for kind in self.extractors:
             manifest_keys = _deep_feature_cache_metadata(self.ctx, kind)[3]
-            # A prediction-side position built from another prediction is rebuilt whole.
             stale = not _source_current(self.ctx, manifest_keys, pos_name)
             if self._force_snapshot[kind] or stale:
                 out[kind] = list(range(t_count))

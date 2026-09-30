@@ -192,8 +192,8 @@ def metrics_provenance_matches(
         mtime); a blank position (no stored chunk) cannot be dated and forces one
         recompute. That misses one legacy case: metrics saved after a re-predict but
         scored from pred caches it had left stale. The grouped leaves'
-        ``force_recompute.final_metrics: true`` and the 2026-09-30 recompute of the
-        stale caches cover it.
+        ``force_recompute.final_metrics: true`` covers it, and stale legacy caches were
+        audited and recomputed.
 
     Returns
     -------
