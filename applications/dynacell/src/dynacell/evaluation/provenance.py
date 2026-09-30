@@ -125,7 +125,7 @@ def write_metrics_provenance(
     *,
     cp_reference_sha256: str | None,
     cp_space_sha256: str | None,
-    prediction_sources_sha256_12: str,
+    prediction_digest: str,
 ) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
@@ -140,10 +140,11 @@ def write_metrics_provenance(
         ``DatasetCPSpace.binding_sha256`` of the space the run scored in: the
         reference bound to one dataset and the GT cells it was fit on. This is the
         value cache reuse compares. ``None`` exactly when ``cp_reference_sha256`` is.
-    prediction_sources_sha256_12 : str
-        Digest of the per-position sources of the prediction the metrics were scored
-        on, taken before scoring; the final-metrics cache gate compares it with the
-        store's current one.
+    prediction_digest : str
+        :func:`~dynacell.evaluation.cache.prediction_sources_sha256_12` of the
+        prediction the metrics were scored on, taken before scoring and stored as
+        ``prediction_sources_sha256_12``; the final-metrics cache gate compares it with
+        the store's current one.
 
     Raises
     ------
@@ -156,7 +157,7 @@ def write_metrics_provenance(
         "versions": installed_versions(),
         "cp_reference_sha256": cp_reference_sha256,
         "cp_space_sha256": cp_space_sha256,
-        "prediction_sources_sha256_12": prediction_sources_sha256_12,
+        "prediction_sources_sha256_12": prediction_digest,
     }
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 

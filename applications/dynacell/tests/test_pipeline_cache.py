@@ -2184,7 +2184,7 @@ def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
         save_dir,
         cp_reference_sha256=None,
         cp_space_sha256=None,
-        prediction_sources_sha256_12=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+        prediction_digest=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
     )
     np.save(save_dir / "pixel_metrics.npy", np.array([dict(_DUAL_SCALING_PIXEL_ROW)], dtype=object))
     cfg = _make_config(
@@ -2230,7 +2230,7 @@ def test_final_metrics_cache_gate_requires_both_pixel_scalings(tmp_path: Path) -
         save_dir,
         cp_reference_sha256=None,
         cp_space_sha256=None,
-        prediction_sources_sha256_12=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+        prediction_digest=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
     )
     cfg = _make_config(
         **{

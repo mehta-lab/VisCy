@@ -44,9 +44,7 @@ def test_installed_versions_records_cubic():
 
 
 def test_roundtrip_matches_running_environment(tmp_path):
-    write_metrics_provenance(
-        tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_sources_sha256_12=_DIGEST
-    )
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_digest=_DIGEST)
     payload = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
     assert payload["versions"]["cubic"] == version("cubic")
     assert payload["cp_reference_sha256"] == "ref-abc"
@@ -57,9 +55,7 @@ def test_roundtrip_matches_running_environment(tmp_path):
 
 def test_feature_less_stamp_matches_only_a_feature_less_run(tmp_path):
     """A run without feature metrics stamps ``None``; a CP-scoring run must not reuse it."""
-    write_metrics_provenance(
-        tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_sources_sha256_12=_DIGEST
-    )
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST)
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256="abc", prediction_sources=_SOURCES)
 
@@ -68,17 +64,13 @@ def test_feature_less_run_ignores_the_cp_key(tmp_path):
     """compute_feature_metrics=false reuses no CP value, so a missing or foreign hash is irrelevant."""
     (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
-    write_metrics_provenance(
-        tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_sources_sha256_12=_DIGEST
-    )
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_digest=_DIGEST)
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
 
 
 def test_other_cp_reference_is_not_a_match(tmp_path):
     """CP values scored in another reference are not reusable after a rebuild."""
-    write_metrics_provenance(
-        tmp_path, cp_reference_sha256="ref-old", cp_space_sha256="old", prediction_sources_sha256_12=_DIGEST
-    )
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-old", cp_space_sha256="old", prediction_digest=_DIGEST)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256="new", prediction_sources=_SOURCES)
 
 
@@ -104,7 +96,7 @@ def _stamp_cubic(save_dir, cubic, *, cp_space_sha256):
         save_dir,
         cp_reference_sha256=cp_reference_sha256,
         cp_space_sha256=cp_space_sha256,
-        prediction_sources_sha256_12=_DIGEST,
+        prediction_digest=_DIGEST,
     )
     path = save_dir / PROVENANCE_FILENAME
     payload = json.loads(path.read_text())
@@ -187,16 +179,12 @@ def test_stamp_without_a_cp_space_binding_is_not_a_match(tmp_path):
 
 def test_half_a_cp_stamp_is_refused(tmp_path):
     with pytest.raises(ValueError, match="both be given or both be None"):
-        write_metrics_provenance(
-            tmp_path, cp_reference_sha256="abc", cp_space_sha256=None, prediction_sources_sha256_12=_DIGEST
-        )
+        write_metrics_provenance(tmp_path, cp_reference_sha256="abc", cp_space_sha256=None, prediction_digest=_DIGEST)
 
 
 def test_prediction_sources_must_match_the_stamp_or_predate_the_sidecar(tmp_path):
     """The stamped digest is compared; a sidecar without one is reusable only if every position predates it."""
-    write_metrics_provenance(
-        tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_sources_sha256_12=_DIGEST
-    )
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST)
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
     rewritten = {"A/1/0": {"marker": None, "written_ns": 2}}
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=rewritten)

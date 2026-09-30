@@ -197,6 +197,7 @@ def init_cache_context(
     dynaclr_preprocess_version: str | None = None,
     celldino_preprocess_version: str | None = None,
     morphem_preprocess_version: str | None = None,
+    prediction_snapshot: dict[str, dict[str, Any]] | None = None,
 ) -> _CacheContext:
     """Open and validate the *side*-specific artifact cache for the run.
 
@@ -231,6 +232,11 @@ def init_cache_context(
         recomputed with the current preprocessing. Missing values (e.g.
         the kind isn't loaded, or the cached manifest pre-dates version
         tracking) are treated as "no constraint" — no auto-invalidation.
+    prediction_snapshot
+        :func:`~dynacell.evaluation.cache.prediction_sources` of ``io.pred_path`` the
+        caller already read (and hashed for the metrics stamp); the prediction side
+        copies it instead of reading the store again. ``None`` reads it here. Ignored
+        on the GT side.
 
     Notes
     -----
@@ -386,14 +392,22 @@ def init_cache_context(
         cell_segmentation_path=cell_seg_path,
     )
 
+    # Read once, before any artifact is built: a position written by this run is
+    # recorded with its source as it stood when the run started. A caller's snapshot is
+    # copied, since positions read on demand are added to it.
+    sources = None
+    if side == "pred":
+        sources = (
+            dict(prediction_snapshot)
+            if prediction_snapshot is not None
+            else prediction_sources(plate_path, channel_name)
+        )
     ctx = _CacheContext(
         paths=paths,
         manifest=manifest,
         require_complete=require_complete_requested,
         side=side,
-        # Read once, before any artifact is built: a position written by this run is
-        # recorded with its source as it stood when the run started.
-        prediction_sources=prediction_sources(plate_path, channel_name) if side == "pred" else None,
+        prediction_sources=sources,
         **base_kwargs,
     )
     _auto_invalidate_on_artifact_param_mismatch(ctx)

@@ -449,6 +449,15 @@ def test_a_position_added_after_init_is_recorded_and_reused(tmp_path: Path, monk
     assert _masks(_open_quietly(lambda: init_cache_context(config, side="pred")), monkeypatch, everything) == {}
 
 
+def test_pred_context_uses_the_callers_snapshot(tmp_path: Path) -> None:
+    """A snapshot the caller already read (and hashed) is used as is, not re-read, and copied."""
+    _write_prediction(tmp_path / "pred.zarr", "run-1")
+    snapshot = {name: {"marker": "caller", "written_ns": 1} for name in _POSITIONS}
+    ctx = init_cache_context(_config(tmp_path), side="pred", prediction_snapshot=snapshot)
+    assert ctx.prediction_sources == snapshot
+    assert ctx.prediction_sources is not snapshot
+
+
 def test_multichannel_repredict_invalidates_only_its_channel(tmp_path: Path, monkeypatch) -> None:
     """Rewriting channel 1 of a two-channel store misses a channel-1 cache and leaves a channel-0 cache hit."""
     pred = tmp_path / "pred.zarr"
@@ -639,7 +648,7 @@ _MASK = [{"FOV": "A/1/0", "Timepoint": 0, "Dice": 0.5}]
 def _evaluate_and_save(pipeline, config, monkeypatch, *, during_scoring=None) -> None:
     """Run the real ``evaluate_model`` save path over stubbed scoring rows."""
 
-    def _fake_evaluate_predictions(cfg, *, cp_space):
+    def _fake_evaluate_predictions(cfg, *, cp_space, prediction_snapshot):
         if during_scoring is not None:
             during_scoring()
         return _PIXEL, _MASK, []
@@ -699,7 +708,7 @@ def test_grouped_final_metrics_stamp_the_prediction_scored(tmp_path: Path, monke
         },
     )
 
-    def _fake_evaluate_predictions(cfg, *, models, cp_space):
+    def _fake_evaluate_predictions(cfg, *, models, cp_space, prediction_snapshot):
         _repredict(pred, "run-2")
         return _PIXEL, _MASK, []
 

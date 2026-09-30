@@ -126,7 +126,7 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
         tmp_path,
         cp_reference_sha256=None,
         cp_space_sha256=None,
-        prediction_sources_sha256_12=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+        prediction_digest=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
     )
 
     def fail_if_recomputed(_config):

@@ -1330,7 +1330,11 @@ def _worker_run_fov(
 
 
 def evaluate_predictions(
-    config: DictConfig, *, models: EvalModels | None = None, cp_space: DatasetCPSpace | None = None
+    config: DictConfig,
+    *,
+    models: EvalModels | None = None,
+    cp_space: DatasetCPSpace | None = None,
+    prediction_snapshot: dict[str, dict[str, Any]] | None = None,
 ):
     """Evaluate predictions on all test images.
 
@@ -1350,6 +1354,11 @@ def evaluate_predictions(
         The CP reference bound to this eval's dataset (:func:`eval_cp_space`).
         Required exactly when ``compute_feature_metrics=true``; the caller loads it
         so the same verified reference is stamped by :func:`save_metrics`.
+    prediction_snapshot : dict or None, optional
+        :func:`~dynacell.evaluation.cache.prediction_sources` of ``io.pred_path``, read
+        by the caller for the stamp it hashes; the prediction-side cache then uses the
+        same snapshot instead of reading the store again. ``None`` reads it here.
+        Process-executor workers read their own.
     """
     # Phase 1 runtime resolution: lock in executor + thread caps before any
     # heavy work. fov_workers may be provisional when "auto"; re-resolved in
@@ -1402,7 +1411,7 @@ def evaluate_predictions(
         celldino_feature_extractor = models.celldino
         morphem_feature_extractor = models.morphem
 
-        cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
+        cache_ctx, pred_cache_ctx = init_cache_contexts(config, models, prediction_snapshot=prediction_snapshot)
     # The CP reference masks and scales by column position: refuse a GT or pred CP
     # cache whose columns are not the reference's, by name and order.
     if cp_space is not None:
@@ -1904,7 +1913,7 @@ def save_metrics(
     feature_metrics=None,
     *,
     cp_space: DatasetCPSpace | None,
-    prediction_sources_sha256_12: str,
+    prediction_digest: str,
 ):
     """Save metric rows as CSV + NPY (and plots), then stamp ``metrics_provenance.json``.
 
@@ -1920,11 +1929,11 @@ def save_metrics(
         Its ``reference_sha256`` (audit) and ``binding_sha256`` (compared on cache
         reuse) are stamped. It is passed in rather than re-read here, so a reference
         rebuilt mid-run cannot be stamped on values it did not produce.
-    prediction_sources_sha256_12 : str
-        :func:`~dynacell.evaluation.cache.prediction_sources_sha256_12` of
-        ``io.pred_path``, taken before scoring for the same reason: a re-predict landing
-        mid-run then leaves a stamp that no longer matches the store, and the rows are
-        recomputed.
+    prediction_digest : str
+        :func:`~dynacell.evaluation.cache.prediction_sources_sha256_12` of the
+        ``io.pred_path`` snapshot scored, taken before scoring for the same reason: a
+        re-predict landing mid-run then leaves a stamp that no longer matches the
+        store, and the rows are recomputed.
 
     Raises
     ------
@@ -1962,7 +1971,7 @@ def save_metrics(
         save_dir,
         cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
         cp_space_sha256=cp_space.binding_sha256 if cp_space is not None else None,
-        prediction_sources_sha256_12=prediction_sources_sha256_12,
+        prediction_digest=prediction_digest,
     )
 
 
@@ -2326,11 +2335,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
             pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
         else:
             cp_space = eval_cp_space(merged) if merged.compute_feature_metrics else None
-            scored_prediction = prediction_sources_sha256_12(
-                prediction_sources(merged.io.pred_path, merged.io.pred_channel_name)
-            )
+            snapshot = prediction_sources(merged.io.pred_path, merged.io.pred_channel_name)
             pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
-                merged, models=get_models(), cp_space=cp_space
+                merged, models=get_models(), cp_space=cp_space, prediction_snapshot=snapshot
             )
             save_metrics(
                 merged,
@@ -2338,7 +2345,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
                 cp_space=cp_space,
-                prediction_sources_sha256_12=scored_prediction,
+                prediction_digest=prediction_sources_sha256_12(snapshot),
             )
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
         condition_save_dirs.append(Path(merged.save.save_dir))
@@ -2382,10 +2389,10 @@ def evaluate_model(config: DictConfig):
         # stamped by save_metrics is the reference the metrics were scored with. The
         # prediction fingerprint is taken before scoring for the same reason.
         cp_space = eval_cp_space(config) if config.compute_feature_metrics else None
-        scored_prediction = prediction_sources_sha256_12(
-            prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+        snapshot = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
+            config, cp_space=cp_space, prediction_snapshot=snapshot
         )
-        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config, cp_space=cp_space)
         with region_timer("save_metrics_csvs", "<parent>"):
             save_metrics(
                 config,
@@ -2393,7 +2400,7 @@ def evaluate_model(config: DictConfig):
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
                 cp_space=cp_space,
-                prediction_sources_sha256_12=scored_prediction,
+                prediction_digest=prediction_sources_sha256_12(snapshot),
             )
         # Re-dump so save_metrics_csvs lands in eval_timing.csv. evaluate_predictions
         # dumps once before save_metrics runs; this second dump overwrites with the
