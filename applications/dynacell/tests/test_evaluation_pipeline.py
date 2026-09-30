@@ -30,12 +30,14 @@ def _import_pipeline_with_stubs(monkeypatch):
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")
     metrics_module.ascupy = None
     metrics_module.CP_FEATURE_VERSION = "v2_dist_texture"
+    metrics_module.CP_FEATURE_NAMES_BY_VERSION = {"v2_dist_texture": ()}
     metrics_module.fit_microssim = lambda *args, **kwargs: None
     metrics_module.score_microssim = lambda *args, **kwargs: []
     metrics_module.compute_pixel_metrics = lambda *args, **kwargs: {}
     metrics_module.evaluate_segmentations = lambda *args, **kwargs: {}
     metrics_module.cp_regionprops = lambda *args, **kwargs: None
     metrics_module.active_cp_feature_names = lambda *args, **kwargs: ()
+    metrics_module.round_device_dependent_cp_columns = lambda features, feature_names: features
     metrics_module.per_cell_similarity = lambda *args, **kwargs: []
     metrics_module.deep_features = lambda *args, **kwargs: None
     metrics_module.build_crops = lambda *args, **kwargs: []
