@@ -281,6 +281,16 @@ def built_at_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def json_sha256_12(obj: Any) -> str:
+    """Return the first 12 hex chars of the sha256 of *obj* serialized as JSON.
+
+    Keys are sorted, so representation-equivalent mappings hash alike; values JSON
+    cannot encode are serialized with ``str``.
+    """
+    payload = json.dumps(obj, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:12]
+
+
 def _chunk_files(directory: Path) -> Iterator[os.DirEntry]:
     """Yield the chunk files under *directory*, depth first and lazily.
 
@@ -353,10 +363,7 @@ def _first_channel_chunk_mtime_ns(plate_path: Path, array: ImageArray, channel_i
 def _position_source(plate_path: Path, position: Position, channel_name: str, archive_ns: int | None) -> dict[str, Any]:
     """Return one position's source; see :func:`prediction_sources`."""
     marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(channel_name)
-    digest = None
-    if marker is not None:
-        payload = json.dumps(marker_identity(marker), sort_keys=True).encode("utf-8")
-        digest = hashlib.sha256(payload).hexdigest()[:12]
+    digest = None if marker is None else json_sha256_12(marker_identity(marker))
     if archive_ns is not None:
         written_ns = archive_ns
     else:
@@ -448,8 +455,7 @@ def prediction_sources_sha256_12(sources: dict[str, dict[str, Any]]) -> str:
     str
         First 12 hex characters of the digest.
     """
-    payload = json.dumps(sorted(sources.items()), sort_keys=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()[:12]
+    return json_sha256_12(sorted(sources.items()))
 
 
 def _read_position_channel0(plate_path: Path, pos_name: str, dtype: npt.DTypeLike) -> np.ndarray | None:
@@ -778,8 +784,7 @@ def encoder_config_sha256_12(encoder_cfg: dict[str, Any]) -> str:
 
     Keys are sorted so representation-equivalent configs produce the same hash.
     """
-    payload = json.dumps(encoder_cfg, sort_keys=True, default=str).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()[:12]
+    return json_sha256_12(encoder_cfg)
 
 
 def feature_slug(name: str) -> str:
