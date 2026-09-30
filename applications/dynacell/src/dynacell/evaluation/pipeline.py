@@ -17,7 +17,7 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.cache import FeatureKind, prediction_sources, prediction_sources_sha256_12, source_predates
+from dynacell.evaluation.cache import FeatureKind, prediction_sources, prediction_sources_sha256_12
 from dynacell.evaluation.cp_reference import (
     CP_SIDECAR_FILENAME,
     DatasetCPSpace,
@@ -2007,9 +2007,9 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         with open_ome_zarr(Path(config.io.gt_path), mode="r") as gt_plate:
             space.check_positions([name for name, _ in gt_plate.positions()])
         current_sha256 = space.binding_sha256
-    if not metrics_provenance_matches(save_dir, cp_space_sha256=current_sha256):
-        return False
-    if not _metrics_scored_current_prediction(config, save_dir):
+    # A missing prediction store raises FileNotFoundError here, as it would when scoring.
+    sources = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+    if not metrics_provenance_matches(save_dir, cp_space_sha256=current_sha256, prediction_sources=sources):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename
@@ -2071,43 +2071,6 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
             if cp in prefixes and not {f"Dataset_{cp}_clip_frac", f"{cp}_clip_frac"} <= set(columns):
                 return False
     return pixel_ok and mask_ok and feature_ok
-
-
-def _metrics_scored_current_prediction(config: DictConfig, save_dir: Path) -> bool:
-    """Return whether ``save_dir``'s metrics were scored on the prediction now at ``io.pred_path``.
-
-    A re-predict writes into the same path, so compare the
-    ``prediction_sources_sha256_12`` that :func:`save_metrics` stamped with the store's
-    current one (:func:`~dynacell.evaluation.cache.prediction_sources`). A stamp written
-    before that field existed is dated instead: the rows are reusable only when every
-    position's chunks are dated and none was written after the stamp file; a blank
-    position (no stored chunk) cannot be dated and forces one recompute. A missing
-    prediction store raises ``FileNotFoundError`` here, as it would when scoring.
-    That misses one legacy case:
-    metrics saved after a re-predict but scored from pred caches it had left stale. The
-    grouped leaves' ``force_recompute.final_metrics: true`` and the 2026-09-30 recompute
-    of the stale caches cover it.
-
-    Parameters
-    ----------
-    config : DictConfig
-        Eval config (``io.pred_path``, ``io.pred_channel_name``).
-    save_dir : pathlib.Path
-        Directory holding ``metrics_provenance.json``.
-
-    Returns
-    -------
-    bool
-        True when the stamped fingerprint matches, or, for an unstamped sidecar, when
-        the store is not newer than it.
-    """
-    stamp = save_dir / PROVENANCE_FILENAME
-    sources = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
-    recorded = json.loads(stamp.read_text()).get("prediction_sources_sha256_12")
-    if recorded is not None:
-        return recorded == prediction_sources_sha256_12(sources)
-    saved_ns = stamp.stat().st_mtime_ns
-    return all(source_predates(source, saved_ns) for source in sources.values())
 
 
 def _load_cached_final_metrics(config: DictConfig) -> tuple[list, list, list]:
