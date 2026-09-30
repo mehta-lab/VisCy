@@ -39,6 +39,11 @@ metrics were scored in (:mod:`dynacell.evaluation.cp_reference`). CP KID/FID/
 cosine move whenever the reference is rebuilt, so a cache stamped with another
 reference -- or with none, i.e. written before the shared CP space existed -- is
 refused the same way.
+
+It also stamps the ``prediction_sources_sha256_12`` of the prediction that was scored
+(:func:`dynacell.evaluation.cache.prediction_sources_sha256_12`): a re-predict writes
+into the same ``io.pred_path``, so the path alone cannot tell the final-metrics cache
+gate that its rows describe an older prediction.
 """
 
 import json
@@ -112,7 +117,13 @@ def check_cubic_pin() -> None:
         )
 
 
-def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None, cp_space_sha256: str | None) -> None:
+def write_metrics_provenance(
+    save_dir: Path,
+    *,
+    cp_reference_sha256: str | None,
+    cp_space_sha256: str | None,
+    prediction_sources_sha256_12: str,
+) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
     Parameters
@@ -126,6 +137,10 @@ def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None,
         ``DatasetCPSpace.binding_sha256`` of the space the run scored in: the
         reference bound to one dataset and the GT cells it was fit on. This is the
         value cache reuse compares. ``None`` exactly when ``cp_reference_sha256`` is.
+    prediction_sources_sha256_12 : str
+        Digest of the per-position sources of the prediction the metrics were scored
+        on, taken before scoring; the final-metrics cache gate compares it with the
+        store's current one.
 
     Raises
     ------
@@ -138,6 +153,7 @@ def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None,
         "versions": installed_versions(),
         "cp_reference_sha256": cp_reference_sha256,
         "cp_space_sha256": cp_space_sha256,
+        "prediction_sources_sha256_12": prediction_sources_sha256_12,
     }
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 

@@ -18,7 +18,10 @@ from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_pr
 def _save_dir(root, rel, microssim, cubic="0.9.0a1"):
     save_dir = root / rel
     save_dir.mkdir(parents=True)
-    write_metrics_provenance(save_dir, cp_reference_sha256=None, cp_space_sha256=None)
+    # The scan reads only the cubic stamp; the prediction digest is a placeholder.
+    write_metrics_provenance(
+        save_dir, cp_reference_sha256=None, cp_space_sha256=None, prediction_sources_sha256_12="000000000000"
+    )
     sidecar = save_dir / PROVENANCE_FILENAME
     payload = json.loads(sidecar.read_text())
     payload["versions"]["cubic"] = cubic

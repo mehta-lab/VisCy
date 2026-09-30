@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from omegaconf import OmegaConf
 
-from ._eval_fixtures import build_eval_config, live_pipeline_module, make_cp_reference
+from ._eval_fixtures import build_eval_config, live_pipeline_module, make_cp_reference, make_hcs_plate
 
 _SETS = ("set-a", "set-b", "set-c")
 _LITE = {"set-b-lite": "set-b"}
@@ -35,6 +35,7 @@ def _config(tmp_path: Path):
     )
     config.compute_feature_metrics = True
     make_cp_reference(config, tmp_path / "er.json", datasets=_SETS, lite=_LITE)
+    make_hcs_plate(tmp_path / "pred.zarr", "prediction", seed=0)  # fingerprinted before scoring
     return config
 
 
@@ -176,6 +177,7 @@ def test_real_dataset_names_are_not_swapped(tmp_path: Path, monkeypatch) -> None
     )
     config.compute_feature_metrics = True
     make_cp_reference(config, tmp_path / "er.json", datasets=_REAL_SETS, lite=_REAL_LITE)
+    make_hcs_plate(tmp_path / "pred.zarr", "prediction", seed=0)  # fingerprinted before scoring
     reference = json.loads((tmp_path / "er.json").read_text())
     names = (*_REAL_SETS, *_REAL_LITE)
     conditions = [

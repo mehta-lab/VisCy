@@ -7,14 +7,18 @@ expensive segmentation and feature-extraction work.
 Cache identity is rooted in the source plate/channel plus
 ``cell_segmentation_path`` when cell-level features are involved.
 Per-artifact invalidation is driven by extra params recorded in the manifest
-(e.g. spacing, patch_size, checkpoint hash).
+(e.g. spacing, patch_size, checkpoint hash). On the prediction side each cached
+position also records the :func:`prediction_sources` entry it was built from.
 """
 
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
+import os
 import shutil
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,8 +28,10 @@ from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 import zarr
-from iohub.ngff import open_ome_zarr
+from iohub.ngff import ImageArray, Position, open_ome_zarr
 from omegaconf import OmegaConf
+
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, marker_identity
 
 FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
 
@@ -264,6 +270,177 @@ def diff_artifact_params(
 def built_at_now() -> str:
     """Return the current UTC timestamp in ISO-8601 format (for manifest entries)."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _chunk_files(directory: Path) -> Iterator[os.DirEntry]:
+    """Yield the chunk files under *directory*, depth first and lazily.
+
+    Array and group metadata (``zarr.json``, ``.zarray``, ``.zattrs``) is skipped. A
+    caller taking ``next(...)`` reads one directory batch per level instead of listing
+    every chunk.
+    """
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            if entry.is_dir():
+                yield from _chunk_files(Path(entry.path))
+            elif entry.name != "zarr.json" and not entry.name.startswith("."):
+                yield entry
+
+
+#: Directory entries a ``.``-separated chunk-key fallback scans before giving up. Only
+#: zarr v2 flat layouts reach it, and a store holding more entries than this ahead of
+#: the channel's chunks reads as having none (``written_ns=None``); the current writer
+#: only writes zarr v3, so those stores are not re-predicted.
+_FLAT_CHUNK_SCAN_LIMIT = 4096
+
+
+def _stored_chunk(array_dir: Path, key: str, spatial: int) -> os.DirEntry | Path | None:
+    """Return the chunk stored at *key*, else the first stored chunk sharing its ``(t, c)`` prefix.
+
+    A chunk never written, or reset to the fill value (zarr deletes it), is absent. The
+    prefix scan is bounded: one directory batch per level for ``/``-separated keys, at
+    most :data:`_FLAT_CHUNK_SCAN_LIMIT` entries for ``.``-separated ones.
+    """
+    chunk = array_dir / key
+    if chunk.is_file():
+        return chunk
+    parts = key.split("/")
+    if len(parts) > spatial:
+        # "/"-separated coordinates: the (t, c) chunks share one directory subtree.
+        prefix = array_dir.joinpath(*parts[:-spatial])
+        return next(_chunk_files(prefix), None) if prefix.is_dir() else None
+    # "."-separated coordinates: the (t, c) chunks share a name prefix.
+    stem = key.rsplit(".", spatial)[0] + "."
+    with os.scandir(array_dir) as entries:
+        return next((e for e in itertools.islice(entries, _FLAT_CHUNK_SCAN_LIMIT) if e.name.startswith(stem)), None)
+
+
+def _first_channel_chunk_mtime_ns(plate_path: Path, array: ImageArray, channel_index: int) -> int | None:
+    """Return the ``st_mtime_ns`` of the first stored chunk holding *channel_index*, earliest ``t`` first.
+
+    Each candidate ``(t, c, 0, 0, 0)`` is located through the array's own chunk-key
+    encoding (zarr v2 or v3, sharded or not), so no layout is parsed by hand, and
+    :func:`_stored_chunk` falls back to the first stored chunk of that ``(t, c)``.
+    Later timepoints are tried because a blank output (all fill values, e.g. an
+    all-zero prediction) stores no chunk at all: at most one lookup per timepoint.
+
+    Returns
+    -------
+    int or None
+        ``None`` when no chunk of the channel is stored at any timepoint.
+    """
+    outer = array.shards if array.shards is not None else array.chunks
+    spatial = array.ndim - 2
+    channel_chunk = channel_index // outer[1]
+    array_dir = plate_path / array.path
+    for t_chunk in range(-(-array.shape[0] // outer[0])):
+        key = array.native.metadata.encode_chunk_key((t_chunk, channel_chunk) + (0,) * spatial)
+        found = _stored_chunk(array_dir, key, spatial)
+        if found is not None:
+            return found.stat().st_mtime_ns
+    return None
+
+
+def _position_source(plate_path: Path, position: Position, channel_name: str, archive_ns: int | None) -> dict[str, Any]:
+    """Return one position's source; see :func:`prediction_sources`."""
+    marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(channel_name)
+    digest = None
+    if marker is not None:
+        payload = json.dumps(marker_identity(marker), sort_keys=True).encode("utf-8")
+        digest = hashlib.sha256(payload).hexdigest()[:12]
+    if archive_ns is not None:
+        written_ns = archive_ns
+    else:
+        array = position[position.metadata.multiscales[0].datasets[0].path]
+        written_ns = _first_channel_chunk_mtime_ns(plate_path, array, position.get_channel_index(channel_name))
+    return {"marker": digest, "written_ns": written_ns}
+
+
+def _archive_mtime_ns(path: Path) -> int | None:
+    """Return a packed ``.ozx`` archive's own mtime, which stands in for its chunks; ``None`` for a directory store."""
+    return path.stat().st_mtime_ns if path.is_file() else None
+
+
+def prediction_sources(plate_path: Path | str, channel_name: str) -> dict[str, dict[str, Any]]:
+    """Return the source identity of every position of one prediction channel.
+
+    A position's source is what a cached artifact built from it must still match:
+
+    ``marker``
+        sha256_12 of the channel's predict-writer marker
+        (:data:`~viscy_utils.prediction_metadata.PREDICTION_COMPLETE_KEY`) with its
+        provenance-only fields stripped
+        (:func:`~viscy_utils.prediction_metadata.marker_identity`), or ``None`` when the
+        position was written before markers existed. It changes when a re-predict
+        uses another checkpoint or settings.
+    ``written_ns``
+        ``st_mtime_ns`` of the channel's first stored chunk, earliest timepoint first,
+        or ``None`` when no chunk of the channel is stored (an unwritten or entirely
+        blank output). It changes on every re-predict of the channel, including one
+        that leaves the marker alone: a code-only fix, an input outside the settings
+        hash, or a writer from before the markers.
+
+    Metadata-file mtimes are deliberately not part of it: another channel's markers,
+    or a focus estimate written into the store, rewrite the position's attributes
+    without touching this channel's voxels. A packed ``.ozx`` archive stores no
+    per-chunk files, so its own mtime stands in for ``written_ns``.
+
+    Costs one attribute read, one array-metadata read and a ``stat`` per position (one
+    per timepoint while the channel's earlier chunks are blank); the store is opened
+    read-only, and the eval never writes to it.
+
+    Parameters
+    ----------
+    plate_path : Path or str
+        HCS prediction store; a missing store raises ``FileNotFoundError``.
+    channel_name : str
+        Prediction channel the eval scores.
+
+    Returns
+    -------
+    dict
+        ``{position_name: {"marker": str | None, "written_ns": int | None}}``.
+    """
+    path = Path(plate_path)
+    archive_ns = _archive_mtime_ns(path)
+    with open_ome_zarr(path, mode="r") as plate:
+        return {
+            name: _position_source(path, position, channel_name, archive_ns) for name, position in plate.positions()
+        }
+
+
+def prediction_source(plate_path: Path | str, position_name: str, channel_name: str) -> dict[str, Any]:
+    """Return the :func:`prediction_sources` entry of one position, read on its own.
+
+    For a position that appeared after the store-wide snapshot, e.g. one a running
+    predict finished while an ``io.exclude_fov_names`` eval was already open.
+
+    Raises
+    ------
+    KeyError
+        If the store has no such position.
+    """
+    path = Path(plate_path)
+    archive_ns = _archive_mtime_ns(path)
+    with open_ome_zarr(path, mode="r") as plate:
+        return _position_source(path, plate[position_name], channel_name, archive_ns)
+
+
+def prediction_sources_sha256_12(sources: dict[str, dict[str, Any]]) -> str:
+    """Return the sha256_12 over the name-sorted ``(position, source)`` pairs of :func:`prediction_sources`.
+
+    Parameters
+    ----------
+    sources : dict
+        Output of :func:`prediction_sources`.
+
+    Returns
+    -------
+    str
+        First 12 hex characters of the digest.
+    """
+    payload = json.dumps(sorted(sources.items()), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:12]
 
 
 def _read_position_channel0(plate_path: Path, pos_name: str, dtype: npt.DTypeLike) -> np.ndarray | None:

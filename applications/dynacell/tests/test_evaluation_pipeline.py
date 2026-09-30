@@ -6,8 +6,10 @@ import types
 from pathlib import Path
 
 import numpy as np
+from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
+from dynacell.evaluation.cache import prediction_sources, prediction_sources_sha256_12
 from dynacell.evaluation.provenance import write_metrics_provenance
 
 
@@ -88,9 +90,13 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
 ) -> None:
     """Reuse pixel and mask caches when feature metrics are disabled."""
     pipeline = _import_pipeline_with_stubs(monkeypatch)
+    pred_path = tmp_path / "pred.zarr"
+    with open_ome_zarr(pred_path, mode="w", layout="hcs", channel_names=["prediction"], version="0.5") as plate:
+        plate.create_position("A", "1", "0").create_image("0", np.zeros((1, 1, 1, 2, 2), dtype=np.float32))
     config = OmegaConf.create(
         {
             "compute_feature_metrics": False,
+            "io": {"pred_path": str(pred_path), "pred_channel_name": "prediction"},
             "force_recompute": {
                 "all": False,
                 "gt_masks": False,
@@ -116,7 +122,12 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     _write_metrics(tmp_path / config.save.mask_metrics_filename, expected_mask_metrics)
     # A reusable cache is one this code could have written, which includes the
     # numeric-provenance stamp save_metrics emits.
-    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None)
+    write_metrics_provenance(
+        tmp_path,
+        cp_reference_sha256=None,
+        cp_space_sha256=None,
+        prediction_sources_sha256_12=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+    )
 
     def fail_if_recomputed(_config):
         raise AssertionError("evaluate_predictions should not run when cache is valid")

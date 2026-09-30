@@ -185,3 +185,18 @@ def test_checkpoint_sha256_12_read_only_dir(tmp_path: Path) -> None:
         assert not (ckpt_dir / "last.ckpt.sha256").exists()
     finally:
         os.chmod(ckpt_dir, 0o755)
+
+
+def test_marker_identity_strips_only_provenance_fields() -> None:
+    """A moved checkpoint keeps its identity; any field that shapes the voxels stays in it."""
+    run = {"array_key": "0", "checkpoint_path": "/a/model.ckpt", "checkpoint_sha256_12": "abc"}
+    marker = prediction_metadata.completion_marker([1, 2, 3, 4], run)
+    assert prediction_metadata.marker_identity(marker) == {
+        "source_shape": [1, 2, 3, 4],
+        "array_key": "0",
+        "checkpoint_sha256_12": "abc",
+    }
+    assert prediction_metadata.marker_identity({**marker, "checkpoint_path": "/b/model.ckpt"}) == (
+        prediction_metadata.marker_identity(marker)
+    )
+    assert prediction_metadata.marker_identity(None) is None

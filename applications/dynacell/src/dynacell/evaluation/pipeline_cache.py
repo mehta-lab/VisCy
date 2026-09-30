@@ -14,6 +14,7 @@ import fcntl
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import KW_ONLY, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -33,6 +34,8 @@ from dynacell.evaluation.cache import (
     feature_slug,
     load_manifest,
     open_features_group,
+    prediction_source,
+    prediction_sources,
     read_features_from_group,
     read_instance_mask,
     read_mask,
@@ -111,7 +114,13 @@ class _CacheContext:
     dynaclr_preprocess_version: str | None = None
     celldino_preprocess_version: str | None = None
     morphem_preprocess_version: str | None = None
+    prediction_sources: dict[str, dict[str, Any]] | None = None
+    # Store and channel the sources come from, to read a position added after the snapshot.
+    prediction_plate_path: str | None = None
+    prediction_channel_name: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
+    # Positions this process recorded a source for, per manifest path, since the last flush.
+    _written_sources: dict[tuple[str, ...], set[str]] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def enabled(self) -> bool:
@@ -225,6 +234,14 @@ def init_cache_context(
         recomputed with the current preprocessing. Missing values (e.g.
         the kind isn't loaded, or the cached manifest pre-dates version
         tracking) are treated as "no constraint" — no auto-invalidation.
+
+    Notes
+    -----
+    The prediction-side context also reads the per-position
+    :func:`~dynacell.evaluation.cache.prediction_sources` of ``io.pred_path``: a
+    re-predict writes into the same path, which the path/channel identity above cannot
+    tell apart, so each cached position is reused only while the store still holds the
+    source it was built from (see :func:`_check_prediction_sources`).
     """
     io = config.io
     force = _resolve_force(config.force_recompute)
@@ -377,9 +394,15 @@ def init_cache_context(
         manifest=manifest,
         require_complete=require_complete_requested,
         side=side,
+        # Read once, before any artifact is built: a position written by this run is
+        # recorded with its source as it stood when the run started.
+        prediction_sources=prediction_sources(plate_path, channel_name) if side == "pred" else None,
+        prediction_plate_path=plate_path if side == "pred" else None,
+        prediction_channel_name=channel_name if side == "pred" else None,
         **base_kwargs,
     )
     _auto_invalidate_on_artifact_param_mismatch(ctx)
+    _check_prediction_sources(ctx)
     _auto_invalidate_on_preprocess_version_mismatch(ctx)
     return ctx
 
@@ -498,6 +521,37 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
     """
     if not ctx.enabled:
         return
+    for kind, artifact_label, entry, current, numeric_keys in _artifact_checks(ctx):
+        mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
+        if not mismatches:
+            continue
+        details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
+        if ctx.require_complete:
+            raise StaleCacheError(
+                f"{artifact_label}: artifact param mismatch ({details}) and io.require_complete_cache=true"
+            )
+        if ctx.partial_walk:
+            raise StaleCacheError(
+                f"{artifact_label}: artifact param mismatch ({details}) and limit_positions is set "
+                f"(partial walk cannot safely auto-invalidate; clear the cache or drop limit_positions)"
+            )
+        force_key = f"{ctx.side}_{kind}"
+        ctx.force[force_key] = True
+        warnings.warn(
+            f"{artifact_label}: artifact param mismatch ({details}); auto-invalidating {force_key} cache for this run.",
+            stacklevel=2,
+        )
+
+
+def _artifact_checks(
+    ctx: _CacheContext,
+) -> list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]]:
+    """Return one ``(kind, label, entry, current identity, numeric keys)`` per artifact family this run reads.
+
+    ``entry`` is the family's manifest entry under its current key (``None`` when
+    absent); ``current`` is the identity this run would write, compared by
+    :func:`diff_artifact_params` over ``numeric keys`` with a tolerance.
+    """
     artifacts = ctx.manifest.get("artifacts", {})
 
     checks: list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
@@ -585,27 +639,97 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
                 (),
             )
         )
+    return checks
 
-    for kind, artifact_label, entry, current, numeric_keys in checks:
-        mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
-        if not mismatches:
+
+def _check_prediction_sources(ctx: _CacheContext) -> None:
+    """Upgrade pre-source prediction entries position by position, and warn about stale positions.
+
+    Every cached prediction-side position records the
+    :func:`~dynacell.evaluation.cache.prediction_sources` entry it was built from
+    (``entry["sources"][pos]``, see :func:`_record_position`), and is reused only while
+    the store still holds that source (:func:`_source_current`). Any other position is
+    an ordinary cache miss: recomputed and re-recorded, or a
+    :class:`StaleCacheError` under ``io.require_complete_cache`` through
+    :func:`_raise_if_require_complete`. Staleness is per position, so an interrupted
+    rebuild resumes where it stopped and a ``limit_positions`` walk needs no store-wide
+    refusal.
+
+    An entry written before sources existed is upgraded here, before this run writes
+    anything, against the ``built_at`` it was loaded with: a position is recorded as
+    current iff its chunks were last written (``written_ns``) no later than
+    ``built_at``; every other position becomes a miss. A position with no stored chunk
+    (``written_ns is None``: blank, e.g. an all-zero prediction, or unwritten) cannot
+    be dated and is a miss too, a one-time rebuild after which its recorded ``None``
+    matches exactly. The upgrade is persisted by the next :func:`flush_manifest`, so
+    the cache directory must be writable even on an ``io.require_complete_cache`` run.
+    ``built_at`` is the time of the family's LAST write, so upgrading after a partial
+    write of this run would move it past the store's date. The same imprecision remains
+    inside the legacy entry -- a position rebuilt after a re-predict moves ``built_at``
+    past positions still holding the old prediction -- and is accepted: a production
+    audit (2026-09-30; 1304 grouped store/cache pairs, dated per chunk) found every
+    legacy cache fresh except the 31 already being recomputed.
+
+    Checks the families :func:`_artifact_checks` lists for this run. Entries with no
+    identity yet (absent, or bookkeeping only) are left to the param check.
+    """
+    if not ctx.enabled or ctx.prediction_sources is None:
+        return
+    for _, artifact_label, entry, _, _ in _artifact_checks(ctx):
+        if not isinstance(entry, dict) or not (entry.keys() - _BOOKKEEPING_KEYS):
             continue
-        details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
-        if ctx.require_complete:
-            raise StaleCacheError(
-                f"{artifact_label}: artifact param mismatch ({details}) and io.require_complete_cache=true"
+        if "sources" not in entry:
+            built_at = entry.get("built_at")
+            horizon_ns = None if built_at is None else round(datetime.fromisoformat(str(built_at)).timestamp() * 1e9)
+            entry["sources"] = {
+                pos: dict(source)
+                for pos, source in ctx.prediction_sources.items()
+                if source["written_ns"] is not None and horizon_ns is not None and source["written_ns"] <= horizon_ns
+            }
+            ctx.mark_manifest_dirty()
+        recorded = entry["sources"] if isinstance(entry["sources"], dict) else {}
+        stale = [pos for pos in entry.get("positions", []) if recorded.get(pos) != ctx.prediction_sources.get(pos)]
+        if stale:
+            warnings.warn(
+                f"{artifact_label}: {len(stale)} cached position(s) were built from another prediction "
+                f"(e.g. {stale[:3]}); they are cache misses this run.",
+                stacklevel=2,
             )
-        if ctx.partial_walk:
-            raise StaleCacheError(
-                f"{artifact_label}: artifact param mismatch ({details}) and limit_positions is set "
-                f"(partial walk cannot safely auto-invalidate; clear the cache or drop limit_positions)"
-            )
-        force_key = f"{ctx.side}_{kind}"
-        ctx.force[force_key] = True
-        warnings.warn(
-            f"{artifact_label}: artifact param mismatch ({details}); auto-invalidating {force_key} cache for this run.",
-            stacklevel=2,
-        )
+
+
+def _source_current(ctx: _CacheContext, entry: dict[str, Any], pos_name: str) -> bool:
+    """Return whether *entry*'s cached *pos_name* was built from the prediction the store holds now.
+
+    Always true on the GT side. On the prediction side a position with no recorded
+    source is not current.
+    """
+    if ctx.prediction_sources is None:
+        return True
+    sources = entry.get("sources") if isinstance(entry, dict) else None
+    recorded = sources.get(pos_name) if isinstance(sources, dict) else None
+    return recorded is not None and recorded == _prediction_source(ctx, pos_name)
+
+
+def _prediction_source(ctx: _CacheContext, pos_name: str) -> dict[str, Any]:
+    """Return *pos_name*'s source from the init snapshot, reading it on demand if it appeared since.
+
+    A running predict can finish a position between :func:`init_cache_context` and the
+    walk that lists it (an ``io.exclude_fov_names`` eval over a partial store). The
+    on-demand read is cached; a position the store does not have raises ``KeyError``.
+    """
+    source = ctx.prediction_sources.get(pos_name)
+    if source is None:
+        source = prediction_source(ctx.prediction_plate_path, pos_name, ctx.prediction_channel_name)
+        ctx.prediction_sources[pos_name] = source
+    return source
+
+
+def _manifest_leaf(ctx: _CacheContext, keys: list[str]) -> dict[str, Any]:
+    """Return the manifest entry at *keys* under ``artifacts`` (an empty dict when absent)."""
+    leaf = ctx.manifest.get("artifacts", {})
+    for key in keys:
+        leaf = leaf.get(key, {}) if isinstance(leaf, dict) else {}
+    return leaf if isinstance(leaf, dict) else {}
 
 
 def _raise_if_require_complete(ctx: _CacheContext, artifact: str, pos_name: str, t: int | None = None) -> None:
@@ -626,6 +750,9 @@ def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, pres
         Nested path under ``artifacts`` to the entry.
     entry : dict
         Identity fields (``preprocess_version``, artifact params) for this run.
+        Per-position bookkeeping (``positions``, ``sources``) is recorded by
+        :func:`_record_position`, whatever *preserve_identity* says: it describes
+        only the positions this run wrote.
     preserve_identity : bool
         Set on a partial walk driven by ``io.exclude_fov_names``. The entry is
         a store-wide claim, so a leaf that already carries an identity is left
@@ -634,7 +761,7 @@ def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, pres
         forever. Leaving the older stamp in place costs one redundant rebuild
         on the next full walk and keeps the invalidation honest. Identity keys
         the recorded leaf lacks stay unset for the same reason -- unknown is
-        unknown. A leaf with no identity at all (absent, or only ``positions``)
+        unknown. A leaf with no identity at all (absent, or bookkeeping only)
         is stamped with the full entry even on an excluded walk: there is
         nothing to preserve, and leaving it bare would make every later run an
         all-keys mismatch -- a perpetual recompute of the walked FOVs, or a
@@ -647,8 +774,25 @@ def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, pres
     for key in keys[:-1]:
         current = current.setdefault(key, {})
     leaf = current.setdefault(keys[-1], {})
-    if not preserve_identity or not (leaf.keys() - {"positions"}):
+    if not preserve_identity or not (leaf.keys() - _BOOKKEEPING_KEYS):
         leaf.update(entry)
+
+
+#: Per-position entry keys that are not part of an artifact's identity.
+_BOOKKEEPING_KEYS = frozenset({"positions", "sources"})
+
+
+def _record_position(ctx: _CacheContext, keys: list[str], pos_name: str) -> None:
+    """Record that this run wrote *pos_name* of the entry at *keys*, with its prediction source.
+
+    The source (prediction side only) is what :func:`_source_current` compares on the
+    next read, so it is recorded for exactly the position written.
+    """
+    _add_position(ctx.manifest, keys, pos_name)
+    if ctx.prediction_sources is None:
+        return
+    _manifest_leaf(ctx, keys).setdefault("sources", {})[pos_name] = dict(_prediction_source(ctx, pos_name))
+    ctx._written_sources.setdefault(tuple(keys), set()).add(pos_name)
 
 
 def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
@@ -675,7 +819,7 @@ def _check_identity_bootstrap(
     """Refuse to stamp a bare manifest leaf over cache data of unknown identity.
 
     Only an excluded walk (``io.exclude_fov_names``) is concerned, and only while
-    the leaf at *keys* carries no identity -- absent, or ``positions`` alone.
+    the leaf at *keys* carries no identity -- absent, or bookkeeping alone.
     :func:`_update_manifest_entry` would then stamp this run's full identity, and
     that stamp is a store-wide claim: every slot under the leaf reads back as a
     hit for this identity, FOVs the walk skipped included. It is honest only when
@@ -698,7 +842,7 @@ def _check_identity_bootstrap(
     leaf = ctx.manifest.get("artifacts", {})
     for key in keys:
         leaf = leaf.get(key, {})
-    if leaf.keys() - {"positions"}:
+    if leaf.keys() - _BOOKKEEPING_KEYS:
         return
     recorded = list(leaf.get("positions") or [])
     foreign = sorted(stored() - writing)
@@ -850,7 +994,7 @@ def _fov_masks(
             manifest_entry,
             preserve_identity=ctx.excluded_walk,
         )
-        _add_position(ctx.manifest, ["organelle_masks", manifest_key], pos_name)
+        _record_position(ctx, ["organelle_masks", manifest_key], pos_name)
         ctx.mark_manifest_dirty()
 
     def _write_masks(masks: np.ndarray) -> None:
@@ -880,8 +1024,11 @@ def _fov_masks(
             _record_write()
         return masks
 
+    # A cached prediction-side position built from another prediction is a miss.
+    current = _source_current(ctx, _manifest_leaf(ctx, ["organelle_masks", manifest_key]), pos_name)
+
     # Fast-path: cache hit without taking a lock.
-    cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
+    cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
     if cached is not None:
         return _validate_cached_shape(cached)
 
@@ -889,7 +1036,7 @@ def _fov_masks(
     # may have populated the slot between our fast-path read and the lock
     # acquisition; if so, the re-read returns a hit and we skip recomputation.
     with _pos_write_lock(ctx, f"{ctx.side}_masks_{ctx.target_name}", pos_name):
-        cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
+        cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
         if cached is not None:
             return _validate_cached_shape(cached)
         _raise_if_require_complete(ctx, artifact_label, pos_name)
@@ -1093,7 +1240,7 @@ def _fov_instances(
 
     def _record_write() -> None:
         _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry, preserve_identity=ctx.excluded_walk)
-        _add_position(ctx.manifest, manifest_keys, pos_name)
+        _record_position(ctx, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
 
     if not ctx.enabled:
@@ -1108,12 +1255,13 @@ def _fov_instances(
             _record_write()
         return labels
 
-    cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
+    current = _source_current(ctx, _manifest_leaf(ctx, manifest_keys), pos_name)
+    cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
     if cached is not None:
         return _validate_cached_shape(cached)
 
     with _pos_write_lock(ctx, lock_tag, pos_name):
-        cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
+        cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
         if cached is not None:
             return _validate_cached_shape(cached)
         _raise_if_require_complete(ctx, artifact_label, pos_name)
@@ -1127,12 +1275,15 @@ def _fov_instances(
 def instance_cache_hit(ctx: _CacheContext, pos_name: str) -> bool:
     """Whether *pos_name*'s instance labels are present and valid (no compute needed).
 
-    A disabled cache (``not ctx.enabled``) or a set ``{side}_instances`` force
-    flag (manifest identity mismatch at init, or an explicit force) counts as a
-    miss. Used by the whole-cell seed preflight to skip seed computation only
-    when both sides already hit.
+    A disabled cache (``not ctx.enabled``), a set ``{side}_instances`` force
+    flag (manifest identity mismatch at init, or an explicit force), or a
+    prediction-side position built from another prediction counts as a miss.
+    Used by the whole-cell seed preflight to skip seed computation only when
+    both sides already hit.
     """
     if not ctx.enabled or ctx.force[f"{ctx.side}_instances"]:
+        return False
+    if not _source_current(ctx, _manifest_leaf(ctx, ["instance_masks", f"{ctx.target_name}__{ctx.backend}"]), pos_name):
         return False
     return read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) is not None
 
@@ -1301,17 +1452,19 @@ def _load_or_compute_feature_timepoints(
         return [np.asarray(compute_fn(t)) for t in range(t_count)], False
 
     force_recompute = ctx.force[force_key]
+    # A cached prediction-side position built from another prediction is read as a miss.
+    reuse = not force_recompute and _source_current(ctx, _manifest_leaf(ctx, manifest_keys), pos_name)
     per_t: list[np.ndarray | None] = [None] * t_count
 
     # Lockless prefetch pass. Skipped under force_recompute because we'll
     # rewrite every timepoint anyway.
-    if not force_recompute:
+    if reuse:
         with open_features_group(ctx.paths, kind, mode="r", **cache_kwargs) as group:
             if group is not None:
                 for t in range(t_count):
                     per_t[t] = read_features_from_group(group, pos_name, t)
 
-    pending = list(range(t_count)) if force_recompute else [t for t in range(t_count) if per_t[t] is None]
+    pending = [t for t in range(t_count) if per_t[t] is None]
     if not pending:
         return per_t, False  # type: ignore[return-value]
 
@@ -1334,13 +1487,14 @@ def _load_or_compute_feature_timepoints(
             stored=lambda: _feature_slots(group),
         )
         for t in pending:
-            if not force_recompute:
+            if reuse:
                 # A concurrent writer may have populated this slot between
                 # the lockless prefetch and the lock acquisition.
                 feats = read_features_from_group(group, pos_name, t)
                 if feats is not None:
                     per_t[t] = feats
                     continue
+            if not force_recompute:
                 _raise_if_require_complete(ctx, artifact_label, pos_name, t)
             feats = np.asarray(compute_fn(t))
             write_features_to_group(group, pos_name, t, feats)
@@ -1474,7 +1628,7 @@ def fov_cp_features(
             "cp_feature_names": list(names),
         }
         _update_manifest_entry(ctx.manifest, ["cp_features"], entry, preserve_identity=ctx.excluded_walk)
-        _add_position(ctx.manifest, ["cp_features"], pos_name)
+        _record_position(ctx, ["cp_features"], pos_name)
         ctx.mark_manifest_dirty()
 
     return per_t
@@ -1614,7 +1768,7 @@ def _fov_deep_features(
 
     if ctx.enabled and manifest_updated:
         _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
-        _add_position(ctx.manifest, manifest_keys, pos_name)
+        _record_position(ctx, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
 
     return per_t
@@ -1633,18 +1787,53 @@ def flush_manifest(ctx: _CacheContext) -> None:
         return
     with _pos_write_lock(ctx, "manifest", "global"):
         on_disk = load_manifest(ctx.paths)
-        merged = _merge_manifests(on_disk, ctx.manifest)
+        merged = _merge_manifests(on_disk, ctx.manifest, written=ctx._written_sources)
         save_manifest(ctx.paths, merged)
         ctx.manifest = merged
+        ctx._written_sources = {}
 
 
-def _merge_manifests(on_disk: dict[str, Any], in_memory: dict[str, Any]) -> dict[str, Any]:
-    """Merge an in-memory manifest on top of the on-disk one, unioning position lists.
+#: Artifact families stored as a single entry (``artifacts.<family>``) rather than keyed
+#: by stem or model (``artifacts.<family>.<key>``).
+_FLAT_ARTIFACTS = frozenset({"cp_features"})
+
+
+def _merge_entry(on_disk: dict[str, Any], in_memory: dict[str, Any], written: set[str]) -> dict[str, Any]:
+    """Merge one artifact entry: in-memory fields win, ``positions`` and ``sources`` are unioned.
+
+    A position's source is taken from memory when this process wrote it (*written*),
+    else from disk, where a concurrent writer may have recorded a newer one.
+    """
+    merged = {**on_disk, **in_memory}
+    positions = list(dict.fromkeys([*on_disk.get("positions", []), *in_memory.get("positions", [])]))
+    if positions:
+        merged["positions"] = positions
+    if "sources" in on_disk or "sources" in in_memory:
+        disk_sources = on_disk.get("sources") or {}
+        memory_sources = in_memory.get("sources") or {}
+        merged["sources"] = {
+            **memory_sources,
+            **disk_sources,
+            **{pos: memory_sources[pos] for pos in written if pos in memory_sources},
+        }
+    return merged
+
+
+def _merge_manifests(
+    on_disk: dict[str, Any],
+    in_memory: dict[str, Any],
+    *,
+    written: dict[tuple[str, ...], set[str]] | None = None,
+) -> dict[str, Any]:
+    """Merge an in-memory manifest on top of the on-disk one, unioning per-position bookkeeping.
 
     Identity fields and per-artifact metadata (``built_at``, ``path``, model
-    identifiers) are taken from the in-memory copy. ``positions`` lists are
-    unioned so additions from concurrent writers are preserved.
+    identifiers) are taken from the in-memory copy. ``positions`` lists and
+    ``sources`` maps are unioned so additions from concurrent writers are preserved
+    (see :func:`_merge_entry`); *written* maps each entry's manifest path to the
+    positions this process wrote since its last flush.
     """
+    written = written or {}
     merged = {**on_disk, **{k: v for k, v in in_memory.items() if k != "artifacts"}}
     merged["artifacts"] = dict(on_disk.get("artifacts", {}))
     in_artifacts = in_memory.get("artifacts", {})
@@ -1656,20 +1845,15 @@ def _merge_manifests(on_disk: dict[str, Any], in_memory: dict[str, Any]) -> dict
         if not isinstance(existing, dict):
             merged["artifacts"][top_key] = top_val
             continue
+        if top_key in _FLAT_ARTIFACTS:
+            merged["artifacts"][top_key] = _merge_entry(existing, top_val, written.get((top_key,), set()))
+            continue
         for sub_key, sub_val in top_val.items():
-            if not isinstance(sub_val, dict):
+            target = existing.get(sub_key, {})
+            if not isinstance(sub_val, dict) or not isinstance(target, dict):
                 existing[sub_key] = sub_val
                 continue
-            target = existing.setdefault(sub_key, {})
-            if not isinstance(target, dict):
-                existing[sub_key] = sub_val
-                continue
-            on_disk_positions = target.get("positions", [])
-            in_mem_positions = sub_val.get("positions", [])
-            unioned = list(dict.fromkeys([*on_disk_positions, *in_mem_positions]))
-            target.update(sub_val)
-            if unioned:
-                target["positions"] = unioned
+            existing[sub_key] = _merge_entry(target, sub_val, written.get((top_key, sub_key), set()))
     return merged
 
 
@@ -1720,7 +1904,10 @@ class DeepFeatureBatcher:
         """Lockless prefetch: return per-kind list of timepoints needing work."""
         out: dict[FeatureKind, list[int]] = {}
         for kind in self.extractors:
-            if self._force_snapshot[kind]:
+            manifest_keys = _deep_feature_cache_metadata(self.ctx, kind)[3]
+            # A prediction-side position built from another prediction is rebuilt whole.
+            stale = not _source_current(self.ctx, _manifest_leaf(self.ctx, manifest_keys), pos_name)
+            if self._force_snapshot[kind] or stale:
                 out[kind] = list(range(t_count))
                 continue
             cache_kwargs = _kind_cache_kwargs(self.ctx, kind)
@@ -1838,7 +2025,7 @@ def _flush_kind(
             for t, chunk in ts_chunks:
                 write_features_to_group(group, pos_name, t, chunk)
         _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
-        _add_position(ctx.manifest, manifest_keys, pos_name)
+        _record_position(ctx, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
     # Manifest persistence is deferred to the caller (after batcher.drain()).
     # Zarr slot writes above are durable per-slot; on resume the lockless
