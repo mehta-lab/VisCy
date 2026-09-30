@@ -63,6 +63,11 @@ waves:
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__denv/prediction.zarr
           a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__zikv/prediction.zarr
+  # Second draw of the FNet-3D nucleus segaux arm (fit max_steps 200000, --ckpt best
+  # epoch=180-step=156746), 2026-09-30. Generate with --wave wave2h.
+  wave2h:
+    nucleus:
+      - fnet3d_paper_segaux_seed1
   # CELL-Diff A549 legs that finished after wave2f (2026-09-29): the CELL-Diff-2D C-cond arm
   # re-predicted with threshold="otsu" (its fixed-t=0.30 wave2a scores are kept aside as
   # _spotlight_v2/nucleus/celldiff_2d_ccond/ipsc/<leg>.fixed_t030), two CELL-Diff-3D segaux legs
