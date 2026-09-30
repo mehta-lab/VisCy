@@ -34,7 +34,6 @@ from dynacell.evaluation.cache import (
     feature_slug,
     load_manifest,
     open_features_group,
-    prediction_source,
     prediction_sources,
     read_features_from_group,
     read_instance_mask,
@@ -115,9 +114,6 @@ class _CacheContext:
     celldino_preprocess_version: str | None = None
     morphem_preprocess_version: str | None = None
     prediction_sources: dict[str, dict[str, Any]] | None = None
-    # Store and channel the sources come from, to read a position added after the snapshot.
-    prediction_plate_path: str | None = None
-    prediction_channel_name: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
     # Positions this process recorded a source for, per manifest path, since the last flush.
     _written_sources: dict[tuple[str, ...], set[str]] = field(default_factory=dict, init=False, repr=False)
@@ -397,8 +393,6 @@ def init_cache_context(
         # Read once, before any artifact is built: a position written by this run is
         # recorded with its source as it stood when the run started.
         prediction_sources=prediction_sources(plate_path, channel_name) if side == "pred" else None,
-        prediction_plate_path=plate_path if side == "pred" else None,
-        prediction_channel_name=channel_name if side == "pred" else None,
         **base_kwargs,
     )
     _auto_invalidate_on_artifact_param_mismatch(ctx)
@@ -715,11 +709,14 @@ def _prediction_source(ctx: _CacheContext, pos_name: str) -> dict[str, Any]:
 
     A running predict can finish a position between :func:`init_cache_context` and the
     walk that lists it (an ``io.exclude_fov_names`` eval over a partial store). The
-    on-demand read is cached; a position the store does not have raises ``KeyError``.
+    on-demand read comes from the store and channel the manifest's ``pred`` identity
+    records (seeded and checked by :func:`init_cache_context`) and is cached; a
+    position the store does not have raises ``KeyError``.
     """
     source = ctx.prediction_sources.get(pos_name)
     if source is None:
-        source = prediction_source(ctx.prediction_plate_path, pos_name, ctx.prediction_channel_name)
+        pred = ctx.manifest["pred"]
+        source = prediction_sources(pred["plate_path"], pred["channel_name"], [pos_name])[pos_name]
         ctx.prediction_sources[pos_name] = source
     return source
 

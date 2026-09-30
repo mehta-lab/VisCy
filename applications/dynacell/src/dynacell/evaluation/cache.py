@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -368,8 +368,10 @@ def _archive_mtime_ns(path: Path) -> int | None:
     return path.stat().st_mtime_ns if path.is_file() else None
 
 
-def prediction_sources(plate_path: Path | str, channel_name: str) -> dict[str, dict[str, Any]]:
-    """Return the source identity of every position of one prediction channel.
+def prediction_sources(
+    plate_path: Path | str, channel_name: str, positions: Iterable[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Return the source identity of every position (or of *positions*) of one prediction channel.
 
     A position's source is what a cached artifact built from it must still match:
 
@@ -402,6 +404,10 @@ def prediction_sources(plate_path: Path | str, channel_name: str) -> dict[str, d
         HCS prediction store; a missing store raises ``FileNotFoundError``.
     channel_name : str
         Prediction channel the eval scores.
+    positions : iterable of str, optional
+        Read only these positions, e.g. one a running predict finished after the
+        store-wide snapshot; each must exist (``KeyError`` otherwise). ``None`` reads
+        every position.
 
     Returns
     -------
@@ -411,26 +417,8 @@ def prediction_sources(plate_path: Path | str, channel_name: str) -> dict[str, d
     path = Path(plate_path)
     archive_ns = _archive_mtime_ns(path)
     with open_ome_zarr(path, mode="r") as plate:
-        return {
-            name: _position_source(path, position, channel_name, archive_ns) for name, position in plate.positions()
-        }
-
-
-def prediction_source(plate_path: Path | str, position_name: str, channel_name: str) -> dict[str, Any]:
-    """Return the :func:`prediction_sources` entry of one position, read on its own.
-
-    For a position that appeared after the store-wide snapshot, e.g. one a running
-    predict finished while an ``io.exclude_fov_names`` eval was already open.
-
-    Raises
-    ------
-    KeyError
-        If the store has no such position.
-    """
-    path = Path(plate_path)
-    archive_ns = _archive_mtime_ns(path)
-    with open_ome_zarr(path, mode="r") as plate:
-        return _position_source(path, plate[position_name], channel_name, archive_ns)
+        items = plate.positions() if positions is None else ((name, plate[name]) for name in positions)
+        return {name: _position_source(path, position, channel_name, archive_ns) for name, position in items}
 
 
 def prediction_sources_sha256_12(sources: dict[str, dict[str, Any]]) -> str:
