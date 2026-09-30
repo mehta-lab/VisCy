@@ -67,7 +67,9 @@ optional-dependencies.eval = [
   # -- do not bump it casually. Tag, not a bare commit. v0.9.0a2 rewrites only the
   # MicroSSIM RI-factor fit: chunked float64 reduction (peak 40.5 -> 12.9 GB on
   # 576x640x960 float32) and a ValueError on empty input; measured equivalent.
-  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a2",
+  # v0.9.0a3 fixes single-image FSC/FRC splitting (binomial path, sampling-floor
+  # warning); production's two-image FSC/FRC is untouched -- measured exact.
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a3",
   "dinov3 @ git+https://github.com/facebookresearch/dinov3",
   "dynaclr",
   "hydra-core>=1.2",
@@ -104,7 +106,7 @@ optional-dependencies.eval_gpu = [
 # selection->waveorder, segmentation->cellpose (cellpose imported lazily).
 optional-dependencies.preprocess = [
   "cellpose>=4.2",
-  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a2",
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a3",
   "iohub>=0.3.6",
   "tqdm",
   "waveorder",
