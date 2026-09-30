@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 from monai.transforms import Compose
@@ -39,7 +41,9 @@ def test_batched_gaussian_noise_statistics(mean, std, sample_std):
     transform = BatchedRandGaussianNoise(prob=1.0, mean=mean, std=std, sample_std=sample_std)
     result = transform(img)
     assert (result.mean() - mean).abs() < 0.5
-    expected_std = std / 2.0 if sample_std else std
+    # sample_std draws each sample's std from U(0, std); the pooled std is then
+    # sqrt(E[s^2]) = std / sqrt(3), not the mean draw std / 2.
+    expected_std = std / math.sqrt(3) if sample_std else std
     assert (result.std() - expected_std).abs() < 0.6
 
 
