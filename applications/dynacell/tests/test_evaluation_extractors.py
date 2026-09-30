@@ -249,7 +249,10 @@ def test_load_eval_models_pins_morphem_to_the_configured_revision(monkeypatch: p
 
     from dynacell.evaluation.model_loader import LoadFlags, load_eval_models
 
-    monkeypatch.setattr(eval_utils, "MorphEmModel", _StubMorphEm)
+    # Patched by import path: ``load_eval_models`` imports ``dynacell.evaluation.utils``
+    # at call time, and a test that re-imports ``dynacell.evaluation.*``
+    # (``live_pipeline_module``) leaves a module other than this file's ``eval_utils`` there.
+    monkeypatch.setattr("dynacell.evaluation.utils.MorphEmModel", _StubMorphEm)
     config = OmegaConf.create(
         {
             "target_name": "nucleus",
