@@ -34,6 +34,7 @@ def test_batched_gaussian_noise(device, ndim, prob, compose):
 @pytest.mark.parametrize("std", [2.0, 4.0])
 @pytest.mark.parametrize("sample_std", [True, False])
 def test_batched_gaussian_noise_statistics(mean, std, sample_std):
+    torch.manual_seed(0)
     img = torch.zeros(64, 8, 8, 8, 8)
     transform = BatchedRandGaussianNoise(prob=1.0, mean=mean, std=std, sample_std=sample_std)
     result = transform(img)
