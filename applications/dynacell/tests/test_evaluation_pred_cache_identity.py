@@ -100,10 +100,17 @@ def _write_prediction(
     _date_store(path, attributes=_WRITTEN_AT, chunks=_WRITTEN_AT)
 
 
+def _is_metadata(f: Path) -> bool:
+    """Whether *f* is zarr metadata (v3 ``zarr.json``, v2 ``.zattrs``/``.zgroup``/``.zarray``), not a chunk."""
+    return f.name == "zarr.json" or f.name.startswith(".")
+
+
+def _chunks(path: Path) -> list[Path]:
+    return sorted(f for f in path.rglob("*") if f.is_file() and not _is_metadata(f))
+
+
 def _metadata_mtimes(path: Path) -> dict[Path, float]:
-    return {
-        f: f.stat().st_mtime for f in path.rglob("*") if f.is_file() and (f.name == "zarr.json" or f.name[0] == ".")
-    }
+    return {f: f.stat().st_mtime for f in path.rglob("*") if f.is_file() and _is_metadata(f)}
 
 
 def _repredict(
@@ -140,8 +147,7 @@ def _date_store(path: Path, *, attributes: float, chunks: float) -> None:
         for file in position.rglob("*"):
             if not file.is_file():
                 continue
-            is_metadata = file.name == "zarr.json" or file.name.startswith(".")
-            mtime = attributes if is_metadata else chunks
+            mtime = attributes if _is_metadata(file) else chunks
             os.utime(file, (mtime, mtime))
 
 
@@ -389,10 +395,6 @@ def _blank(path: Path, timepoints: slice) -> None:
             position["0"][timepoints] = 0.0
 
 
-def _chunks(path: Path) -> list[Path]:
-    return sorted(f for f in path.rglob("*") if f.is_file() and f.name != "zarr.json" and not f.name.startswith("."))
-
-
 @pytest.mark.parametrize(
     ("chunks_at", "rebuilt"),
     [(_BUILT_AT_S - _DAY, set()), (_BUILT_AT_S + _DAY, set(_POSITIONS))],
@@ -617,9 +619,7 @@ def test_source_chunk_is_found_in_every_layout(tmp_path: Path, layout: str) -> N
     with open_ome_zarr(pred, mode="w", layout="hcs", channel_names=[_CHANNEL, _OTHER], version=version) as plate:
         for name in _POSITIONS:
             plate.create_position(*name.split("/")).create_image("0", data, chunks=(1, 1, 1, _H, _W), **extra)
-    chunks = sorted(
-        f for f in (pred / "A/1/0/0").rglob("*") if f.is_file() and f.name != "zarr.json" and f.name[0] != "."
-    )
+    chunks = _chunks(pred / "A/1/0/0")
     for i, chunk in enumerate(chunks):  # every stored chunk gets its own date
         os.utime(chunk, (_WRITTEN_AT + i, _WRITTEN_AT + i))
 
