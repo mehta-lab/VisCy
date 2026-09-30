@@ -142,6 +142,8 @@ When in doubt, read both `train_dataloader` overrides directly — they are shor
 
 Prefer `{file}_test.py` in the same directory as `{file}.py`, unless there are import issues, in which case use `tests/`.
 
+Run the suite in parallel with `pytest -n <cores>` (pytest-xdist, in the `test` group). The root `conftest.py` pins each worker to one OpenMP/BLAS thread. Without that pin, torch in every worker grabs every core and the parallel run is 10x slower than it should be. `-n auto` counts the cores the shell may use, so inside a 1-CPU `srun` step it runs a single worker; give the step more CPUs (`srun --overlap -c N`) first.
+
 ---
 
 ## Project Conventions
