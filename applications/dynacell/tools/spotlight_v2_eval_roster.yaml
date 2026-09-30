@@ -34,6 +34,128 @@ waves:
       - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
     membrane:
       - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
+  # The pix2pix2d BASELINE re-predicted from its own last.ckpt (predict-only arm), so GAN
+  # arm-vs-baseline compares final checkpoints on both sides. Generate with --wave wave1c.
+  wave1c:
+    nucleus: [pix2pix2d_unetvit_last]
+    membrane: [pix2pix2d_unetvit_last]
+  # Cosmetic-vs-structural control for the 3D nucleus segaux A549 gain (2026-09-29): each v2
+  # baseline's prediction histogram-matched per (position, T) volume to its segaux arm's, spatial
+  # structure kept. Stores written by experiments/2026-09-24_spotlight-v2/histmatch_control.py.
+  # Generate with --wave ctrl1.
+  ctrl1:
+    nucleus:
+      - model: fnet3d_paper_histmatch
+        leaves: [a549__mock, a549__denv, a549__zikv]
+        pred_paths:
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_paper_histmatch/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_paper_histmatch/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_paper_histmatch/ipsc/a549__zikv/prediction.zarr
+      - model: pix2pix3d_unetvit_v2_histmatch
+        leaves: [a549__mock, a549__denv, a549__zikv]
+        pred_paths:
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/pix2pix3d_unetvit_v2_histmatch/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/pix2pix3d_unetvit_v2_histmatch/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/pix2pix3d_unetvit_v2_histmatch/ipsc/a549__zikv/prediction.zarr
+      - model: fcmae_vscyto3d_scratch_v2_histmatch
+        leaves: [a549__mock, a549__denv, a549__zikv]
+        pred_paths:
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__zikv/prediction.zarr
+  # CELL-Diff A549 legs that finished after wave2f (2026-09-29): the CELL-Diff-2D C-cond arm
+  # re-predicted with threshold="otsu" (its fixed-t=0.30 wave2a scores are kept aside as
+  # _spotlight_v2/nucleus/celldiff_2d_ccond/ipsc/<leg>.fixed_t030), two CELL-Diff-3D segaux legs
+  # and the first CELL-Diff-2D seed1 A549 leg. Generate with --wave wave2g.
+  wave2g:
+    nucleus:
+      - {model: celldiff_2d_ccond, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__zikv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the FNet-2D segaux arm (both organelles) and the UNeXt2-3D membrane segaux
+  # arm (fit ep199/200, --ckpt best ep125), 2026-09-29. Generate with --wave wave2f.
+  wave2f:
+    nucleus:
+      - fnet2d_segaux_seed1
+    membrane:
+      - fnet2d_segaux_seed1
+      - fcmae_vscyto3d_scratch_segaux
+  # Otsu-threshold C-cond iPSC legs (CELL-Diff-2D and -3D) and the CELL-Diff-2D membrane
+  # segauxself ZIKV leg, 2026-09-28. Generate with --wave wave2e.
+  wave2e:
+    nucleus:
+      - {model: celldiff_ccond_iterative, leaves: [ipsc]}
+      - {model: celldiff_2d_ccond, leaves: [ipsc]}
+    membrane:
+      - {model: celldiff_2d_segauxself, leaves: [a549__zikv]}
+  # UNeXt2-3D nucleus: the segaux arm and its fresh v2 baseline (fits ep199/200, --ckpt best
+  # ep95 / ep81), 2026-09-28. Generate with --wave wave2d.
+  wave2d:
+    nucleus:
+      - fcmae_vscyto3d_scratch_segaux
+      - fcmae_vscyto3d_scratch_v2
+  # Seed-replicate A549 legs (the A549 noise floor; fnet3d_paper_seed1 also checks the April
+  # FNet-3D baseline store) and the fresh UNeXt2-3D membrane baseline (2026-09-28).
+  # Generate with --wave wave2c.
+  wave2c:
+    nucleus:
+      - {model: fnet2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: pix2pix2d_unetvit_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fnet3d_paper_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+    membrane:
+      - {model: fnet2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: pix2pix2d_unetvit_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fcmae_vscyto2d_scratch_l1seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - fcmae_vscyto3d_scratch_v2
+  # pix2pix3d nucleus legs that finished after wave2a (2026-09-28). Generate with --wave wave2b.
+  wave2b:
+    nucleus:
+      - {model: pix2pix3d_unetvit_segaux, leaves: [a549__zikv]}
+      - {model: pix2pix3d_unetvit_v2, leaves: [a549__mock, a549__denv]}
+  # Stage 1/2 batch of finished predicts (2026-09-28): 2D segauxself + l1 arms, FNet-3D,
+  # pix2pix3d and CELL-Diff-3D legs that completed. (The CELL-Diff-2D C-cond arm was scored here
+  # at fixed t=0.30, then moved back to wave1 for its Otsu re-predict.)
+  # Generate with --wave wave2a.
+  wave2a:
+    nucleus:
+      - {model: celldiff_cjoint_iterative, leaves: [ipsc]}
+      - {model: celldiff_segaux_iterative, leaves: [ipsc]}
+      - fcmae_vscyto2d_scratch_segauxself
+      - {model: fnet3d_paper_seed1, leaves: [ipsc]}
+      - fnet3d_paper_segaux
+      - pix2pix2d_unetvit_segauxself
+      - {model: pix2pix3d_unetvit_segaux, leaves: [ipsc, a549__mock, a549__denv]}
+      - {model: pix2pix3d_unetvit_v2, leaves: [ipsc, a549__zikv]}
+    membrane:
+      - {model: celldiff_2d_segauxself, leaves: [ipsc]}
+      - {model: celldiff_segaux_iterative, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_l1seed1, leaves: [ipsc]}
+      - fcmae_vscyto2d_scratch_l1segaux
+      - fcmae_vscyto2d_scratch_segauxself
+      - fnet2d_segauxself
+      - fnet3d_paper_segaux
+      - pix2pix2d_unetvit_segauxself
+      - pix2pix3d_unetvit_segaux
+      - pix2pix3d_unetvit_v2
+  # Stage 1/2, third batch of finished 2D predicts (2026-09-27): CELL-Diff-2D segaux/seed1/cjoint,
+  # UNeXt2-2D nucleus segaux/seed1, the first segauxself arms, the jointsteps probe and the l1
+  # probe's A549 legs (its iPSC leg is in wave1b). Generate with --wave wave1d.
+  wave1d:
+    nucleus:
+      - fcmae_vscyto2d_scratch_segaux
+      - celldiff_2d_segaux
+      - celldiff_2d_cjoint
+      - fnet2d_segauxself
+      - celldiff_2d_segauxself
+      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
+      - {model: celldiff_2d_seed1, leaves: [ipsc]}
+    membrane:
+      - celldiff_2d_segaux
+      - {model: celldiff_2d_seed1, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_jointsteps, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_l1, leaves: [a549__mock, a549__denv, a549__zikv]}
   # Stage 1, second batch of finished predicts (2026-09-25): FNet-2D, UNeXt2-2D membrane
   # (segaux, seed1, l1/safecrop probes) and pix2pix2d membrane segaux. Generate with --wave wave1b.
   wave1b:
@@ -48,37 +170,18 @@ waves:
       - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_l1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_safecrop, leaves: [ipsc]}
-  # Stage 0b/0c/0g + Stage 1 first wave (leaves from tools/generate_spotlight_v2_leaves.py).
-  # Stores do not exist yet: do NOT run the generator on this wave until every predict has
-  # COMPLETED -- its store gate refuses absent or partial stores. Seed replicates and the
-  # UNeXt2-2D membrane recipe probes are predicted on the iPSC test only. The CellDiff-3D
-  # arm is keyed by its store dir celldiff_segaux_iterative (checkpoints under
-  # .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
+  # Stage 1 first wave, now only the CELL-Diff A549 legs still predicting: do NOT run the
+  # generator on it until every predict has COMPLETED -- its store gate refuses absent or
+  # partial stores. The CellDiff-3D arm is keyed by its store dir celldiff_segaux_iterative
+  # (checkpoints under .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
   wave1:
     nucleus:
-      - fnet3d_paper_segaux
-      - fcmae_vscyto2d_scratch_segaux
-      - fcmae_vscyto3d_scratch_segaux
-      - pix2pix3d_unetvit_segaux
-      - celldiff_2d_segaux
-      - celldiff_segaux_iterative
-      - fcmae_vscyto3d_scratch_v2
-      - pix2pix3d_unetvit_v2
-      - {model: fnet3d_paper_seed1, leaves: [ipsc]}
-      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
-      - {model: celldiff_2d_seed1, leaves: [ipsc]}
+      - {model: celldiff_segaux_iterative, leaves: [a549__denv]}
       # Stage 1b (nucleus only for now): mask in the generative process.
-      - celldiff_2d_cjoint
-      - celldiff_2d_ccond
-      - celldiff_cjoint_iterative
-      - celldiff_ccond_iterative
+      - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_ccond_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__zikv]}
     membrane:
-      - fnet3d_paper_segaux
-      - fcmae_vscyto3d_scratch_segaux
-      - pix2pix3d_unetvit_segaux
-      - celldiff_2d_segaux
-      - celldiff_segaux_iterative
-      - fcmae_vscyto3d_scratch_v2
-      - pix2pix3d_unetvit_v2
-      - {model: celldiff_2d_seed1, leaves: [ipsc]}
-      - {model: fcmae_vscyto2d_scratch_jointsteps, leaves: [ipsc]}
+      - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}

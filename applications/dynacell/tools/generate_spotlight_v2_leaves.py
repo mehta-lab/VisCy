@@ -29,7 +29,7 @@ Arms (``<baseline>_<suffix>``):
   its selectable checkpoints at ep <= 25 of 40, while its S arm will have all 40).
   Each model's ``_segaux`` arm is generated from the same baseline leaf in the same
   pass, so the arm and its v2 control share one recipe by construction.
-- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,segaux}`` compose
+- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
   allocation each): nucleus e96 00:39:27 -> e98 01:38:24 (2.04 ep/h), e98 ->
@@ -52,8 +52,8 @@ Arms (``<baseline>_<suffix>``):
   second conditioning channel (``net_config.cond_channels: 2``, ``mask_mode: cond``)
   seen through ``MaskCorruption`` in training; its predict leaves read the mask
   from the same-dim FNet ``_segaux`` store of the same test leg via
-  ``CondMaskSource`` (``Nuclei_prediction``, threshold a string PLACEHOLDER so an
-  untuned submit fails at parse) and set no ``fg_mask_key``.
+  ``CondMaskSource`` (``Nuclei_prediction``, thresholded per window at Otsu) and
+  set no ``fg_mask_key``.
 
 Leaves are emitted with ``yaml.safe_dump``, so they carry no inline comments: the
 recipe rationale stays in the baseline leaf each header names, and the reasons for
@@ -72,7 +72,7 @@ from __future__ import annotations
 import argparse
 import copy
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +111,9 @@ SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
     ("membrane", "pix2pix3d_unetvit_segaux"): 3.1,
     ("membrane", "celldiff_2d_segaux"): 0.58,
     ("membrane", "celldiff_segaux"): 1.0,
+    # UNeXt2-2D membrane on the L1 recipe (the MixedLoss baseline is a failed fit; the l1
+    # probe trains, Dice 0.889). Calibrated on the l1 probe's best ckpt: 0.18 [0.15-0.27].
+    ("membrane", "fcmae_vscyto2d_scratch_l1segaux"): 0.18,
 }
 # C-joint's mask Dice has no baseline to calibrate against (the baseline has no
 # mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
@@ -119,19 +122,22 @@ MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "celldiff_cjoint"): 1.4,
 }
 JOINTSTEPS_MAX_EPOCHS = 320
+# Second draws (see SEED_SOURCES) inherit their source arm's wall.
 LONG_WALL_MODELS: frozenset[str] = frozenset({"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux"})
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
 SAFE_CROP_SIZE = [1, 384, 384]
 MASK_VELOCITY_WEIGHT = 1.0
-# C-cond predict conditions on the same-dimensionality FNet `_segaux` prediction
-# for the same test leg, thresholded at a val-tuned t. The store path is the
-# planned one (it exists once that predict completes); the threshold is a STRING
-# placeholder on purpose, so a submit before it is tuned fails at config parse
-# instead of silently conditioning on an all-background (or all-foreground) mask.
+# C-cond predict conditions on the same-dimensionality FNet `_segaux` prediction for the
+# same test leg (that predict must be COMPLETE first), thresholded per window.
 CCOND_MASK_MODEL: dict[str, str] = {"celldiff_2d": "fnet2d_segaux", "celldiff": "fnet3d_paper_segaux"}
 CCOND_MASK_CHANNEL = "Nuclei_prediction"
-CCOND_THRESHOLD_PLACEHOLDER = "PLACEHOLDER_val_tuned_threshold"
+# Per-window Otsu (2026-09-28), label- and scale-free. The val-tuned fixed thresholds it
+# replaced (2D 0.30, Dice 0.774; 3D 0.40) marked 96-98% of A549 pixels foreground, where
+# FNet predictions sit on another intensity scale. Otsu: iPSC val Dice 0.769; A549 fg
+# fraction 7-9% (2D) / 26-35% (3D) vs 12.5% [4.8-18.6%] for the A549 training masks
+# (experiments/2026-09-24_spotlight-v2/ccond_threshold*/).
+CCOND_THRESHOLD = "otsu"
 SAFE_CROP_COVERAGE = 0.9
 _UNEXT2_2D_DATA_OVERLAY = BENCHMARKS / "_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml"
 
@@ -198,14 +204,21 @@ class Arm:
 
 ARMS: tuple[Arm, ...] = (
     *(Arm(m, "segaux", ORGANELLES, a549=True) for m in BASELINES),
+    # Seed replicates predict the A549 legs too: most arm effects are A549-transfer effects,
+    # and without an A549 seed spread they have no noise floor (readout 2026-09-28).
     *(
-        Arm(m, "seed1", ORGANELLES, a549=False)
+        Arm(m, "seed1", ORGANELLES, a549=True)
         for m in ("fnet2d", "fcmae_vscyto2d_scratch", "pix2pix2d_unetvit", "celldiff_2d")
     ),
-    Arm("fnet3d_paper", "seed1", ("nucleus",), a549=False),
+    Arm("fnet3d_paper", "seed1", ("nucleus",), a549=True),
     Arm("fcmae_vscyto3d_scratch", "v2", ORGANELLES, a549=True),
     Arm("pix2pix3d_unetvit", "v2", ORGANELLES, a549=True),
-    *(Arm("fcmae_vscyto2d_scratch", s, ("membrane",), a549=False) for s in ("jointsteps", "l1", "safecrop")),
+    *(Arm("fcmae_vscyto2d_scratch", s, ("membrane",), a549=False) for s in ("jointsteps", "safecrop")),
+    # The l1 probe won (Dice 0.889 vs 0.380) and is the baseline for l1segaux, so it also predicts A549.
+    Arm("fcmae_vscyto2d_scratch", "l1", ("membrane",), a549=True),
+    # The comparison rebuilt on the recipe that trains: the l1 probe is the baseline for these.
+    Arm("fcmae_vscyto2d_scratch", "l1segaux", ("membrane",), a549=True),
+    Arm("fcmae_vscyto2d_scratch", "l1seed1", ("membrane",), a549=True),
     # Stage 1b, nucleus first: segmentation inside the generative process.
     *(Arm(m, s, ("nucleus",), a549=True) for s in ("cjoint", "ccond") for m in ("celldiff_2d", "celldiff")),
     # Stage 2 #1: the segaux arm with a self-consistent Dice reference (2D families first).
@@ -215,7 +228,39 @@ ARMS: tuple[Arm, ...] = (
     # while every GAN arm predicts from last.ckpt (recorded EMA val L1 does not track the
     # weights), so arm-vs-baseline needs this.
     Arm("pix2pix2d_unetvit", "last", ORGANELLES, a549=True, fit=False),
+    # Second draws where the verdict rests on one run (readout 2026-09-28: on A549 the two FNet
+    # baseline draws differ by up to 0.39 Dice): the arm itself for the FNet cells whose effect
+    # holds against both baseline draws, and the pix2pix3d v2 baseline, which had no replicate.
+    Arm("fnet2d", "segaux_seed1", ORGANELLES, a549=True),
+    Arm("fnet3d_paper", "segaux_seed1", ("nucleus",), a549=True),
+    Arm("pix2pix3d_unetvit", "v2_seed1", ORGANELLES, a549=True),
+    # UNeXt2-3D v2 baseline, drawn per organelle once its segaux verdict came back non-null
+    # (nucleus, wave2d 2026-09-28: A549 instance Dice +0.029..+0.047, PCC -0.020..-0.025;
+    # membrane, wave2f 2026-09-29: iPSC mAP +0.128, instance Dice +0.099, PCC +0.027; CIs exclude 0).
+    Arm("fcmae_vscyto3d_scratch", "v2_seed1", ORGANELLES, a549=True),
+    # ... and the UNeXt2-3D membrane segaux arm itself, so the one arm that improves every
+    # in-domain metric gets the full 2x2 (arm draw x baseline draw) on A549, where the
+    # FNet-2D arm's two draws disagreed (nucleus Dice +0.15..+0.20 vs +0.01..+0.02).
+    Arm("fcmae_vscyto3d_scratch", "segaux_seed1", ("membrane",), a549=True),
+    # Loss-weight sweep on the one cell whose effect held against both baseline draws
+    # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
+    Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
+    Arm("fnet3d_paper", "segaux_doublew", ("nucleus",), a549=True),
 )
+# Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
+SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
+# Loss-weight sweep arms: the segaux arm's recipe with seg_aux_weight scaled by this factor.
+WEIGHT_SCALES: dict[str, float] = {"segaux_halfw": 0.5, "segaux_doublew": 2.0}
+
+
+def _unseeded(arm: Arm) -> Arm:
+    """Return the arm a second draw re-draws (:data:`SEED_SOURCES`); any other arm unchanged."""
+    return replace(arm, suffix=SEED_SOURCES.get(arm.suffix, arm.suffix))
+
+
+def _long_wall(arm: Arm) -> bool:
+    return _unseeded(arm).model in LONG_WALL_MODELS
+
 
 _DESCRIPTION: dict[str, str] = {
     "segaux": "data fg_mask_key: fg_mask; model seg_aux (SegAuxDice c=0.1) + seg_aux_weight (+ seg_aux_t0 for flow)",
@@ -223,11 +268,18 @@ _DESCRIPTION: dict[str, str] = {
     "arm's seg_aux_weight (+ seg_aux_t0 for flow). One field from the segaux arm: the Dice reference is the "
     "target through the same sigmoid, so the term is zero at pred == target",
     "seed1": "seed_everything: 1",
+    "segaux_seed1": "the segaux arm's recipe + seed_everything: 1 (a second draw of the arm)",
+    "v2_seed1": "seed_everything: 1 (a second draw of the v2 baseline)",
+    "segaux_halfw": "the segaux arm's recipe with seg_aux_weight x0.5 (loss-weight sweep)",
+    "segaux_doublew": "the segaux arm's recipe with seg_aux_weight x2 (loss-weight sweep)",
     "v2": "nothing (fresh retrain of the baseline recipe under its own run root)",
     "jointsteps": f"trainer max_epochs: {JOINTSTEPS_MAX_EPOCHS}. Step budget matched to the joint membrane run, "
     "measured from final checkpoints: baseline latest-epoch=199-step=100000 (500 steps/ep), joint "
     "latest-epoch=199-step=160000 (800 steps/ep); 320 x 500 = 160000",
     "l1": "MixedLoss l1_alpha 1.0 / l2_alpha 0.0 / ms_dssim_alpha 0.0 (L1 only)",
+    "l1segaux": "the l1 arm's MixedLoss (L1 only) + data fg_mask_key: fg_mask + model seg_aux (SegAuxDice "
+    "c=0.1) + seg_aux_weight. Its baseline is the l1 probe, from which it differs by the seg-aux term only",
+    "l1seed1": "the l1 arm's MixedLoss (L1 only) + seed_everything: 1 (noise floor for l1segaux vs l1)",
     "safecrop": f"affine safe_crop_size {SAFE_CROP_SIZE} + safe_crop_coverage {SAFE_CROP_COVERAGE}",
     "cjoint": "data fg_mask_key: fg_mask; model net_config.in_channels 2, mask_mode joint, mask_dice_weight, "
     f"mask_velocity_weight {MASK_VELOCITY_WEIGHT}, seg_aux_t0 {SEG_AUX_T0}",
@@ -298,6 +350,14 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
                 }
             )
         return _PREDICT_RENAMES, frozenset()
+    if arm.suffix in SEED_SOURCES:
+        renames, recipe_keys = allowed_diff(_unseeded(arm), kind)
+        return renames, recipe_keys | {"seed_everything"}
+    if arm.suffix in WEIGHT_SCALES:
+        return allowed_diff(replace(arm, suffix="segaux"), kind)
+    if arm.suffix == "l1segaux":
+        renames, l1_keys = allowed_diff(replace(arm, suffix="l1"), kind)
+        return renames, l1_keys | allowed_diff(replace(arm, suffix="segaux"), kind)[1]
     recipe: set[str] = set()
     if arm.suffix in ("segaux", "segauxself"):
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.seg_aux", "model.init_args.seg_aux_weight"}
@@ -327,7 +387,7 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
             "model.init_args.mask_mode",
             "model.init_args.mask_corruption",
         }
-    if arm.model in LONG_WALL_MODELS:
+    if _long_wall(arm):
         recipe.add("base")
     return _FIT_RENAMES, frozenset(recipe)
 
@@ -357,6 +417,20 @@ def _safecrop_gpu_augmentations() -> list[dict]:
 
 def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
     """Apply the arm's recipe delta to a fit-leaf dict in place."""
+    if arm.suffix in SEED_SOURCES:
+        _apply_recipe(_unseeded(arm), organelle, cfg)
+        cfg["seed_everything"] = 1
+        return
+    if arm.suffix in WEIGHT_SCALES:
+        _apply_recipe(replace(arm, suffix="segaux"), organelle, cfg)
+        cfg["model"]["init_args"]["seg_aux_weight"] *= WEIGHT_SCALES[arm.suffix]
+        return
+    if arm.suffix == "l1segaux":
+        # The l1 recipe plus the segaux terms, at the weight calibrated on the l1 probe.
+        _apply_recipe(replace(arm, suffix="l1"), organelle, cfg)
+        _apply_recipe(replace(arm, suffix="segaux"), organelle, cfg)
+        cfg["model"]["init_args"]["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, arm.model)]
+        return
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})
     if arm.suffix in ("segaux", "segauxself"):
@@ -418,7 +492,7 @@ def build_fit(arm: Arm, organelle: str, baseline_cfg: dict) -> dict:
     cfg["launcher"]["job_name"] = f"{cfg['launcher']['job_name']}_{arm.suffix}"
     cfg["launcher"]["run_root"] = _replace_segment(cfg["launcher"]["run_root"], base.ckpt_dir, arm.model)
     _apply_recipe(arm, organelle, cfg)
-    if arm.model in LONG_WALL_MODELS:
+    if _long_wall(arm):
         walls = [i for i, entry in enumerate(cfg["base"]) if entry.endswith(_WALL_4GPU)]
         if len(walls) != 1:
             raise ValueError(f"{arm.model}/{organelle}: expected one {_WALL_4GPU} in base, got {len(walls)}")
@@ -458,7 +532,7 @@ def build_predict(arm: Arm, organelle: str, baseline_cfg: dict) -> dict:
             "init_args": {
                 "data_path": mask_store,
                 "channel": CCOND_MASK_CHANNEL,
-                "threshold": CCOND_THRESHOLD_PLACEHOLDER,
+                "threshold": CCOND_THRESHOLD,
             },
         }
     return cfg
@@ -473,7 +547,7 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
     ]
     if kind == "fit":
         lines.append(f"# Recipe delta vs that leaf: {_DESCRIPTION[arm.suffix]}.")
-        if arm.model in LONG_WALL_MODELS:
+        if _long_wall(arm):
             lines.append(
                 "# Wall: hardware_4gpu_long (7 d); 200 epochs at the measured ~2.0 ep/h is ~100 h > 4 d"
                 " (checkpoint-mtime pairs in the generator docstring)."
@@ -489,14 +563,7 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
 
 
 def _render(cfg: dict, header: str) -> str:
-    text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)
-    threshold_line = f"        threshold: {CCOND_THRESHOLD_PLACEHOLDER}\n"
-    text = text.replace(
-        threshold_line,
-        "        # PLACEHOLDER: set to the threshold tuned on the val FOVs (plan Stage 1b C-cond);\n"
-        "        # data_path is the planned FNet _segaux store, which must be COMPLETE first.\n" + threshold_line,
-    )
-    return header + text
+    return header + yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)
 
 
 def build_leaves(benchmarks: Path = BENCHMARKS) -> dict[Path, str]:

@@ -283,6 +283,23 @@ PAPER_KEY: dict[str, str] = {
     "celldiff_2d_segauxself": "celldiff_2d_segauxself",
     # Predict-only: the pix2pix2d baseline's own last.ckpt (canonical stores: best ckpts, nucleus ep 22 / membrane ep 37).
     "pix2pix2d_unetvit_last": "pix2pix2d_last",
+    # UNeXt2-2D membrane rebuilt on the L1 recipe: seg-aux arm and its seed replicate.
+    "fcmae_vscyto2d_scratch_l1segaux": "unext2_2d_l1segaux",
+    "fcmae_vscyto2d_scratch_l1seed1": "unext2_2d_l1seed1",
+    # Second draws: the FNet and UNeXt2-3D segaux arms and the pix2pix3d and UNeXt2-3D v2 baselines.
+    "fnet2d_segaux_seed1": "fnet2d_segaux_seed1",
+    "fnet3d_paper_segaux_seed1": "fnet3d_segaux_seed1",
+    "pix2pix3d_unetvit_v2_seed1": "pix2pix3d_v2_seed1",
+    "fcmae_vscyto3d_scratch_v2_seed1": "unext2_v2_seed1",
+    "fcmae_vscyto3d_scratch_segaux_seed1": "unext2_segaux_seed1",
+    # FNet-3D nucleus loss-weight sweep: the segaux arm at 0.5x and 2x seg_aux_weight.
+    "fnet3d_paper_segaux_halfw": "fnet3d_segaux_halfw",
+    "fnet3d_paper_segaux_doublew": "fnet3d_segaux_doublew",
+    # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
+    # histogram-matched per volume to its segaux arm's (spatial structure kept).
+    "fnet3d_paper_histmatch": "fnet3d_histmatch",
+    "pix2pix3d_unetvit_v2_histmatch": "pix2pix3d_v2_histmatch",
+    "fcmae_vscyto3d_scratch_v2_histmatch": "unext2_v2_histmatch",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

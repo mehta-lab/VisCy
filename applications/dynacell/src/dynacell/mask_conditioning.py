@@ -16,7 +16,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from iohub.ngff import open_ome_zarr
+from skimage.filters import threshold_otsu
 from torch import Tensor
+
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY
 
 __all__ = ["CondMaskSource", "MaskCorruption", "binarize_mask", "encode_mask"]
 
@@ -146,11 +149,22 @@ class CondMaskSource:
         ``_segaux`` ``prediction.zarr``.
     channel : str
         Channel to threshold, e.g. ``"Nuclei_prediction"``.
-    threshold : float
-        Voxels ``>= threshold`` are foreground, in the channel's own units.
+    threshold : float or str
+        A float marks voxels ``>= threshold`` as foreground, in the channel's
+        own units. ``"otsu"`` instead thresholds each predict window (each
+        sample of a batch) at the Otsu threshold of its own values, so the
+        mask adapts to a source whose intensity scale shifts between
+        datasets.
+
+    Raises
+    ------
+    ValueError
+        If ``threshold`` is a string other than ``"otsu"``.
     """
 
-    def __init__(self, data_path: str, channel: str, threshold: float) -> None:
+    def __init__(self, data_path: str, channel: str, threshold: float | str) -> None:
+        if isinstance(threshold, str) and threshold != "otsu":
+            raise ValueError(f"threshold must be a float or 'otsu', got {threshold!r}")
         self.data_path = Path(data_path)
         self.channel = channel
         self.threshold = threshold
@@ -174,8 +188,11 @@ class CondMaskSource:
         Raises
         ------
         ValueError
-            If the source image's YX shape differs from the window or the
-            window holds NaN (an unwritten prediction).
+            If a source position's channel has no completion marker (it is
+            unwritten, partly written, or predates markers: the prediction
+            writer zero-fills, so no pixel test can tell), its YX shape differs
+            from the window, the window holds NaN, or an ``"otsu"`` window is
+            constant (Otsu has no split).
         """
         img_names, t_indices, z_indices = index
         depth = spatial[0]
@@ -183,6 +200,12 @@ class CondMaskSource:
         for img_name, t, z in zip(img_names, t_indices, z_indices):
             _, row, col, pos, arr = img_name.split("/")
             with open_ome_zarr(self.data_path / row / col / pos, mode="r") as position:
+                marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(self.channel)
+                if not isinstance(marker, dict) or "source_shape" not in marker:
+                    raise ValueError(
+                        f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} has no completion "
+                        f"marker ({PREDICTION_COMPLETE_KEY}); the mask source is incomplete or predates markers."
+                    )
                 ch = position.get_channel_index(self.channel)
                 image = position[arr]
                 window = np.asarray(image[int(t), ch, int(z) : int(z) + depth])
@@ -196,5 +219,15 @@ class CondMaskSource:
                     f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} holds NaN at t={int(t)}, "
                     f"z={int(z)}; the mask source is incomplete."
                 )
-            windows.append(torch.from_numpy(window >= self.threshold).float())
+            if self.threshold == "otsu" and window.min() == window.max():
+                raise ValueError(
+                    f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} is constant "
+                    f"({window.flat[0]}) at t={int(t)}, z={int(z)}; Otsu has no split."
+                )
+            windows.append(torch.from_numpy(self._binarize(window)).float())
         return torch.stack(windows).unsqueeze(1)
+
+    def _binarize(self, window: np.ndarray) -> np.ndarray:
+        if self.threshold != "otsu":
+            return window >= self.threshold
+        return window >= threshold_otsu(window.ravel())

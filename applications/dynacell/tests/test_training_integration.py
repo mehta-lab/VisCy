@@ -22,6 +22,13 @@ from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 from viscy_utils.compose import load_composed_config
 from viscy_utils.losses import MixedLoss, SegAuxDice, SpotlightLoss
 from viscy_utils.meta_utils import generate_fg_masks
+from viscy_utils.prediction_metadata import (
+    PREDICTION_COMPLETE_KEY,
+    completion_marker,
+    mark_complete,
+    mark_started,
+    tzyx_shape,
+)
 
 # Small model configs for tests (not production sizes).
 VIT_TEST_CONFIG = {
@@ -922,6 +929,9 @@ def test_cond_predict_reads_the_mask_source(tmp_path, tiny_hcs_zarr, monkeypatch
     """C-cond predict conditions on the thresholded mask-source channel read at each
     window's own (position, t, z), and refuses to predict without a source."""
     seed_everything(42)
+    with open_ome_zarr(tiny_hcs_zarr, mode="r+") as plate:
+        for _, position in plate.positions():
+            mark_complete(position, ["Fluorescence"], completion_marker(tzyx_shape(position["0"]), {"run": "test"}))
     source = CondMaskSource(data_path=str(tiny_hcs_zarr), channel="Fluorescence", threshold=0.5)
     module = DynacellFlowMatching(
         transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
@@ -954,6 +964,80 @@ def test_cond_predict_reads_the_mask_source(tmp_path, tiny_hcs_zarr, monkeypatch
     module.cond_mask_source = None
     with pytest.raises(ValueError, match="needs cond_mask_source"):
         module.predict_step({"source": torch.randn(1, 1, 8, 32, 32)}, 0)
+
+
+def _mask_source_store(path: Path, images: list[np.ndarray]) -> Path:
+    """Write one ``(Z, Y, X)`` image per position of a single-channel HCS store, each position
+    marked complete the way the prediction writer marks a finished channel."""
+    with open_ome_zarr(path, layout="hcs", mode="w", channel_names=["Nuclei_prediction"]) as plate:
+        for i, image in enumerate(images):
+            position = plate.create_position("A", "1", str(i))
+            array = position.create_image("0", image[None, None].astype(np.float32))
+            mark_complete(position, ["Nuclei_prediction"], completion_marker(tzyx_shape(array), {"run": "test"}))
+    return path
+
+
+def _bimodal_image() -> tuple[np.ndarray, np.ndarray]:
+    """A (2, 32, 32) noisy dim background with a bright square, and the square's mask."""
+    rng = np.random.default_rng(0)
+    bright = np.zeros((2, 32, 32), dtype=bool)
+    bright[:, 8:20, 10:26] = True
+    image = np.where(bright, 1.0, 0.0) + 0.1 * rng.standard_normal(bright.shape)
+    return image, bright
+
+
+def test_cond_mask_source_otsu_adapts_to_the_intensity_scale(tmp_path):
+    """Per-window Otsu recovers the bright region on the raw and on an affinely
+    rescaled store; the fixed float threshold tuned on the raw store does not
+    survive the rescale."""
+    image, bright = _bimodal_image()
+    store = _mask_source_store(tmp_path / "mask.zarr", [image, 10.0 * image + 5.0])
+    index = (["/A/1/0/0", "/A/1/1/0"], [0, 0], [0, 0])
+    otsu = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold="otsu").read(index, (2, 32, 32))
+    fixed = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold=0.5).read(index, (2, 32, 32))
+    expected = torch.from_numpy(bright).float()
+    assert otsu.shape == (2, 1, 2, 32, 32)
+    assert torch.equal(otsu[0, 0], expected)
+    assert torch.equal(otsu[1, 0], expected)
+    # The float path is unchanged: right on the raw store, all-foreground after the shift.
+    assert torch.equal(fixed[0, 0], torch.from_numpy(image >= 0.5).float())
+    assert torch.equal(fixed[0, 0], expected)
+    assert fixed[1, 0].mean() == 1.0
+
+
+@pytest.mark.parametrize("threshold", ["otsu", 0.5])
+@pytest.mark.parametrize("marker", ["started", "none"])
+def test_cond_mask_source_refuses_a_position_that_is_not_marked_complete(tmp_path, threshold, marker):
+    """A partly written source mixes predictions with the writer's zero fill, which no pixel test
+    can tell from a finished window; only the channel's completion marker vouches for it."""
+    image, _ = _bimodal_image()
+    partial = image.copy()
+    partial[:, 16:] = 0.0
+    store = _mask_source_store(tmp_path / "mask.zarr", [image, partial])
+    with open_ome_zarr(store / "A" / "1" / "1", mode="r+") as position:
+        if marker == "started":
+            mark_started(position, ["Nuclei_prediction"], {"run": "test"})
+        else:
+            position.zattrs[PREDICTION_COMPLETE_KEY] = {}
+    source = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold=threshold)
+    assert source.read((["/A/1/0/0"], [0], [0]), (2, 32, 32)).shape == (1, 1, 2, 32, 32)
+    with pytest.raises(ValueError, match="no completion marker"):
+        source.read((["/A/1/0/0", "/A/1/1/0"], [0, 0], [0, 0]), (2, 32, 32))
+
+
+def test_cond_mask_source_otsu_refuses_a_constant_window(tmp_path):
+    """Otsu has no split on a constant window; a float threshold is still well defined there."""
+    store = _mask_source_store(tmp_path / "mask.zarr", [np.full((2, 32, 32), 3.0)])
+    index = (["/A/1/0/0"], [0], [0])
+    with pytest.raises(ValueError, match="Otsu has no split"):
+        CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold="otsu").read(index, (2, 32, 32))
+    fixed = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold=0.5).read(index, (2, 32, 32))
+    assert fixed.mean() == 1.0
+
+
+def test_cond_mask_source_rejects_unknown_threshold_string(tmp_path):
+    with pytest.raises(ValueError, match="float or 'otsu'"):
+        CondMaskSource(data_path=str(tmp_path), channel="Nuclei_prediction", threshold="triangle")
 
 
 # ---- Predict integration tests (CPU) ----
