@@ -53,14 +53,11 @@ def _require_cubic():
 
 
 def _min_max_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Min-max normalize a tensor to [0, 1] range."""
-    # torch is imported lazily: it costs seconds, and cp_reference and the paper
-    # scripts import this module only for CP feature names and cache helpers.
+    """Min-max normalize a tensor to [0, 1] range; called inside :func:`ssim`'s inference mode."""
     import torch
 
-    with torch.inference_mode():
-        x = x.float()
-        return (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
+    x = x.float()
+    return (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
 
 
 def ssim(img1: torch.Tensor, img2: torch.Tensor, *, scale_invariant: bool = True, eps: float = 1e-8) -> float:
@@ -97,6 +94,8 @@ def ssim(img1: torch.Tensor, img2: torch.Tensor, *, scale_invariant: bool = True
     eps : float
         Min-max denominator floor; used only when ``scale_invariant=False``.
     """
+    # torch is imported lazily: it costs seconds, and cp_reference and the paper
+    # scripts import this module only for CP feature names and cache helpers.
     import torch
 
     with torch.inference_mode():
