@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,8 @@ import pytest
 pytest.importorskip("zarr")
 pytest.importorskip("iohub")
 pytest.importorskip("omegaconf")
+
+from omegaconf import OmegaConf  # noqa: E402
 
 from dynacell.evaluation.cache import (  # noqa: E402
     CACHE_SCHEMA_VERSION,
@@ -72,6 +75,70 @@ def test_save_and_load_manifest_roundtrip(tmp_path: Path) -> None:
     save_manifest(paths, manifest)
     loaded = load_manifest(paths)
     assert loaded == manifest
+
+
+def test_save_manifest_writes_what_omegaconf_wrote(tmp_path: Path) -> None:
+    """The libyaml writer matches ``OmegaConf.save`` byte for byte, and OmegaConf reads its output back.
+
+    The cases are the ones libyaml's plain SafeDumper gets wrong: a hex sha12 marker that
+    OmegaConf's loader parses as a float, bool and int spellings, non-ASCII text, a
+    timestamp-like str, and one list object shared by two entries (aliases).
+    """
+    spacing = [0.29, 0.108, 0.108]
+    manifest = {
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+        "pred": {"plate_path": "/data/café/pred.zarr", "channel_name": "y"},
+        "artifacts": {
+            "cp_features": {"spacing": spacing, "built_at": "2026-09-30T19:44:54+00:00"},
+            "organelle_masks": {"er": {"spacing": spacing, "threshold": "1e-3"}},
+            "dinov3_features": {
+                "m": {
+                    "sources": {
+                        "A/1/0": {"marker": "4e1234567890", "written_ns": 1},
+                        "A/1/1": {"marker": "012345678901"},
+                    }
+                }
+            },
+        },
+    }
+    save_manifest(paths := cache_paths(tmp_path / "libyaml"), manifest)
+    OmegaConf.save(OmegaConf.create(manifest), reference := tmp_path / "omegaconf.yaml")
+    assert paths.manifest.read_bytes() == reference.read_bytes()
+    assert OmegaConf.to_container(OmegaConf.load(paths.manifest)) == manifest
+    assert load_manifest(paths) == {**manifest, "gt": None, "cell_segmentation": None}
+
+
+def test_save_manifest_interrupted_leaves_the_old_file(tmp_path: Path, monkeypatch) -> None:
+    """A writer that dies mid-dump leaves the previous manifest intact and no temp file behind."""
+    paths = cache_paths(tmp_path)
+    save_manifest(paths, {"cache_schema_version": CACHE_SCHEMA_VERSION, "artifacts": {"a": 1}})
+    before = paths.manifest.read_bytes()
+
+    def dump_then_die(data, stream, **kwargs):
+        stream.write("cache_schema_version: 1\nartif")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("dynacell.evaluation.cache.yaml.dump", dump_then_die)
+    with pytest.raises(KeyboardInterrupt):
+        save_manifest(paths, {"cache_schema_version": CACHE_SCHEMA_VERSION, "artifacts": {"b": 2}})
+    assert paths.manifest.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["manifest.yaml"]
+
+
+def test_save_manifest_never_writes_through_a_planted_temp_path(tmp_path: Path, monkeypatch) -> None:
+    """A path already at the temp name (here a symlink to another file) is refused, not followed or removed."""
+    paths = cache_paths(tmp_path / "cache")
+    paths.root.mkdir()
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    monkeypatch.setattr("dynacell.evaluation.cache.uuid.uuid4", lambda: uuid.UUID(int=0))
+    planted = paths.root / f".manifest.yaml.{uuid.UUID(int=0).hex}.tmp"
+    planted.symlink_to(victim)
+    with pytest.raises(FileExistsError):
+        save_manifest(paths, {"cache_schema_version": CACHE_SCHEMA_VERSION, "artifacts": {}})
+    assert victim.read_text() == "keep me"
+    assert planted.is_symlink()
+    assert not paths.manifest.exists()
 
 
 def test_check_cache_identity_version_mismatch(tmp_path: Path) -> None:

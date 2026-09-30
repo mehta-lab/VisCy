@@ -127,7 +127,7 @@ def _write_final_caches(pipeline, save_dir: Path, feature_row: dict, config) -> 
         save_dir,
         cp_reference_sha256=space.reference_sha256,
         cp_space_sha256=space.binding_sha256,
-        prediction_sources_sha256_12=prediction_sources_sha256_12(
+        prediction_digest=prediction_sources_sha256_12(
             prediction_sources(config.io.pred_path, config.io.pred_channel_name)
         ),
     )
@@ -331,7 +331,7 @@ def test_evaluate_model_stamps_the_reference_it_scored_with(tmp_path: Path, monk
     config.force_recompute.final_metrics = True
     seen = {}
 
-    def _fake_evaluate_predictions(cfg, *, cp_space):
+    def _fake_evaluate_predictions(cfg, *, cp_space, prediction_snapshot):
         seen["cp_space"] = cp_space
         make_cp_reference(cfg, tmp_path / "cp_reference.json", seed=7)  # rebuilt mid-run
         return [{"FOV": "A/1/0", "Timepoint": 0, "PCC": 0.5}], [], []

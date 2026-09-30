@@ -1330,7 +1330,11 @@ def _worker_run_fov(
 
 
 def evaluate_predictions(
-    config: DictConfig, *, models: EvalModels | None = None, cp_space: DatasetCPSpace | None = None
+    config: DictConfig,
+    *,
+    models: EvalModels | None = None,
+    cp_space: DatasetCPSpace | None = None,
+    prediction_snapshot: dict[str, dict[str, Any]] | None = None,
 ):
     """Evaluate predictions on all test images.
 
@@ -1350,6 +1354,11 @@ def evaluate_predictions(
         The CP reference bound to this eval's dataset (:func:`eval_cp_space`).
         Required exactly when ``compute_feature_metrics=true``; the caller loads it
         so the same verified reference is stamped by :func:`save_metrics`.
+    prediction_snapshot : dict or None, optional
+        :func:`~dynacell.evaluation.cache.prediction_sources` of ``io.pred_path``, read
+        by the caller for the stamp it hashes; the prediction-side cache then uses the
+        same snapshot instead of reading the store again. ``None`` reads it here.
+        Process-executor workers read their own.
     """
     # Phase 1 runtime resolution: lock in executor + thread caps before any
     # heavy work. fov_workers may be provisional when "auto"; re-resolved in
@@ -1402,7 +1411,7 @@ def evaluate_predictions(
         celldino_feature_extractor = models.celldino
         morphem_feature_extractor = models.morphem
 
-        cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
+        cache_ctx, pred_cache_ctx = init_cache_contexts(config, models, prediction_snapshot=prediction_snapshot)
     # The CP reference masks and scales by column position: refuse a GT or pred CP
     # cache whose columns are not the reference's, by name and order.
     if cp_space is not None:
@@ -1904,7 +1913,7 @@ def save_metrics(
     feature_metrics=None,
     *,
     cp_space: DatasetCPSpace | None,
-    prediction_sources_sha256_12: str,
+    prediction_digest: str,
 ):
     """Save metric rows as CSV + NPY (and plots), then stamp ``metrics_provenance.json``.
 
@@ -1920,11 +1929,11 @@ def save_metrics(
         Its ``reference_sha256`` (audit) and ``binding_sha256`` (compared on cache
         reuse) are stamped. It is passed in rather than re-read here, so a reference
         rebuilt mid-run cannot be stamped on values it did not produce.
-    prediction_sources_sha256_12 : str
-        :func:`~dynacell.evaluation.cache.prediction_sources_sha256_12` of
-        ``io.pred_path``, taken before scoring for the same reason: a re-predict landing
-        mid-run then leaves a stamp that no longer matches the store, and the rows are
-        recomputed.
+    prediction_digest : str
+        :func:`~dynacell.evaluation.cache.prediction_sources_sha256_12` of the
+        ``io.pred_path`` snapshot scored, taken before scoring for the same reason: a
+        re-predict landing mid-run then leaves a stamp that no longer matches the
+        store, and the rows are recomputed.
 
     Raises
     ------
@@ -1962,7 +1971,7 @@ def save_metrics(
         save_dir,
         cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
         cp_space_sha256=cp_space.binding_sha256 if cp_space is not None else None,
-        prediction_sources_sha256_12=prediction_sources_sha256_12,
+        prediction_digest=prediction_digest,
     )
 
 
@@ -2007,9 +2016,9 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         with open_ome_zarr(Path(config.io.gt_path), mode="r") as gt_plate:
             space.check_positions([name for name, _ in gt_plate.positions()])
         current_sha256 = space.binding_sha256
-    if not metrics_provenance_matches(save_dir, cp_space_sha256=current_sha256):
-        return False
-    if not _metrics_scored_current_prediction(config, save_dir):
+    # A missing prediction store raises FileNotFoundError here, as it would when scoring.
+    sources = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+    if not metrics_provenance_matches(save_dir, cp_space_sha256=current_sha256, prediction_sources=sources):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename
@@ -2071,43 +2080,6 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
             if cp in prefixes and not {f"Dataset_{cp}_clip_frac", f"{cp}_clip_frac"} <= set(columns):
                 return False
     return pixel_ok and mask_ok and feature_ok
-
-
-def _metrics_scored_current_prediction(config: DictConfig, save_dir: Path) -> bool:
-    """Return whether ``save_dir``'s metrics were scored on the prediction now at ``io.pred_path``.
-
-    A re-predict writes into the same path, so compare the
-    ``prediction_sources_sha256_12`` that :func:`save_metrics` stamped with the store's
-    current one (:func:`~dynacell.evaluation.cache.prediction_sources`). A stamp written
-    before that field existed is dated instead: the rows are reusable only when every
-    position's chunks are dated and none was written after the stamp file; a blank
-    position (no stored chunk) cannot be dated and forces one recompute. A missing
-    prediction store raises ``FileNotFoundError`` here, as it would when scoring.
-    That misses one legacy case:
-    metrics saved after a re-predict but scored from pred caches it had left stale. The
-    grouped leaves' ``force_recompute.final_metrics: true`` and the 2026-09-30 recompute
-    of the stale caches cover it.
-
-    Parameters
-    ----------
-    config : DictConfig
-        Eval config (``io.pred_path``, ``io.pred_channel_name``).
-    save_dir : pathlib.Path
-        Directory holding ``metrics_provenance.json``.
-
-    Returns
-    -------
-    bool
-        True when the stamped fingerprint matches, or, for an unstamped sidecar, when
-        the store is not newer than it.
-    """
-    stamp = save_dir / PROVENANCE_FILENAME
-    sources = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
-    recorded = json.loads(stamp.read_text()).get("prediction_sources_sha256_12")
-    if recorded is not None:
-        return recorded == prediction_sources_sha256_12(sources)
-    written = [source["written_ns"] for source in sources.values()]
-    return None not in written and max(written, default=0) <= stamp.stat().st_mtime_ns
 
 
 def _load_cached_final_metrics(config: DictConfig) -> tuple[list, list, list]:
@@ -2363,11 +2335,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
             pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
         else:
             cp_space = eval_cp_space(merged) if merged.compute_feature_metrics else None
-            scored_prediction = prediction_sources_sha256_12(
-                prediction_sources(merged.io.pred_path, merged.io.pred_channel_name)
-            )
+            snapshot = prediction_sources(merged.io.pred_path, merged.io.pred_channel_name)
             pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
-                merged, models=get_models(), cp_space=cp_space
+                merged, models=get_models(), cp_space=cp_space, prediction_snapshot=snapshot
             )
             save_metrics(
                 merged,
@@ -2375,7 +2345,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
                 cp_space=cp_space,
-                prediction_sources_sha256_12=scored_prediction,
+                prediction_digest=prediction_sources_sha256_12(snapshot),
             )
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
         condition_save_dirs.append(Path(merged.save.save_dir))
@@ -2419,10 +2389,10 @@ def evaluate_model(config: DictConfig):
         # stamped by save_metrics is the reference the metrics were scored with. The
         # prediction fingerprint is taken before scoring for the same reason.
         cp_space = eval_cp_space(config) if config.compute_feature_metrics else None
-        scored_prediction = prediction_sources_sha256_12(
-            prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+        snapshot = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
+            config, cp_space=cp_space, prediction_snapshot=snapshot
         )
-        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config, cp_space=cp_space)
         with region_timer("save_metrics_csvs", "<parent>"):
             save_metrics(
                 config,
@@ -2430,7 +2400,7 @@ def evaluate_model(config: DictConfig):
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
                 cp_space=cp_space,
-                prediction_sources_sha256_12=scored_prediction,
+                prediction_digest=prediction_sources_sha256_12(snapshot),
             )
         # Re-dump so save_metrics_csvs lands in eval_timing.csv. evaluate_predictions
         # dumps once before save_metrics runs; this second dump overwrites with the

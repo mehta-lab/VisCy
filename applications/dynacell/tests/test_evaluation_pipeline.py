@@ -6,11 +6,12 @@ import types
 from pathlib import Path
 
 import numpy as np
-from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
 from dynacell.evaluation.cache import prediction_sources, prediction_sources_sha256_12
 from dynacell.evaluation.provenance import write_metrics_provenance
+
+from ._eval_fixtures import make_hcs_plate
 
 
 def _write_metrics(path: Path, payload: list[dict[str, str]]) -> None:
@@ -91,8 +92,7 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     """Reuse pixel and mask caches when feature metrics are disabled."""
     pipeline = _import_pipeline_with_stubs(monkeypatch)
     pred_path = tmp_path / "pred.zarr"
-    with open_ome_zarr(pred_path, mode="w", layout="hcs", channel_names=["prediction"], version="0.5") as plate:
-        plate.create_position("A", "1", "0").create_image("0", np.zeros((1, 1, 1, 2, 2), dtype=np.float32))
+    make_hcs_plate(pred_path, "prediction", seed=0)
     config = OmegaConf.create(
         {
             "compute_feature_metrics": False,
@@ -126,7 +126,7 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
         tmp_path,
         cp_reference_sha256=None,
         cp_space_sha256=None,
-        prediction_sources_sha256_12=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+        prediction_digest=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
     )
 
     def fail_if_recomputed(_config):

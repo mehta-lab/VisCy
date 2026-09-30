@@ -180,7 +180,7 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     """``evaluate_model`` runs ``apply_dataset_ref`` before ``evaluate_predictions``."""
     captured: list[DictConfig] = []
 
-    def _fake_evaluate_predictions(cfg: DictConfig, *, cp_space):
+    def _fake_evaluate_predictions(cfg: DictConfig, *, cp_space, prediction_snapshot):
         captured.append(cfg)
         return ([], [], [])
 

@@ -14,11 +14,11 @@ position also records the :func:`prediction_sources` entry it was built from.
 from __future__ import annotations
 
 import hashlib
-import itertools
 import json
 import os
 import shutil
-from collections.abc import Iterator
+import uuid
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,13 +27,49 @@ from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
+import yaml
 import zarr
 from iohub.ngff import ImageArray, Position, open_ome_zarr
-from omegaconf import OmegaConf
 
 from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, marker_identity
 
 FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
+
+# The manifest is read and written once per FOV, and its per-position ``sources``
+# make it large; libyaml's C loader and dumper are an order of magnitude faster than
+# the pure-Python ones. They are absent only from a PyYAML built without libyaml,
+# which then falls back to the pure-Python classes.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+#: YAML 1.1 bool spellings that ``OmegaConf.save`` quotes.
+_OMEGACONF_BOOLS = frozenset(
+    "y Y yes Yes YES n N no No NO true True TRUE false False FALSE on On ON off Off OFF".split()
+)
+
+
+class _ManifestDumper(getattr(yaml, "CSafeDumper", yaml.SafeDumper)):
+    """libyaml dumper that writes what ``OmegaConf.save`` wrote: no anchors, str quoted like OmegaConf.
+
+    OmegaConf's loader reads an unquoted ``4e1234567890`` (a possible hex sha12 marker)
+    as a float, so a str that parses as a bool, int or float is single-quoted, exactly
+    as OmegaConf's own representer does. Entries sharing one object (``ctx.spacing``)
+    are written out in full rather than as ``&id001`` aliases.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
+    try:
+        float(data)
+        quoted = True
+    except ValueError:
+        quoted = data in _OMEGACONF_BOOLS
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="'" if quoted else None)
+
+
+_ManifestDumper.add_representer(str, _represent_str)
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -118,7 +154,8 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
             "cell_segmentation": None,
             "artifacts": {},
         }
-    raw = OmegaConf.to_container(OmegaConf.load(paths.manifest), resolve=True)
+    with open(paths.manifest) as f:
+        raw = yaml.load(f, Loader=_YAML_LOADER)
     if not isinstance(raw, dict):
         raise StaleCacheError(f"Manifest at {paths.manifest} is not a mapping")
     raw.setdefault("gt", None)
@@ -129,9 +166,25 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
 
 
 def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
-    """Persist *manifest* as YAML under *paths.manifest*, creating parents."""
+    """Persist *manifest* as YAML under *paths.manifest*, creating parents.
+
+    The YAML goes to a sibling temp file that is then renamed over the manifest, so a
+    reader that does not hold the manifest lock (``init_cache_context``) sees the old
+    file or the new one, never a truncated one. The temp name is unguessable and created
+    exclusively, so in a group-writable cache dir it never truncates or writes through a
+    path (or symlink) that another process made.
+    """
     paths.root.mkdir(parents=True, exist_ok=True)
-    OmegaConf.save(OmegaConf.create(manifest), paths.manifest)
+    tmp = paths.manifest.with_name(f".{paths.manifest.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "x") as f:
+            yaml.dump(manifest, f, Dumper=_ManifestDumper, sort_keys=False, allow_unicode=True)
+        os.replace(tmp, paths.manifest)
+    except FileExistsError:
+        raise  # only open(tmp, "x") raises this; the path is not ours to remove
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def check_cache_identity(
@@ -272,6 +325,16 @@ def built_at_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def json_sha256_12(obj: Any) -> str:
+    """Return the first 12 hex chars of the sha256 of *obj* serialized as JSON.
+
+    Keys are sorted, so representation-equivalent mappings hash alike; values JSON
+    cannot encode are serialized with ``str``.
+    """
+    payload = json.dumps(obj, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:12]
+
+
 def _chunk_files(directory: Path) -> Iterator[os.DirEntry]:
     """Yield the chunk files under *directory*, depth first and lazily.
 
@@ -287,32 +350,24 @@ def _chunk_files(directory: Path) -> Iterator[os.DirEntry]:
                 yield entry
 
 
-#: Directory entries a ``.``-separated chunk-key fallback scans before giving up. Only
-#: zarr v2 flat layouts reach it, and a store holding more entries than this ahead of
-#: the channel's chunks reads as having none (``written_ns=None``); the current writer
-#: only writes zarr v3, so those stores are not re-predicted.
-_FLAT_CHUNK_SCAN_LIMIT = 4096
-
-
 def _stored_chunk(array_dir: Path, key: str, spatial: int) -> os.DirEntry | Path | None:
     """Return the chunk stored at *key*, else the first stored chunk sharing its ``(t, c)`` prefix.
 
     A chunk never written, or reset to the fill value (zarr deletes it), is absent. The
-    prefix scan is bounded: one directory batch per level for ``/``-separated keys, at
-    most :data:`_FLAT_CHUNK_SCAN_LIMIT` entries for ``.``-separated ones.
+    prefix fallback exists only for ``/``-separated keys, whose ``(t, c)`` chunks share
+    one directory subtree, read one directory batch per level. A ``.``-separated key (a
+    flat zarr v2 layout) resolves only exactly; when that chunk is absent the position
+    reads as unwritten (``written_ns=None``), which rebuilds a legacy entry over it once.
+    Every evaluated non-v3 store uses ``/`` separators.
     """
     chunk = array_dir / key
     if chunk.is_file():
         return chunk
     parts = key.split("/")
-    if len(parts) > spatial:
-        # "/"-separated coordinates: the (t, c) chunks share one directory subtree.
-        prefix = array_dir.joinpath(*parts[:-spatial])
-        return next(_chunk_files(prefix), None) if prefix.is_dir() else None
-    # "."-separated coordinates: the (t, c) chunks share a name prefix.
-    stem = key.rsplit(".", spatial)[0] + "."
-    with os.scandir(array_dir) as entries:
-        return next((e for e in itertools.islice(entries, _FLAT_CHUNK_SCAN_LIMIT) if e.name.startswith(stem)), None)
+    if len(parts) <= spatial:
+        return None
+    prefix = array_dir.joinpath(*parts[:-spatial])
+    return next(_chunk_files(prefix), None) if prefix.is_dir() else None
 
 
 def _first_channel_chunk_mtime_ns(plate_path: Path, array: ImageArray, channel_index: int) -> int | None:
@@ -344,10 +399,7 @@ def _first_channel_chunk_mtime_ns(plate_path: Path, array: ImageArray, channel_i
 def _position_source(plate_path: Path, position: Position, channel_name: str, archive_ns: int | None) -> dict[str, Any]:
     """Return one position's source; see :func:`prediction_sources`."""
     marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(channel_name)
-    digest = None
-    if marker is not None:
-        payload = json.dumps(marker_identity(marker), sort_keys=True).encode("utf-8")
-        digest = hashlib.sha256(payload).hexdigest()[:12]
+    digest = None if marker is None else json_sha256_12(marker_identity(marker))
     if archive_ns is not None:
         written_ns = archive_ns
     else:
@@ -361,8 +413,10 @@ def _archive_mtime_ns(path: Path) -> int | None:
     return path.stat().st_mtime_ns if path.is_file() else None
 
 
-def prediction_sources(plate_path: Path | str, channel_name: str) -> dict[str, dict[str, Any]]:
-    """Return the source identity of every position of one prediction channel.
+def prediction_sources(
+    plate_path: Path | str, channel_name: str, positions: Iterable[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Return the source identity of every position (or of *positions*) of one prediction channel.
 
     A position's source is what a cached artifact built from it must still match:
 
@@ -395,6 +449,10 @@ def prediction_sources(plate_path: Path | str, channel_name: str) -> dict[str, d
         HCS prediction store; a missing store raises ``FileNotFoundError``.
     channel_name : str
         Prediction channel the eval scores.
+    positions : iterable of str, optional
+        Read only these positions, e.g. one a running predict finished after the
+        store-wide snapshot; each must exist (``KeyError`` otherwise). ``None`` reads
+        every position.
 
     Returns
     -------
@@ -404,26 +462,31 @@ def prediction_sources(plate_path: Path | str, channel_name: str) -> dict[str, d
     path = Path(plate_path)
     archive_ns = _archive_mtime_ns(path)
     with open_ome_zarr(path, mode="r") as plate:
-        return {
-            name: _position_source(path, position, channel_name, archive_ns) for name, position in plate.positions()
-        }
+        items = plate.positions() if positions is None else ((name, plate[name]) for name in positions)
+        return {name: _position_source(path, position, channel_name, archive_ns) for name, position in items}
 
 
-def prediction_source(plate_path: Path | str, position_name: str, channel_name: str) -> dict[str, Any]:
-    """Return the :func:`prediction_sources` entry of one position, read on its own.
+def source_predates(source: dict[str, Any], horizon_ns: int) -> bool:
+    """Return whether a :func:`prediction_sources` entry was written no later than *horizon_ns*.
 
-    For a position that appeared after the store-wide snapshot, e.g. one a running
-    predict finished while an ``io.exclude_fov_names`` eval was already open.
+    Dates caches recorded before sources existed, which carry only a time: a manifest
+    entry's ``built_at``, or a metrics sidecar's mtime. A position whose first stored
+    chunk (``written_ns``) is no newer than that time is verified; one with no stored
+    chunk cannot be dated and never is.
 
-    Raises
-    ------
-    KeyError
-        If the store has no such position.
+    Parameters
+    ----------
+    source : dict
+        One position's ``{"marker", "written_ns"}``.
+    horizon_ns : int
+        The legacy record's time, in ns since the epoch.
+
+    Returns
+    -------
+    bool
+        ``written_ns is not None and written_ns <= horizon_ns``.
     """
-    path = Path(plate_path)
-    archive_ns = _archive_mtime_ns(path)
-    with open_ome_zarr(path, mode="r") as plate:
-        return _position_source(path, plate[position_name], channel_name, archive_ns)
+    return source["written_ns"] is not None and source["written_ns"] <= horizon_ns
 
 
 def prediction_sources_sha256_12(sources: dict[str, dict[str, Any]]) -> str:
@@ -439,8 +502,7 @@ def prediction_sources_sha256_12(sources: dict[str, dict[str, Any]]) -> str:
     str
         First 12 hex characters of the digest.
     """
-    payload = json.dumps(sorted(sources.items()), sort_keys=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()[:12]
+    return json_sha256_12(sorted(sources.items()))
 
 
 def _read_position_channel0(plate_path: Path, pos_name: str, dtype: npt.DTypeLike) -> np.ndarray | None:
@@ -769,8 +831,7 @@ def encoder_config_sha256_12(encoder_cfg: dict[str, Any]) -> str:
 
     Keys are sorted so representation-equivalent configs produce the same hash.
     """
-    payload = json.dumps(encoder_cfg, sort_keys=True, default=str).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()[:12]
+    return json_sha256_12(encoder_cfg)
 
 
 def feature_slug(name: str) -> str:

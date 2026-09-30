@@ -200,19 +200,22 @@ def _identity_kwargs(models: EvalModels) -> dict[str, Any]:
     }
 
 
-def init_cache_contexts(config: DictConfig, models: EvalModels) -> tuple[Any, Any]:
+def init_cache_contexts(
+    config: DictConfig, models: EvalModels, *, prediction_snapshot: dict[str, dict[str, Any]] | None = None
+) -> tuple[Any, Any]:
     """Build ``(gt_ctx, pred_ctx)`` cache contexts using ``models``'s identity tags.
 
     Replaces the four-call-site duplication in ``evaluate_predictions``
     and ``_worker_setup`` where the same six kwargs flowed into
     ``init_cache_context(..., side="gt")`` then again into
-    ``init_cache_context(..., side="pred")``.
+    ``init_cache_context(..., side="pred")``. *prediction_snapshot* goes to the
+    prediction side only (see :func:`~dynacell.evaluation.pipeline_cache.init_cache_context`).
     """
     from dynacell.evaluation.pipeline_cache import init_cache_context
 
     kwargs = _identity_kwargs(models)
     gt_ctx = init_cache_context(config, side="gt", **kwargs)
-    pred_ctx = init_cache_context(config, side="pred", **kwargs)
+    pred_ctx = init_cache_context(config, side="pred", prediction_snapshot=prediction_snapshot, **kwargs)
     return gt_ctx, pred_ctx
 
 

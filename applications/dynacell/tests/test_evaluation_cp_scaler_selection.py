@@ -80,7 +80,7 @@ def test_grouped_conditions_each_get_their_own_scaler(tmp_path: Path, monkeypatc
     seen: dict[str, object] = {}
     stamped: dict[str, str | None] = {}
 
-    def _fake_evaluate_predictions(cfg, *, models, cp_space):
+    def _fake_evaluate_predictions(cfg, *, models, cp_space, prediction_snapshot):
         seen[cfg.benchmark.dataset_ref.dataset] = cp_space
         return [], [], []
 
@@ -139,7 +139,9 @@ def test_grouped_probe_failure_on_the_cp_reference_propagates(tmp_path: Path, mo
     )
     monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
     monkeypatch.setattr(pipeline, "load_eval_models", lambda cfg: object())
-    monkeypatch.setattr(pipeline, "evaluate_predictions", lambda cfg, *, models, cp_space: ([], [], []))
+    monkeypatch.setattr(
+        pipeline, "evaluate_predictions", lambda cfg, *, models, cp_space, prediction_snapshot: ([], [], [])
+    )
     monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
     with pytest.raises(KeyError, match="reference_path"):
         pipeline.evaluate_predictions_grouped(config)
@@ -198,7 +200,10 @@ def test_real_dataset_names_are_not_swapped(tmp_path: Path, monkeypatch) -> None
     monkeypatch.setattr(
         pipeline,
         "evaluate_predictions",
-        lambda cfg, *, models, cp_space: seen.__setitem__(cfg.benchmark.dataset_ref.dataset, cp_space) or ([], [], []),
+        lambda cfg, *, models, cp_space, prediction_snapshot: seen.__setitem__(
+            cfg.benchmark.dataset_ref.dataset, cp_space
+        )
+        or ([], [], []),
     )
     monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
     pipeline.evaluate_predictions_grouped(grouped)

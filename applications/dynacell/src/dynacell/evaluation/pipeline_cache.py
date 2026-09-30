@@ -34,13 +34,13 @@ from dynacell.evaluation.cache import (
     feature_slug,
     load_manifest,
     open_features_group,
-    prediction_source,
     prediction_sources,
     read_features_from_group,
     read_instance_mask,
     read_mask,
     save_manifest,
     seed_cache_identity,
+    source_predates,
     write_features_to_group,
     write_instance_mask,
     write_mask,
@@ -115,9 +115,6 @@ class _CacheContext:
     celldino_preprocess_version: str | None = None
     morphem_preprocess_version: str | None = None
     prediction_sources: dict[str, dict[str, Any]] | None = None
-    # Store and channel the sources come from, to read a position added after the snapshot.
-    prediction_plate_path: str | None = None
-    prediction_channel_name: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
     # Positions this process recorded a source for, per manifest path, since the last flush.
     _written_sources: dict[tuple[str, ...], set[str]] = field(default_factory=dict, init=False, repr=False)
@@ -200,6 +197,7 @@ def init_cache_context(
     dynaclr_preprocess_version: str | None = None,
     celldino_preprocess_version: str | None = None,
     morphem_preprocess_version: str | None = None,
+    prediction_snapshot: dict[str, dict[str, Any]] | None = None,
 ) -> _CacheContext:
     """Open and validate the *side*-specific artifact cache for the run.
 
@@ -234,6 +232,11 @@ def init_cache_context(
         recomputed with the current preprocessing. Missing values (e.g.
         the kind isn't loaded, or the cached manifest pre-dates version
         tracking) are treated as "no constraint" — no auto-invalidation.
+    prediction_snapshot
+        :func:`~dynacell.evaluation.cache.prediction_sources` of ``io.pred_path`` the
+        caller already read (and hashed for the metrics stamp); the prediction side
+        copies it instead of reading the store again. ``None`` reads it here. Ignored
+        on the GT side.
 
     Notes
     -----
@@ -389,16 +392,22 @@ def init_cache_context(
         cell_segmentation_path=cell_seg_path,
     )
 
+    # Read once, before any artifact is built: a position written by this run is
+    # recorded with its source as it stood when the run started. A caller's snapshot is
+    # copied, since positions read on demand are added to it.
+    sources = None
+    if side == "pred":
+        sources = (
+            dict(prediction_snapshot)
+            if prediction_snapshot is not None
+            else prediction_sources(plate_path, channel_name)
+        )
     ctx = _CacheContext(
         paths=paths,
         manifest=manifest,
         require_complete=require_complete_requested,
         side=side,
-        # Read once, before any artifact is built: a position written by this run is
-        # recorded with its source as it stood when the run started.
-        prediction_sources=prediction_sources(plate_path, channel_name) if side == "pred" else None,
-        prediction_plate_path=plate_path if side == "pred" else None,
-        prediction_channel_name=channel_name if side == "pred" else None,
+        prediction_sources=sources,
         **base_kwargs,
     )
     _auto_invalidate_on_artifact_param_mismatch(ctx)
@@ -521,8 +530,9 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
     """
     if not ctx.enabled:
         return
-    for kind, artifact_label, entry, current, numeric_keys in _artifact_checks(ctx):
-        mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
+    for kind, artifact_label, keys in _artifact_entries(ctx):
+        current, numeric_keys = _artifact_identity(ctx, kind)
+        mismatches = diff_artifact_params(_manifest_entry(ctx, keys), current, numeric_keys=numeric_keys)
         if not mismatches:
             continue
         details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
@@ -543,103 +553,92 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         )
 
 
-def _artifact_checks(
-    ctx: _CacheContext,
-) -> list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]]:
-    """Return one ``(kind, label, entry, current identity, numeric keys)`` per artifact family this run reads.
-
-    ``entry`` is the family's manifest entry under its current key (``None`` when
-    absent); ``current`` is the identity this run would write, compared by
-    :func:`diff_artifact_params` over ``numeric keys`` with a tolerance.
-    """
-    artifacts = ctx.manifest.get("artifacts", {})
-
-    checks: list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
-        (
-            # Key by ``mask_stem`` (= ``{target}__{backend}`` for non-default
-            # backends), the same stem as the cache plate path, so masks from
-            # different backends get separate manifest entries instead of
-            # clobbering one ``organelle_masks[target_name]`` slot. ``backend`` is
-            # encoded in the stem itself, so it is intentionally NOT a param in
-            # the identity dict below (a backend switch lands on a different
-            # entry/plate — there is nothing stale to invalidate, and adding it
-            # would spuriously invalidate pre-existing caches that predate the
-            # field).
-            "masks",
-            f"{ctx.label_prefix}organelle_masks[{ctx.mask_stem}]",
-            artifacts.get("organelle_masks", {}).get(ctx.mask_stem),
-            {"target_name": ctx.target_name, **ctx.source_tag},
-            (),
-        ),
-        (
-            "cp",
-            f"{ctx.label_prefix}cp_features",
-            artifacts.get("cp_features"),
-            _cp_identity(ctx),
-            ("spacing", "cp_norm_p_lo", "cp_norm_p_hi"),
-        ),
+def _artifact_entries(ctx: _CacheContext) -> list[tuple[str, str, list[str]]]:
+    """Return one ``(kind, label, manifest keys)`` per artifact family this run reads."""
+    families = [
+        # Key by ``mask_stem`` (= ``{target}__{backend}`` for non-default
+        # backends), the same stem as the cache plate path, so masks from
+        # different backends get separate manifest entries instead of
+        # clobbering one ``organelle_masks[target_name]`` slot.
+        ("masks", f"{ctx.label_prefix}organelle_masks[{ctx.mask_stem}]", ["organelle_masks", ctx.mask_stem]),
+        ("cp", f"{ctx.label_prefix}cp_features", ["cp_features"]),
     ]
     if ctx.compute_instance_ap:
-        stem = f"{ctx.target_name}__{ctx.backend}"
-        checks.append(
-            (
-                "instances",
-                f"{ctx.label_prefix}instance_masks[{stem}]",
-                artifacts.get("instance_masks", {}).get(stem),
-                _instance_identity(ctx),
-                (),
-            )
-        )
+        keys = _instance_keys(ctx)
+        families.append(("instances", f"{ctx.label_prefix}instance_masks[{keys[1]}]", keys))
     if ctx.dinov3_model_name is not None:
-        checks.append(
+        families.append(
             (
                 "dinov3",
                 f"{ctx.label_prefix}dinov3_features[{ctx.dinov3_model_name}]",
-                artifacts.get("dinov3_features", {}).get(feature_slug(ctx.dinov3_model_name)),
-                {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
-                (),
+                ["dinov3_features", feature_slug(ctx.dinov3_model_name)],
             )
         )
     if ctx.dynaclr_ckpt_sha12 is not None:
-        checks.append(
+        families.append(
             (
                 "dynaclr",
                 f"{ctx.label_prefix}dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
-                artifacts.get("dynaclr_features", {}).get(ctx.dynaclr_ckpt_sha12),
-                {
-                    "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
-                    "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
-                    "patch_size": ctx.patch_size,
-                    **ctx.source_tag,
-                },
-                (),
+                ["dynaclr_features", ctx.dynaclr_ckpt_sha12],
             )
         )
     if ctx.celldino_weights_sha12 is not None:
-        checks.append(
+        families.append(
             (
                 "celldino",
                 f"{ctx.label_prefix}celldino_features[{ctx.celldino_weights_sha12}]",
-                artifacts.get("celldino_features", {}).get(ctx.celldino_weights_sha12),
-                {
-                    "weights_sha256_12": ctx.celldino_weights_sha12,
-                    "patch_size": ctx.patch_size,
-                    **ctx.source_tag,
-                },
-                (),
+                ["celldino_features", ctx.celldino_weights_sha12],
             )
         )
     if ctx.morphem_model_name is not None:
-        checks.append(
+        families.append(
             (
                 "morphem",
                 f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]",
-                artifacts.get("morphem_features", {}).get(feature_slug(ctx.morphem_model_name)),
-                {"model_name": ctx.morphem_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
-                (),
+                ["morphem_features", feature_slug(ctx.morphem_model_name)],
             )
         )
-    return checks
+    return families
+
+
+def _artifact_identity(ctx: _CacheContext, kind: str) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Return the identity a *kind* entry must record, and the keys compared with a numeric tolerance.
+
+    The masks identity leaves out ``backend``: it is encoded in the entry's stem
+    (see :func:`_artifact_entries`), so a backend switch lands on a different
+    entry and plate -- there is nothing stale to invalidate, and adding it would
+    spuriously invalidate pre-existing caches that predate the field.
+    """
+    if kind == "masks":
+        return {"target_name": ctx.target_name, **ctx.source_tag}, ()
+    if kind == "cp":
+        return _cp_identity(ctx), ("spacing", "cp_norm_p_lo", "cp_norm_p_hi")
+    if kind == "instances":
+        return _instance_identity(ctx), ()
+    if kind == "dinov3":
+        return {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag}, ()
+    if kind == "dynaclr":
+        return {
+            "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
+            "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
+            "patch_size": ctx.patch_size,
+            **ctx.source_tag,
+        }, ()
+    if kind == "celldino":
+        return {"weights_sha256_12": ctx.celldino_weights_sha12, "patch_size": ctx.patch_size, **ctx.source_tag}, ()
+    if kind == "morphem":
+        return {"model_name": ctx.morphem_model_name, "patch_size": ctx.patch_size, **ctx.source_tag}, ()
+    raise ValueError(f"Unknown artifact kind: {kind!r}")
+
+
+def _manifest_entry(ctx: _CacheContext, keys: list[str]) -> Any:
+    """Return the manifest value at *keys* under ``artifacts``, or ``None`` when absent."""
+    entry: Any = ctx.manifest.get("artifacts", {})
+    for key in keys:
+        entry = entry.get(key)
+        if entry is None:
+            return None
+    return entry
 
 
 def _check_prediction_sources(ctx: _CacheContext) -> None:
@@ -666,28 +665,31 @@ def _check_prediction_sources(ctx: _CacheContext) -> None:
     ``built_at`` is the time of the family's LAST write, so upgrading after a partial
     write of this run would move it past the store's date. The same imprecision remains
     inside the legacy entry -- a position rebuilt after a re-predict moves ``built_at``
-    past positions still holding the old prediction -- and is accepted: a production
-    audit (2026-09-30; 1304 grouped store/cache pairs, dated per chunk) found every
-    legacy cache fresh except the 31 already being recomputed.
+    past positions still holding the old prediction -- so legacy dating is
+    approximate. It is accepted because legacy caches were audited against their
+    stores' chunks and the stale ones recomputed.
 
-    Checks the families :func:`_artifact_checks` lists for this run. Entries with no
+    Checks the families :func:`_artifact_entries` lists for this run. Entries with no
     identity yet (absent, or bookkeeping only) are left to the param check.
     """
     if not ctx.enabled or ctx.prediction_sources is None:
         return
-    for _, artifact_label, entry, _, _ in _artifact_checks(ctx):
+    for _, artifact_label, keys in _artifact_entries(ctx):
+        entry = _manifest_entry(ctx, keys)
         if not isinstance(entry, dict) or not (entry.keys() - _BOOKKEEPING_KEYS):
             continue
         if "sources" not in entry:
             built_at = entry.get("built_at")
-            horizon_ns = None if built_at is None else round(datetime.fromisoformat(str(built_at)).timestamp() * 1e9)
-            entry["sources"] = {
-                pos: dict(source)
-                for pos, source in ctx.prediction_sources.items()
-                if source["written_ns"] is not None and horizon_ns is not None and source["written_ns"] <= horizon_ns
-            }
+            entry["sources"] = {}
+            if built_at is not None:
+                horizon_ns = round(datetime.fromisoformat(str(built_at)).timestamp() * 1e9)
+                entry["sources"] = {
+                    pos: dict(source)
+                    for pos, source in ctx.prediction_sources.items()
+                    if source_predates(source, horizon_ns)
+                }
             ctx.mark_manifest_dirty()
-        recorded = entry["sources"] if isinstance(entry["sources"], dict) else {}
+        recorded = entry["sources"]
         stale = [pos for pos in entry.get("positions", []) if recorded.get(pos) != ctx.prediction_sources.get(pos)]
         if stale:
             warnings.warn(
@@ -697,16 +699,15 @@ def _check_prediction_sources(ctx: _CacheContext) -> None:
             )
 
 
-def _source_current(ctx: _CacheContext, entry: dict[str, Any], pos_name: str) -> bool:
-    """Return whether *entry*'s cached *pos_name* was built from the prediction the store holds now.
+def _source_current(ctx: _CacheContext, keys: list[str], pos_name: str) -> bool:
+    """Return whether the entry at *keys* caches *pos_name* from the prediction the store holds now.
 
     Always true on the GT side. On the prediction side a position with no recorded
     source is not current.
     """
     if ctx.prediction_sources is None:
         return True
-    sources = entry.get("sources") if isinstance(entry, dict) else None
-    recorded = sources.get(pos_name) if isinstance(sources, dict) else None
+    recorded = _manifest_leaf(ctx, keys).get("sources", {}).get(pos_name)
     return recorded is not None and recorded == _prediction_source(ctx, pos_name)
 
 
@@ -715,11 +716,14 @@ def _prediction_source(ctx: _CacheContext, pos_name: str) -> dict[str, Any]:
 
     A running predict can finish a position between :func:`init_cache_context` and the
     walk that lists it (an ``io.exclude_fov_names`` eval over a partial store). The
-    on-demand read is cached; a position the store does not have raises ``KeyError``.
+    on-demand read comes from the store and channel the manifest's ``pred`` identity
+    records (seeded and checked by :func:`init_cache_context`) and is cached; a
+    position the store does not have raises ``KeyError``.
     """
     source = ctx.prediction_sources.get(pos_name)
     if source is None:
-        source = prediction_source(ctx.prediction_plate_path, pos_name, ctx.prediction_channel_name)
+        pred = ctx.manifest["pred"]
+        source = prediction_sources(pred["plate_path"], pred["channel_name"], [pos_name])[pos_name]
         ctx.prediction_sources[pos_name] = source
     return source
 
@@ -788,23 +792,30 @@ def _record_position(ctx: _CacheContext, keys: list[str], pos_name: str) -> None
     The source (prediction side only) is what :func:`_source_current` compares on the
     next read, so it is recorded for exactly the position written.
     """
-    _add_position(ctx.manifest, keys, pos_name)
+    leaf = _manifest_leaf(ctx, keys)
+    positions = leaf.setdefault("positions", [])
+    if pos_name not in positions:
+        positions.append(pos_name)
     if ctx.prediction_sources is None:
         return
-    _manifest_leaf(ctx, keys).setdefault("sources", {})[pos_name] = dict(_prediction_source(ctx, pos_name))
+    leaf.setdefault("sources", {})[pos_name] = dict(_prediction_source(ctx, pos_name))
     ctx._written_sources.setdefault(tuple(keys), set()).add(pos_name)
 
 
-def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
-    """Append *pos_name* to an artifact entry's ``positions`` list if absent."""
-    current = manifest.get("artifacts", {})
-    for key in keys:
-        current = current.get(key, {})
-        if not isinstance(current, dict):
-            return
-    positions = current.setdefault("positions", [])
-    if pos_name not in positions:
-        positions.append(pos_name)
+def _record_write(ctx: _CacheContext, keys: list[str], entry: dict[str, Any], pos_name: str) -> None:
+    """Record this run's write of *pos_name* to the artifact at *keys*: its identity *entry*, the position, its source.
+
+    The identity follows :func:`_update_manifest_entry` (kept as recorded on an excluded
+    walk); the position and its source are recorded by :func:`_record_position`.
+    """
+    _update_manifest_entry(ctx.manifest, keys, entry, preserve_identity=ctx.excluded_walk)
+    _record_position(ctx, keys, pos_name)
+    ctx.mark_manifest_dirty()
+
+
+def _instance_keys(ctx: _CacheContext) -> list[str]:
+    """Manifest keys of this run's instance-label entry: ``instance_masks`` / ``{target}__{backend}``."""
+    return ["instance_masks", f"{ctx.target_name}__{ctx.backend}"]
 
 
 def _check_identity_bootstrap(
@@ -963,6 +974,7 @@ def _fov_masks(
 
     t_count = image_arr.shape[0]
     channel_name = _MASK_CHANNEL_BY_SIDE[ctx.side]
+    keys = ["organelle_masks", manifest_key]
 
     def _compute_masks() -> np.ndarray:
         return np.stack(
@@ -987,23 +999,13 @@ def _fov_masks(
             )
         return arr
 
-    def _record_write() -> None:
-        _update_manifest_entry(
-            ctx.manifest,
-            ["organelle_masks", manifest_key],
-            manifest_entry,
-            preserve_identity=ctx.excluded_walk,
-        )
-        _record_position(ctx, ["organelle_masks", manifest_key], pos_name)
-        ctx.mark_manifest_dirty()
-
     def _write_masks(masks: np.ndarray) -> None:
         write_mask(ctx.paths, ctx.target_name, pos_name, masks, channel_name=channel_name, backend=ctx.backend)
 
     def _check_bootstrap() -> None:
         _check_identity_bootstrap(
             ctx,
-            ["organelle_masks", manifest_key],
+            keys,
             artifact_label=artifact_label,
             force_key=force_key,
             writing={pos_name},
@@ -1021,11 +1023,10 @@ def _fov_masks(
             _check_bootstrap()
             masks = _compute_masks()
             _write_masks(masks)
-            _record_write()
+            _record_write(ctx, keys, manifest_entry, pos_name)
         return masks
 
-    # A cached prediction-side position built from another prediction is a miss.
-    current = _source_current(ctx, _manifest_leaf(ctx, ["organelle_masks", manifest_key]), pos_name)
+    current = _source_current(ctx, keys, pos_name)
 
     # Fast-path: cache hit without taking a lock.
     cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
@@ -1043,7 +1044,7 @@ def _fov_masks(
         _check_bootstrap()
         masks = _compute_masks()
         _write_masks(masks)
-        _record_write()
+        _record_write(ctx, keys, manifest_entry, pos_name)
     return masks
 
 
@@ -1194,8 +1195,8 @@ def _fov_instances(
     """
     t_count = ref_stack.shape[0]
     force_key = f"{ctx.side}_instances"
-    stem = f"{ctx.target_name}__{ctx.backend}"
-    manifest_keys = ["instance_masks", stem]
+    manifest_keys = _instance_keys(ctx)
+    stem = manifest_keys[1]
     artifact_label = f"{ctx.label_prefix}instance_masks[{stem}]"
     manifest_entry = {
         "path": f"instance_masks/{stem}.zarr",
@@ -1238,11 +1239,6 @@ def _fov_instances(
             stored=lambda: _plate_positions(ctx.paths.instance_mask_plate(ctx.target_name, ctx.backend)),
         )
 
-    def _record_write() -> None:
-        _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, manifest_keys, pos_name)
-        ctx.mark_manifest_dirty()
-
     if not ctx.enabled:
         return _compute()
 
@@ -1252,10 +1248,10 @@ def _fov_instances(
             _check_bootstrap()
             labels = _compute()
             _write(labels)
-            _record_write()
+            _record_write(ctx, manifest_keys, manifest_entry, pos_name)
         return labels
 
-    current = _source_current(ctx, _manifest_leaf(ctx, manifest_keys), pos_name)
+    current = _source_current(ctx, manifest_keys, pos_name)
     cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
     if cached is not None:
         return _validate_cached_shape(cached)
@@ -1268,7 +1264,7 @@ def _fov_instances(
         _check_bootstrap()
         labels = _compute()
         _write(labels)
-        _record_write()
+        _record_write(ctx, manifest_keys, manifest_entry, pos_name)
     return labels
 
 
@@ -1283,7 +1279,7 @@ def instance_cache_hit(ctx: _CacheContext, pos_name: str) -> bool:
     """
     if not ctx.enabled or ctx.force[f"{ctx.side}_instances"]:
         return False
-    if not _source_current(ctx, _manifest_leaf(ctx, ["instance_masks", f"{ctx.target_name}__{ctx.backend}"]), pos_name):
+    if not _source_current(ctx, _instance_keys(ctx), pos_name):
         return False
     return read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) is not None
 
@@ -1452,12 +1448,11 @@ def _load_or_compute_feature_timepoints(
         return [np.asarray(compute_fn(t)) for t in range(t_count)], False
 
     force_recompute = ctx.force[force_key]
-    # A cached prediction-side position built from another prediction is read as a miss.
-    reuse = not force_recompute and _source_current(ctx, _manifest_leaf(ctx, manifest_keys), pos_name)
+    reuse = not force_recompute and _source_current(ctx, manifest_keys, pos_name)
     per_t: list[np.ndarray | None] = [None] * t_count
 
-    # Lockless prefetch pass. Skipped under force_recompute because we'll
-    # rewrite every timepoint anyway.
+    # Lockless prefetch pass. Skipped when the position is rewritten anyway: forced,
+    # or cached from another prediction.
     if reuse:
         with open_features_group(ctx.paths, kind, mode="r", **cache_kwargs) as group:
             if group is not None:
@@ -1627,9 +1622,7 @@ def fov_cp_features(
             # have their names read back by cached_cp_feature_names.
             "cp_feature_names": list(names),
         }
-        _update_manifest_entry(ctx.manifest, ["cp_features"], entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, ["cp_features"], pos_name)
-        ctx.mark_manifest_dirty()
+        _record_write(ctx, ["cp_features"], entry, pos_name)
 
     return per_t
 
@@ -1767,9 +1760,7 @@ def _fov_deep_features(
     )
 
     if ctx.enabled and manifest_updated:
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, manifest_keys, pos_name)
-        ctx.mark_manifest_dirty()
+        _record_write(ctx, manifest_keys, entry, pos_name)
 
     return per_t
 
@@ -1787,7 +1778,7 @@ def flush_manifest(ctx: _CacheContext) -> None:
         return
     with _pos_write_lock(ctx, "manifest", "global"):
         on_disk = load_manifest(ctx.paths)
-        merged = _merge_manifests(on_disk, ctx.manifest, written=ctx._written_sources)
+        merged = _merge_manifests(on_disk, ctx.manifest, ctx._written_sources)
         save_manifest(ctx.paths, merged)
         ctx.manifest = merged
         ctx._written_sources = {}
@@ -1820,10 +1811,7 @@ def _merge_entry(on_disk: dict[str, Any], in_memory: dict[str, Any], written: se
 
 
 def _merge_manifests(
-    on_disk: dict[str, Any],
-    in_memory: dict[str, Any],
-    *,
-    written: dict[tuple[str, ...], set[str]] | None = None,
+    on_disk: dict[str, Any], in_memory: dict[str, Any], written: dict[tuple[str, ...], set[str]]
 ) -> dict[str, Any]:
     """Merge an in-memory manifest on top of the on-disk one, unioning per-position bookkeeping.
 
@@ -1833,7 +1821,6 @@ def _merge_manifests(
     (see :func:`_merge_entry`); *written* maps each entry's manifest path to the
     positions this process wrote since its last flush.
     """
-    written = written or {}
     merged = {**on_disk, **{k: v for k, v in in_memory.items() if k != "artifacts"}}
     merged["artifacts"] = dict(on_disk.get("artifacts", {}))
     in_artifacts = in_memory.get("artifacts", {})
@@ -1905,8 +1892,7 @@ class DeepFeatureBatcher:
         out: dict[FeatureKind, list[int]] = {}
         for kind in self.extractors:
             manifest_keys = _deep_feature_cache_metadata(self.ctx, kind)[3]
-            # A prediction-side position built from another prediction is rebuilt whole.
-            stale = not _source_current(self.ctx, _manifest_leaf(self.ctx, manifest_keys), pos_name)
+            stale = not _source_current(self.ctx, manifest_keys, pos_name)
             if self._force_snapshot[kind] or stale:
                 out[kind] = list(range(t_count))
                 continue
@@ -2024,9 +2010,7 @@ def _flush_kind(
         ):
             for t, chunk in ts_chunks:
                 write_features_to_group(group, pos_name, t, chunk)
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, manifest_keys, pos_name)
-        ctx.mark_manifest_dirty()
+        _record_write(ctx, manifest_keys, entry, pos_name)
     # Manifest persistence is deferred to the caller (after batcher.drain()).
     # Zarr slot writes above are durable per-slot; on resume the lockless
     # prefetch finds them whether or not the manifest is up to date.

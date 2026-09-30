@@ -50,6 +50,9 @@ gate that its rows describe an older prediction.
 import json
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
+
+from dynacell.evaluation.cache import prediction_sources_sha256_12, source_predates
 
 #: The ``cubic`` version this repo is built against. Must equal the pin in
 #: ``applications/dynacell/pyproject.toml``; ``provenance_test.py`` asserts
@@ -145,7 +148,7 @@ def write_metrics_provenance(
     *,
     cp_reference_sha256: str | None,
     cp_space_sha256: str | None,
-    prediction_sources_sha256_12: str,
+    prediction_digest: str,
 ) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
@@ -160,10 +163,11 @@ def write_metrics_provenance(
         ``DatasetCPSpace.binding_sha256`` of the space the run scored in: the
         reference bound to one dataset and the GT cells it was fit on. This is the
         value cache reuse compares. ``None`` exactly when ``cp_reference_sha256`` is.
-    prediction_sources_sha256_12 : str
-        Digest of the per-position sources of the prediction the metrics were scored
-        on, taken before scoring; the final-metrics cache gate compares it with the
-        store's current one.
+    prediction_digest : str
+        :func:`~dynacell.evaluation.cache.prediction_sources_sha256_12` of the
+        prediction the metrics were scored on, taken before scoring and stored as
+        ``prediction_sources_sha256_12``; the final-metrics cache gate compares it with
+        the store's current one.
 
     Raises
     ------
@@ -176,13 +180,15 @@ def write_metrics_provenance(
         "versions": installed_versions(),
         "cp_reference_sha256": cp_reference_sha256,
         "cp_space_sha256": cp_space_sha256,
-        "prediction_sources_sha256_12": prediction_sources_sha256_12,
+        "prediction_sources_sha256_12": prediction_digest,
     }
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
-def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -> bool:
-    """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference.
+def metrics_provenance_matches(
+    save_dir: Path, *, cp_space_sha256: str | None, prediction_sources: dict[str, dict[str, Any]]
+) -> bool:
+    """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference, from this prediction.
 
     A missing sidecar returns False. Every cache written before this stamp
     existed predates the fix and is exactly the ambiguous case that has to be
@@ -200,13 +206,25 @@ def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -
         reused and the recorded hash (or its absence) is irrelevant. When given, a
         sidecar without a ``cp_space_sha256`` (written before the binding existed)
         never matches.
+    prediction_sources : dict
+        :func:`~dynacell.evaluation.cache.prediction_sources` of the store the current
+        run would score. A re-predict writes into the same path, so the sidecar's
+        ``prediction_sources_sha256_12`` must equal their digest. A sidecar written
+        before that field existed is dated instead: reusable only when every position
+        predates it (:func:`~dynacell.evaluation.cache.source_predates` against its
+        mtime); a blank position (no stored chunk) cannot be dated and forces one
+        recompute. That misses one legacy case: metrics saved after a re-predict but
+        scored from pred caches it had left stale. The grouped leaves'
+        ``force_recompute.final_metrics: true`` covers it, and stale legacy caches were
+        audited and recomputed.
 
     Returns
     -------
     bool
         True when the recorded ``cubic`` version equals the installed one (or both
-        are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`)
-        and, if ``cp_space_sha256`` is given, the recorded binding equals it.
+        are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`),
+        if ``cp_space_sha256`` is given the recorded binding equals it, and the
+        prediction check above passes.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -217,6 +235,10 @@ def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -
     accepted = _accepted_cubic_versions()
     if recorded != installed and not (recorded in accepted and installed in accepted):
         return False
-    if cp_space_sha256 is None:
-        return True
-    return "cp_space_sha256" in payload and payload["cp_space_sha256"] == cp_space_sha256
+    if cp_space_sha256 is not None and payload.get("cp_space_sha256") != cp_space_sha256:
+        return False
+    digest = payload.get("prediction_sources_sha256_12")
+    if digest is not None:
+        return digest == prediction_sources_sha256_12(prediction_sources)
+    saved_ns = path.stat().st_mtime_ns
+    return all(source_predates(source, saved_ns) for source in prediction_sources.values())
