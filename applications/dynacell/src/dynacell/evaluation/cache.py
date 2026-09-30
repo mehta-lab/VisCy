@@ -39,7 +39,36 @@ FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
 # the pure-Python ones. They are absent only from a PyYAML built without libyaml,
 # which then falls back to the pure-Python classes.
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-_YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+
+#: YAML 1.1 bool spellings that ``OmegaConf.save`` quotes.
+_OMEGACONF_BOOLS = frozenset(
+    "y Y yes Yes YES n N no No NO true True TRUE false False FALSE on On ON off Off OFF".split()
+)
+
+
+class _ManifestDumper(getattr(yaml, "CSafeDumper", yaml.SafeDumper)):
+    """libyaml dumper that writes what ``OmegaConf.save`` wrote: no anchors, str quoted like OmegaConf.
+
+    OmegaConf's loader reads an unquoted ``4e1234567890`` (a possible hex sha12 marker)
+    as a float, so a str that parses as a bool, int or float is single-quoted, exactly
+    as OmegaConf's own representer does. Entries sharing one object (``ctx.spacing``)
+    are written out in full rather than as ``&id001`` aliases.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
+    try:
+        float(data)
+        quoted = True
+    except ValueError:
+        quoted = data in _OMEGACONF_BOOLS
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="'" if quoted else None)
+
+
+_ManifestDumper.add_representer(str, _represent_str)
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -139,7 +168,7 @@ def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
     """Persist *manifest* as YAML under *paths.manifest*, creating parents."""
     paths.root.mkdir(parents=True, exist_ok=True)
     with open(paths.manifest, "w") as f:
-        yaml.dump(manifest, f, Dumper=_YAML_DUMPER, sort_keys=False)
+        yaml.dump(manifest, f, Dumper=_ManifestDumper, sort_keys=False, allow_unicode=True)
 
 
 def check_cache_identity(

@@ -11,6 +11,8 @@ pytest.importorskip("zarr")
 pytest.importorskip("iohub")
 pytest.importorskip("omegaconf")
 
+from omegaconf import OmegaConf  # noqa: E402
+
 from dynacell.evaluation.cache import (  # noqa: E402
     CACHE_SCHEMA_VERSION,
     StaleCacheError,
@@ -72,6 +74,37 @@ def test_save_and_load_manifest_roundtrip(tmp_path: Path) -> None:
     save_manifest(paths, manifest)
     loaded = load_manifest(paths)
     assert loaded == manifest
+
+
+def test_save_manifest_writes_what_omegaconf_wrote(tmp_path: Path) -> None:
+    """The libyaml writer matches ``OmegaConf.save`` byte for byte, and OmegaConf reads its output back.
+
+    The cases are the ones libyaml's plain SafeDumper gets wrong: a hex sha12 marker that
+    OmegaConf's loader parses as a float, bool and int spellings, non-ASCII text, a
+    timestamp-like str, and one list object shared by two entries (aliases).
+    """
+    spacing = [0.29, 0.108, 0.108]
+    manifest = {
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+        "pred": {"plate_path": "/data/café/pred.zarr", "channel_name": "y"},
+        "artifacts": {
+            "cp_features": {"spacing": spacing, "built_at": "2026-09-30T19:44:54+00:00"},
+            "organelle_masks": {"er": {"spacing": spacing, "threshold": "1e-3"}},
+            "dinov3_features": {
+                "m": {
+                    "sources": {
+                        "A/1/0": {"marker": "4e1234567890", "written_ns": 1},
+                        "A/1/1": {"marker": "012345678901"},
+                    }
+                }
+            },
+        },
+    }
+    save_manifest(paths := cache_paths(tmp_path / "libyaml"), manifest)
+    OmegaConf.save(OmegaConf.create(manifest), reference := tmp_path / "omegaconf.yaml")
+    assert paths.manifest.read_bytes() == reference.read_bytes()
+    assert OmegaConf.to_container(OmegaConf.load(paths.manifest)) == manifest
+    assert load_manifest(paths) == {**manifest, "gt": None, "cell_segmentation": None}
 
 
 def test_check_cache_identity_version_mismatch(tmp_path: Path) -> None:
