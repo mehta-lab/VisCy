@@ -40,6 +40,7 @@ from dynacell.evaluation.cache import (
     read_mask,
     save_manifest,
     seed_cache_identity,
+    source_predates,
     write_features_to_group,
     write_instance_mask,
     write_mask,
@@ -515,8 +516,9 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
     """
     if not ctx.enabled:
         return
-    for kind, artifact_label, entry, current, numeric_keys in _artifact_checks(ctx):
-        mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
+    for kind, artifact_label, keys in _artifact_entries(ctx):
+        current, numeric_keys = _artifact_identity(ctx, kind)
+        mismatches = diff_artifact_params(_manifest_entry(ctx, keys), current, numeric_keys=numeric_keys)
         if not mismatches:
             continue
         details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
@@ -537,103 +539,92 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         )
 
 
-def _artifact_checks(
-    ctx: _CacheContext,
-) -> list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]]:
-    """Return one ``(kind, label, entry, current identity, numeric keys)`` per artifact family this run reads.
-
-    ``entry`` is the family's manifest entry under its current key (``None`` when
-    absent); ``current`` is the identity this run would write, compared by
-    :func:`diff_artifact_params` over ``numeric keys`` with a tolerance.
-    """
-    artifacts = ctx.manifest.get("artifacts", {})
-
-    checks: list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
-        (
-            # Key by ``mask_stem`` (= ``{target}__{backend}`` for non-default
-            # backends), the same stem as the cache plate path, so masks from
-            # different backends get separate manifest entries instead of
-            # clobbering one ``organelle_masks[target_name]`` slot. ``backend`` is
-            # encoded in the stem itself, so it is intentionally NOT a param in
-            # the identity dict below (a backend switch lands on a different
-            # entry/plate — there is nothing stale to invalidate, and adding it
-            # would spuriously invalidate pre-existing caches that predate the
-            # field).
-            "masks",
-            f"{ctx.label_prefix}organelle_masks[{ctx.mask_stem}]",
-            artifacts.get("organelle_masks", {}).get(ctx.mask_stem),
-            {"target_name": ctx.target_name, **ctx.source_tag},
-            (),
-        ),
-        (
-            "cp",
-            f"{ctx.label_prefix}cp_features",
-            artifacts.get("cp_features"),
-            _cp_identity(ctx),
-            ("spacing", "cp_norm_p_lo", "cp_norm_p_hi"),
-        ),
+def _artifact_entries(ctx: _CacheContext) -> list[tuple[str, str, list[str]]]:
+    """Return one ``(kind, label, manifest keys)`` per artifact family this run reads."""
+    families = [
+        # Key by ``mask_stem`` (= ``{target}__{backend}`` for non-default
+        # backends), the same stem as the cache plate path, so masks from
+        # different backends get separate manifest entries instead of
+        # clobbering one ``organelle_masks[target_name]`` slot.
+        ("masks", f"{ctx.label_prefix}organelle_masks[{ctx.mask_stem}]", ["organelle_masks", ctx.mask_stem]),
+        ("cp", f"{ctx.label_prefix}cp_features", ["cp_features"]),
     ]
     if ctx.compute_instance_ap:
         stem = f"{ctx.target_name}__{ctx.backend}"
-        checks.append(
-            (
-                "instances",
-                f"{ctx.label_prefix}instance_masks[{stem}]",
-                artifacts.get("instance_masks", {}).get(stem),
-                _instance_identity(ctx),
-                (),
-            )
-        )
+        families.append(("instances", f"{ctx.label_prefix}instance_masks[{stem}]", ["instance_masks", stem]))
     if ctx.dinov3_model_name is not None:
-        checks.append(
+        families.append(
             (
                 "dinov3",
                 f"{ctx.label_prefix}dinov3_features[{ctx.dinov3_model_name}]",
-                artifacts.get("dinov3_features", {}).get(feature_slug(ctx.dinov3_model_name)),
-                {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
-                (),
+                ["dinov3_features", feature_slug(ctx.dinov3_model_name)],
             )
         )
     if ctx.dynaclr_ckpt_sha12 is not None:
-        checks.append(
+        families.append(
             (
                 "dynaclr",
                 f"{ctx.label_prefix}dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
-                artifacts.get("dynaclr_features", {}).get(ctx.dynaclr_ckpt_sha12),
-                {
-                    "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
-                    "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
-                    "patch_size": ctx.patch_size,
-                    **ctx.source_tag,
-                },
-                (),
+                ["dynaclr_features", ctx.dynaclr_ckpt_sha12],
             )
         )
     if ctx.celldino_weights_sha12 is not None:
-        checks.append(
+        families.append(
             (
                 "celldino",
                 f"{ctx.label_prefix}celldino_features[{ctx.celldino_weights_sha12}]",
-                artifacts.get("celldino_features", {}).get(ctx.celldino_weights_sha12),
-                {
-                    "weights_sha256_12": ctx.celldino_weights_sha12,
-                    "patch_size": ctx.patch_size,
-                    **ctx.source_tag,
-                },
-                (),
+                ["celldino_features", ctx.celldino_weights_sha12],
             )
         )
     if ctx.morphem_model_name is not None:
-        checks.append(
+        families.append(
             (
                 "morphem",
                 f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]",
-                artifacts.get("morphem_features", {}).get(feature_slug(ctx.morphem_model_name)),
-                {"model_name": ctx.morphem_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
-                (),
+                ["morphem_features", feature_slug(ctx.morphem_model_name)],
             )
         )
-    return checks
+    return families
+
+
+def _artifact_identity(ctx: _CacheContext, kind: str) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Return the identity a *kind* entry must record, and the keys compared with a numeric tolerance.
+
+    The masks identity leaves out ``backend``: it is encoded in the entry's stem
+    (see :func:`_artifact_entries`), so a backend switch lands on a different
+    entry and plate -- there is nothing stale to invalidate, and adding it would
+    spuriously invalidate pre-existing caches that predate the field.
+    """
+    if kind == "masks":
+        return {"target_name": ctx.target_name, **ctx.source_tag}, ()
+    if kind == "cp":
+        return _cp_identity(ctx), ("spacing", "cp_norm_p_lo", "cp_norm_p_hi")
+    if kind == "instances":
+        return _instance_identity(ctx), ()
+    if kind == "dinov3":
+        return {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag}, ()
+    if kind == "dynaclr":
+        return {
+            "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
+            "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
+            "patch_size": ctx.patch_size,
+            **ctx.source_tag,
+        }, ()
+    if kind == "celldino":
+        return {"weights_sha256_12": ctx.celldino_weights_sha12, "patch_size": ctx.patch_size, **ctx.source_tag}, ()
+    if kind == "morphem":
+        return {"model_name": ctx.morphem_model_name, "patch_size": ctx.patch_size, **ctx.source_tag}, ()
+    raise ValueError(f"Unknown artifact kind: {kind!r}")
+
+
+def _manifest_entry(ctx: _CacheContext, keys: list[str]) -> Any:
+    """Return the manifest value at *keys* under ``artifacts``, or ``None`` when absent."""
+    entry: Any = ctx.manifest.get("artifacts", {})
+    for key in keys:
+        entry = entry.get(key)
+        if entry is None:
+            return None
+    return entry
 
 
 def _check_prediction_sources(ctx: _CacheContext) -> None:
@@ -664,24 +655,27 @@ def _check_prediction_sources(ctx: _CacheContext) -> None:
     audit (2026-09-30; 1304 grouped store/cache pairs, dated per chunk) found every
     legacy cache fresh except the 31 already being recomputed.
 
-    Checks the families :func:`_artifact_checks` lists for this run. Entries with no
+    Checks the families :func:`_artifact_entries` lists for this run. Entries with no
     identity yet (absent, or bookkeeping only) are left to the param check.
     """
     if not ctx.enabled or ctx.prediction_sources is None:
         return
-    for _, artifact_label, entry, _, _ in _artifact_checks(ctx):
+    for _, artifact_label, keys in _artifact_entries(ctx):
+        entry = _manifest_entry(ctx, keys)
         if not isinstance(entry, dict) or not (entry.keys() - _BOOKKEEPING_KEYS):
             continue
         if "sources" not in entry:
             built_at = entry.get("built_at")
-            horizon_ns = None if built_at is None else round(datetime.fromisoformat(str(built_at)).timestamp() * 1e9)
-            entry["sources"] = {
-                pos: dict(source)
-                for pos, source in ctx.prediction_sources.items()
-                if source["written_ns"] is not None and horizon_ns is not None and source["written_ns"] <= horizon_ns
-            }
+            entry["sources"] = {}
+            if built_at is not None:
+                horizon_ns = round(datetime.fromisoformat(str(built_at)).timestamp() * 1e9)
+                entry["sources"] = {
+                    pos: dict(source)
+                    for pos, source in ctx.prediction_sources.items()
+                    if source_predates(source, horizon_ns)
+                }
             ctx.mark_manifest_dirty()
-        recorded = entry["sources"] if isinstance(entry["sources"], dict) else {}
+        recorded = entry["sources"]
         stale = [pos for pos in entry.get("positions", []) if recorded.get(pos) != ctx.prediction_sources.get(pos)]
         if stale:
             warnings.warn(

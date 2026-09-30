@@ -17,7 +17,7 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.cache import FeatureKind, prediction_sources, prediction_sources_sha256_12
+from dynacell.evaluation.cache import FeatureKind, prediction_sources, prediction_sources_sha256_12, source_predates
 from dynacell.evaluation.cp_reference import (
     CP_SIDECAR_FILENAME,
     DatasetCPSpace,
@@ -2106,8 +2106,8 @@ def _metrics_scored_current_prediction(config: DictConfig, save_dir: Path) -> bo
     recorded = json.loads(stamp.read_text()).get("prediction_sources_sha256_12")
     if recorded is not None:
         return recorded == prediction_sources_sha256_12(sources)
-    written = [source["written_ns"] for source in sources.values()]
-    return None not in written and max(written, default=0) <= stamp.stat().st_mtime_ns
+    saved_ns = stamp.stat().st_mtime_ns
+    return all(source_predates(source, saved_ns) for source in sources.values())
 
 
 def _load_cached_final_metrics(config: DictConfig) -> tuple[list, list, list]:

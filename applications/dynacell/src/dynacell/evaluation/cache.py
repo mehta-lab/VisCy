@@ -421,6 +421,29 @@ def prediction_sources(
         return {name: _position_source(path, position, channel_name, archive_ns) for name, position in items}
 
 
+def source_predates(source: dict[str, Any], horizon_ns: int) -> bool:
+    """Return whether a :func:`prediction_sources` entry was written no later than *horizon_ns*.
+
+    Dates caches recorded before sources existed, which carry only a time: a manifest
+    entry's ``built_at``, or a metrics sidecar's mtime. A position whose first stored
+    chunk (``written_ns``) is no newer than that time is verified; one with no stored
+    chunk cannot be dated and never is.
+
+    Parameters
+    ----------
+    source : dict
+        One position's ``{"marker", "written_ns"}``.
+    horizon_ns : int
+        The legacy record's time, in ns since the epoch.
+
+    Returns
+    -------
+    bool
+        ``written_ns is not None and written_ns <= horizon_ns``.
+    """
+    return source["written_ns"] is not None and source["written_ns"] <= horizon_ns
+
+
 def prediction_sources_sha256_12(sources: dict[str, dict[str, Any]]) -> str:
     """Return the sha256_12 over the name-sorted ``(position, source)`` pairs of :func:`prediction_sources`.
 
