@@ -167,6 +167,21 @@ def test_check_cubic_pin_accepts_the_declared_version():
     check_cubic_pin()
 
 
+def test_check_cubic_pin_accepts_an_equivalent_version(monkeypatch):
+    """A venv on a measured-equivalent version keeps working across the bump."""
+    equivalent = next(iter(CUBIC_VERSIONS_EQUIVALENT_TO[REQUIRED_CUBIC_VERSION]))
+    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: equivalent)
+    check_cubic_pin()
+
+
+def test_equivalent_environment_reuses_the_declared_pins_cache(tmp_path, monkeypatch):
+    """Equivalence is symmetric: an equivalent venv reuses a cache the declared pin wrote."""
+    _stamp_cubic(tmp_path, REQUIRED_CUBIC_VERSION, cp_space_sha256=None)
+    equivalent = next(iter(CUBIC_VERSIONS_EQUIVALENT_TO[REQUIRED_CUBIC_VERSION]))
+    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: equivalent)
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+
+
 def test_check_cubic_pin_rejects_a_mismatch(monkeypatch):
     monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: "0.8.0a2")
     with pytest.raises(RuntimeError, match="not comparable across"):

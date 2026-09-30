@@ -22,9 +22,9 @@ every ``SI_*``, ``PerCell_*``, every ``AP_*`` / ``mAP`` / ``instance_dice``,
 
 This module makes that boundary detectable and non-repeatable:
 
-* :func:`check_cubic_pin` fails a run whose environment disagrees with the
-  version the repo declares, instead of silently producing values from a
-  different numeric stack.
+* :func:`check_cubic_pin` fails a run whose environment holds neither the
+  version the repo declares nor one measured equivalent to it, instead of
+  silently producing values from a different numeric stack.
 * :func:`write_metrics_provenance` stamps the versions beside the metrics,
   and :func:`metrics_provenance_matches` lets the final-metrics cache gate
   refuse a cache built by a different ``cubic``.
@@ -95,19 +95,28 @@ def installed_versions() -> dict[str, str]:
     return {name: version(name) for name in _RECORDED_PACKAGES}
 
 
+def _accepted_cubic_versions() -> frozenset[str]:
+    """Return the declared ``cubic`` and the versions measured to reproduce its values."""
+    return CUBIC_VERSIONS_EQUIVALENT_TO.get(REQUIRED_CUBIC_VERSION, frozenset()) | {REQUIRED_CUBIC_VERSION}
+
+
 def check_cubic_pin() -> None:
-    """Raise when the installed ``cubic`` is not the declared one.
+    """Raise when the installed ``cubic`` is neither the declared one nor measured-equivalent to it.
+
+    An equivalent version is accepted because its values are, by measurement, the
+    declared pin's values: that is what lets eval jobs queued on the previous
+    venv keep running across a measured-equivalent bump.
 
     Raises
     ------
     RuntimeError
-        If the installed ``cubic`` version differs from
-        :data:`REQUIRED_CUBIC_VERSION`. Fails closed on purpose: a mismatched
-        stack writes plausible values under the wrong numeric contract, which
-        is exactly the failure this module exists to prevent.
+        If the installed ``cubic`` version is not :data:`REQUIRED_CUBIC_VERSION`
+        or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`. Fails closed
+        on purpose: a mismatched stack writes plausible values under the wrong
+        numeric contract, which is exactly the failure this module exists to prevent.
     """
     installed = version("cubic")
-    if installed != REQUIRED_CUBIC_VERSION:
+    if installed not in _accepted_cubic_versions():
         raise RuntimeError(
             f"cubic {installed!r} is installed but this repo declares "
             f"{REQUIRED_CUBIC_VERSION!r}. Metric values are not comparable across "
@@ -181,10 +190,9 @@ def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -
     Returns
     -------
     bool
-        True when the recorded ``cubic`` version equals the installed one (or is
-        in :data:`CUBIC_VERSIONS_EQUIVALENT_TO` for the declared pin while the installed one is
-        the declared pin) and, if ``cp_space_sha256`` is given, the recorded binding
-        equals it.
+        True when the recorded ``cubic`` version equals the installed one (or both
+        are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`)
+        and, if ``cp_space_sha256`` is given, the recorded binding equals it.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -192,9 +200,8 @@ def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -
     payload = json.loads(path.read_text())
     recorded = payload.get("versions", {}).get("cubic")
     installed = version("cubic")
-    equivalents = CUBIC_VERSIONS_EQUIVALENT_TO.get(REQUIRED_CUBIC_VERSION, frozenset())
-    reproduced = installed == REQUIRED_CUBIC_VERSION and recorded in equivalents
-    if recorded != installed and not reproduced:
+    accepted = _accepted_cubic_versions()
+    if recorded != installed and not (recorded in accepted and installed in accepted):
         return False
     if cp_space_sha256 is None:
         return True
