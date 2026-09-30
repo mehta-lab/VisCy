@@ -31,8 +31,9 @@ This module makes that boundary detectable and non-repeatable:
 
 A version bump measured to move no value beyond a stated tolerance lists the old
 version under the new one in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`, so its caches
-stay reusable instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a
-bump: it rewrites only the MicroSSIM RI-factor fit.
+stay reusable instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 and
+0.9.0a2 -> 0.9.0a3 are such bumps: the first rewrites only the MicroSSIM RI-factor
+fit, the second only single-image FSC/FRC paths that production does not run.
 
 The same sidecar stamps the content hash of the CP reference the CP feature
 metrics were scored in (:mod:`dynacell.evaluation.cp_reference`). CP KID/FID/
@@ -53,7 +54,7 @@ from pathlib import Path
 #: The ``cubic`` version this repo is built against. Must equal the pin in
 #: ``applications/dynacell/pyproject.toml``; ``provenance_test.py`` asserts
 #: they cannot drift apart.
-REQUIRED_CUBIC_VERSION = "0.9.0a2"
+REQUIRED_CUBIC_VERSION = "0.9.0a3"
 
 #: For each declared ``cubic`` version, the earlier versions whose metric values it
 #: reproduces within a stated tolerance, so their caches stay reusable. Keyed by the
@@ -71,7 +72,20 @@ REQUIRED_CUBIC_VERSION = "0.9.0a2"
 #: the versions; the root finder lands on the same alpha. The other
 #: ``pixel_metrics`` / ``mask_metrics`` columns do not use the RI-factor code and
 #: were bit-identical on 1 FOV x 7 timepoints.
-CUBIC_VERSIONS_EQUIVALENT_TO = {"0.9.0a2": frozenset({"0.9.0a1"})}
+#:
+#: 0.9.0a2 -> 0.9.0a3 changes single-image FSC/FRC only: it judges the split
+#: sampling floor per direction, splits binomial counts before isotropic
+#: resampling, and warns when a single-image checkerboard result is finer than
+#: 2.83 x the pixel size. Production never enables the binomial path, and the
+#: two-image FSC/FRC that ``compute_pixel_metrics`` runs is untouched. Tolerance:
+#: exact. Measured 2026-09-30 on the A549-trained ``fnet3d_paper`` ER and nucleus
+#: ``a549__denv`` leaves (FOV 0/0/fov0000, 7 + 10 timepoints, production eval.yaml
+#: and spectral_pcc/base.yaml kwargs, A40): every pixel column, XY/Z FSC,
+#: FRC_Resolution and Spectral_PCC differ by 0 abs / 0 rel. The binomial +
+#: resample_isotropic control moves 1.8-6.1% under the same harness, so the
+#: comparison can see a change. 0.9.0a1 stays listed: it reproduces 0.9.0a2
+#: (entry above), which 0.9.0a3 reproduces exactly.
+CUBIC_VERSIONS_EQUIVALENT_TO = {"0.9.0a3": frozenset({"0.9.0a2", "0.9.0a1"})}
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
 PROVENANCE_FILENAME = "metrics_provenance.json"
