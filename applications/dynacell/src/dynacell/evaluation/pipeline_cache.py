@@ -550,8 +550,8 @@ def _artifact_entries(ctx: _CacheContext) -> list[tuple[str, str, list[str]]]:
         ("cp", f"{ctx.label_prefix}cp_features", ["cp_features"]),
     ]
     if ctx.compute_instance_ap:
-        stem = f"{ctx.target_name}__{ctx.backend}"
-        families.append(("instances", f"{ctx.label_prefix}instance_masks[{stem}]", ["instance_masks", stem]))
+        keys = _instance_keys(ctx)
+        families.append(("instances", f"{ctx.label_prefix}instance_masks[{keys[1]}]", keys))
     if ctx.dinov3_model_name is not None:
         families.append(
             (
@@ -685,16 +685,15 @@ def _check_prediction_sources(ctx: _CacheContext) -> None:
             )
 
 
-def _source_current(ctx: _CacheContext, entry: dict[str, Any], pos_name: str) -> bool:
-    """Return whether *entry*'s cached *pos_name* was built from the prediction the store holds now.
+def _source_current(ctx: _CacheContext, keys: list[str], pos_name: str) -> bool:
+    """Return whether the entry at *keys* caches *pos_name* from the prediction the store holds now.
 
     Always true on the GT side. On the prediction side a position with no recorded
     source is not current.
     """
     if ctx.prediction_sources is None:
         return True
-    sources = entry.get("sources") if isinstance(entry, dict) else None
-    recorded = sources.get(pos_name) if isinstance(sources, dict) else None
+    recorded = _manifest_leaf(ctx, keys).get("sources", {}).get(pos_name)
     return recorded is not None and recorded == _prediction_source(ctx, pos_name)
 
 
@@ -779,23 +778,30 @@ def _record_position(ctx: _CacheContext, keys: list[str], pos_name: str) -> None
     The source (prediction side only) is what :func:`_source_current` compares on the
     next read, so it is recorded for exactly the position written.
     """
-    _add_position(ctx.manifest, keys, pos_name)
+    leaf = _manifest_leaf(ctx, keys)
+    positions = leaf.setdefault("positions", [])
+    if pos_name not in positions:
+        positions.append(pos_name)
     if ctx.prediction_sources is None:
         return
-    _manifest_leaf(ctx, keys).setdefault("sources", {})[pos_name] = dict(_prediction_source(ctx, pos_name))
+    leaf.setdefault("sources", {})[pos_name] = dict(_prediction_source(ctx, pos_name))
     ctx._written_sources.setdefault(tuple(keys), set()).add(pos_name)
 
 
-def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
-    """Append *pos_name* to an artifact entry's ``positions`` list if absent."""
-    current = manifest.get("artifacts", {})
-    for key in keys:
-        current = current.get(key, {})
-        if not isinstance(current, dict):
-            return
-    positions = current.setdefault("positions", [])
-    if pos_name not in positions:
-        positions.append(pos_name)
+def _record_write(ctx: _CacheContext, keys: list[str], entry: dict[str, Any], pos_name: str) -> None:
+    """Record this run's write of *pos_name* to the artifact at *keys*: its identity *entry*, the position, its source.
+
+    The identity follows :func:`_update_manifest_entry` (kept as recorded on an excluded
+    walk); the position and its source are recorded by :func:`_record_position`.
+    """
+    _update_manifest_entry(ctx.manifest, keys, entry, preserve_identity=ctx.excluded_walk)
+    _record_position(ctx, keys, pos_name)
+    ctx.mark_manifest_dirty()
+
+
+def _instance_keys(ctx: _CacheContext) -> list[str]:
+    """Manifest keys of this run's instance-label entry: ``instance_masks`` / ``{target}__{backend}``."""
+    return ["instance_masks", f"{ctx.target_name}__{ctx.backend}"]
 
 
 def _check_identity_bootstrap(
@@ -954,6 +960,7 @@ def _fov_masks(
 
     t_count = image_arr.shape[0]
     channel_name = _MASK_CHANNEL_BY_SIDE[ctx.side]
+    keys = ["organelle_masks", manifest_key]
 
     def _compute_masks() -> np.ndarray:
         return np.stack(
@@ -978,23 +985,13 @@ def _fov_masks(
             )
         return arr
 
-    def _record_write() -> None:
-        _update_manifest_entry(
-            ctx.manifest,
-            ["organelle_masks", manifest_key],
-            manifest_entry,
-            preserve_identity=ctx.excluded_walk,
-        )
-        _record_position(ctx, ["organelle_masks", manifest_key], pos_name)
-        ctx.mark_manifest_dirty()
-
     def _write_masks(masks: np.ndarray) -> None:
         write_mask(ctx.paths, ctx.target_name, pos_name, masks, channel_name=channel_name, backend=ctx.backend)
 
     def _check_bootstrap() -> None:
         _check_identity_bootstrap(
             ctx,
-            ["organelle_masks", manifest_key],
+            keys,
             artifact_label=artifact_label,
             force_key=force_key,
             writing={pos_name},
@@ -1012,11 +1009,10 @@ def _fov_masks(
             _check_bootstrap()
             masks = _compute_masks()
             _write_masks(masks)
-            _record_write()
+            _record_write(ctx, keys, manifest_entry, pos_name)
         return masks
 
-    # A cached prediction-side position built from another prediction is a miss.
-    current = _source_current(ctx, _manifest_leaf(ctx, ["organelle_masks", manifest_key]), pos_name)
+    current = _source_current(ctx, keys, pos_name)
 
     # Fast-path: cache hit without taking a lock.
     cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
@@ -1034,7 +1030,7 @@ def _fov_masks(
         _check_bootstrap()
         masks = _compute_masks()
         _write_masks(masks)
-        _record_write()
+        _record_write(ctx, keys, manifest_entry, pos_name)
     return masks
 
 
@@ -1185,8 +1181,8 @@ def _fov_instances(
     """
     t_count = ref_stack.shape[0]
     force_key = f"{ctx.side}_instances"
-    stem = f"{ctx.target_name}__{ctx.backend}"
-    manifest_keys = ["instance_masks", stem]
+    manifest_keys = _instance_keys(ctx)
+    stem = manifest_keys[1]
     artifact_label = f"{ctx.label_prefix}instance_masks[{stem}]"
     manifest_entry = {
         "path": f"instance_masks/{stem}.zarr",
@@ -1229,11 +1225,6 @@ def _fov_instances(
             stored=lambda: _plate_positions(ctx.paths.instance_mask_plate(ctx.target_name, ctx.backend)),
         )
 
-    def _record_write() -> None:
-        _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, manifest_keys, pos_name)
-        ctx.mark_manifest_dirty()
-
     if not ctx.enabled:
         return _compute()
 
@@ -1243,10 +1234,10 @@ def _fov_instances(
             _check_bootstrap()
             labels = _compute()
             _write(labels)
-            _record_write()
+            _record_write(ctx, manifest_keys, manifest_entry, pos_name)
         return labels
 
-    current = _source_current(ctx, _manifest_leaf(ctx, manifest_keys), pos_name)
+    current = _source_current(ctx, manifest_keys, pos_name)
     cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) if current else None
     if cached is not None:
         return _validate_cached_shape(cached)
@@ -1259,7 +1250,7 @@ def _fov_instances(
         _check_bootstrap()
         labels = _compute()
         _write(labels)
-        _record_write()
+        _record_write(ctx, manifest_keys, manifest_entry, pos_name)
     return labels
 
 
@@ -1274,7 +1265,7 @@ def instance_cache_hit(ctx: _CacheContext, pos_name: str) -> bool:
     """
     if not ctx.enabled or ctx.force[f"{ctx.side}_instances"]:
         return False
-    if not _source_current(ctx, _manifest_leaf(ctx, ["instance_masks", f"{ctx.target_name}__{ctx.backend}"]), pos_name):
+    if not _source_current(ctx, _instance_keys(ctx), pos_name):
         return False
     return read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) is not None
 
@@ -1444,7 +1435,7 @@ def _load_or_compute_feature_timepoints(
 
     force_recompute = ctx.force[force_key]
     # A cached prediction-side position built from another prediction is read as a miss.
-    reuse = not force_recompute and _source_current(ctx, _manifest_leaf(ctx, manifest_keys), pos_name)
+    reuse = not force_recompute and _source_current(ctx, manifest_keys, pos_name)
     per_t: list[np.ndarray | None] = [None] * t_count
 
     # Lockless prefetch pass. Skipped under force_recompute because we'll
@@ -1618,9 +1609,7 @@ def fov_cp_features(
             # have their names read back by cached_cp_feature_names.
             "cp_feature_names": list(names),
         }
-        _update_manifest_entry(ctx.manifest, ["cp_features"], entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, ["cp_features"], pos_name)
-        ctx.mark_manifest_dirty()
+        _record_write(ctx, ["cp_features"], entry, pos_name)
 
     return per_t
 
@@ -1758,9 +1747,7 @@ def _fov_deep_features(
     )
 
     if ctx.enabled and manifest_updated:
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, manifest_keys, pos_name)
-        ctx.mark_manifest_dirty()
+        _record_write(ctx, manifest_keys, entry, pos_name)
 
     return per_t
 
@@ -1897,7 +1884,7 @@ class DeepFeatureBatcher:
         for kind in self.extractors:
             manifest_keys = _deep_feature_cache_metadata(self.ctx, kind)[3]
             # A prediction-side position built from another prediction is rebuilt whole.
-            stale = not _source_current(self.ctx, _manifest_leaf(self.ctx, manifest_keys), pos_name)
+            stale = not _source_current(self.ctx, manifest_keys, pos_name)
             if self._force_snapshot[kind] or stale:
                 out[kind] = list(range(t_count))
                 continue
@@ -2015,9 +2002,7 @@ def _flush_kind(
         ):
             for t, chunk in ts_chunks:
                 write_features_to_group(group, pos_name, t, chunk)
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
-        _record_position(ctx, manifest_keys, pos_name)
-        ctx.mark_manifest_dirty()
+        _record_write(ctx, manifest_keys, entry, pos_name)
     # Manifest persistence is deferred to the caller (after batcher.drain()).
     # Zarr slot writes above are durable per-slot; on resume the lockless
     # prefetch finds them whether or not the manifest is up to date.
