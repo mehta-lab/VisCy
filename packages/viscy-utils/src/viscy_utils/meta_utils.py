@@ -4,7 +4,6 @@ import logging
 
 import iohub.ngff as ngff
 import numpy as np
-import torch
 from iohub.core.config import TensorStoreConfig
 from scipy.ndimage import median_filter
 from skimage.exposure import equalize_adapthist
@@ -80,6 +79,10 @@ def _grid_sample(position, grid_spacing, channel_index):
 
 def _select_backend(op: str) -> str:
     """Pick the array backend for ``op``, logging the choice once per operation."""
+    # torch is imported lazily: it costs seconds, and dynacell.evaluation.focus
+    # imports this module only for write_meta_field.
+    import torch
+
     if ascupy is None:
         chosen = "scipy"
     # Gate the upload on an actual device, as metrics.py does: cubic imports

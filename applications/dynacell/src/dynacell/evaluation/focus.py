@@ -25,11 +25,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import torch
 from cubic.skimage import filters as _cubic_filters
 from iohub.ngff import open_ome_zarr
 from omegaconf import DictConfig, OmegaConf
-from waveorder.focus import focus_from_transverse_band
 
 from viscy_utils.meta_utils import write_meta_field
 
@@ -166,6 +164,11 @@ def estimate_focus_plane(
     detection NA, illumination wavelength, and object-space pixel size (same
     length units).
     """
+    # torch and waveorder (which imports torch) are imported lazily: they cost
+    # seconds, and the paper figure scripts import this module for the focus helpers.
+    import torch
+    from waveorder.focus import focus_from_transverse_band
+
     return int(
         focus_from_transverse_band(
             torch.as_tensor(np.asarray(zyx), device=device),

@@ -1,10 +1,14 @@
 """Metric computation for evaluation: pixel metrics, mask metrics, MicroMS3IM."""
 
+from __future__ import annotations
+
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch
+
+if TYPE_CHECKING:
+    import torch
 
 try:
     from cubic.cuda import ascupy, asnumpy
@@ -48,14 +52,14 @@ def _require_cubic():
         )
 
 
-@torch.inference_mode()
 def _min_max_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Min-max normalize a tensor to [0, 1] range."""
+    """Min-max normalize a tensor to [0, 1] range; called inside :func:`ssim`'s inference mode."""
+    import torch
+
     x = x.float()
     return (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
 
 
-@torch.inference_mode()
 def ssim(img1: torch.Tensor, img2: torch.Tensor, *, scale_invariant: bool = True, eps: float = 1e-8) -> float:
     """Compute mean structural similarity index (SSIM) for 2D or 3D inputs.
 
@@ -90,28 +94,33 @@ def ssim(img1: torch.Tensor, img2: torch.Tensor, *, scale_invariant: bool = True
     eps : float
         Min-max denominator floor; used only when ``scale_invariant=False``.
     """
-    if cubic_ssim is None:
-        raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
-    if img1.ndim not in (2, 3):
-        raise ValueError(
-            f"ssim expects 2-D (H, W) or 3-D (D, H, W) input, got {img1.ndim}-D tensor of shape {tuple(img1.shape)}"
-        )
-    spatial_dims = img1.ndim
+    # torch is imported lazily: it costs seconds, and cp_reference and the paper
+    # scripts import this module only for CP feature names and cache helpers.
+    import torch
 
-    if not scale_invariant:
-        img1 = _min_max_normalize(img1, eps=eps)
-        img2 = _min_max_normalize(img2, eps=eps)
+    with torch.inference_mode():
+        if cubic_ssim is None:
+            raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
+        if img1.ndim not in (2, 3):
+            raise ValueError(
+                f"ssim expects 2-D (H, W) or 3-D (D, H, W) input, got {img1.ndim}-D tensor of shape {tuple(img1.shape)}"
+            )
+        spatial_dims = img1.ndim
 
-    # cubic's batched dispatch expects [N, C, (D,) H, W] (ndim = spatial_dims + 2):
-    # (H,W) → (1,1,H,W); (D,H,W) → (1,1,D,H,W).
-    img1 = img1.unsqueeze(0).unsqueeze(0)
-    img2 = img2.unsqueeze(0).unsqueeze(0)
+        if not scale_invariant:
+            img1 = _min_max_normalize(img1, eps=eps)
+            img2 = _min_max_normalize(img2, eps=eps)
 
-    if scale_invariant:
-        # No data_range here: the scale_invariant path derives its own, and cubic
-        # raises if both are supplied.
-        return cubic_ssim(img1, img2, spatial_dims=spatial_dims, gaussian_weights=True, scale_invariant=True)
-    return cubic_ssim(img1, img2, spatial_dims=spatial_dims, data_range=1.0, gaussian_weights=True)
+        # cubic's batched dispatch expects [N, C, (D,) H, W] (ndim = spatial_dims + 2):
+        # (H,W) → (1,1,H,W); (D,H,W) → (1,1,D,H,W).
+        img1 = img1.unsqueeze(0).unsqueeze(0)
+        img2 = img2.unsqueeze(0).unsqueeze(0)
+
+        if scale_invariant:
+            # No data_range here: the scale_invariant path derives its own, and cubic
+            # raises if both are supplied.
+            return cubic_ssim(img1, img2, spatial_dims=spatial_dims, gaussian_weights=True, scale_invariant=True)
+        return cubic_ssim(img1, img2, spatial_dims=spatial_dims, data_range=1.0, gaussian_weights=True)
 
 
 def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
@@ -183,6 +192,8 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     if pcc is None:
         raise ImportError("cubic is required for pixel metrics. Install via the `eval` extra: `uv sync --extra eval`.")
     _require_cubic()
+    import torch
+
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     to_xp = ascupy if use_cuda else asnumpy
     pred_xp, target_xp = to_xp(prediction), to_xp(target)
@@ -292,6 +303,8 @@ def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = 
         is undefined.
     """
     MicroMS3IM = _require_microms3im()
+    import torch
+
     # Convert to cupy when GPU is requested — cubic.skimage dispatches to
     # cucim (GPU Gaussian filters) when inputs carry a .device attribute.
     to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
@@ -346,6 +359,8 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
     """
     targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
     predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
+    import torch
+
     to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
     targets = to_xp(targets)
     predictions = to_xp(predictions)
@@ -709,6 +724,8 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
         relabel[kept] = np.arange(1, kept.size + 1)
         cell_segmentation = relabel[labels_host]
 
+    import torch
+
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     if use_cuda:
         img = ascupy(img)
@@ -817,6 +834,8 @@ def per_cell_similarity(
         predict_t = predict_t[z_slab]
         target_t = target_t[z_slab]
         cell_segmentation_t = cell_segmentation_t[z_slab]
+    import torch
+
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     to_xp = ascupy if use_cuda else asnumpy
     pred = to_xp(predict_t)
