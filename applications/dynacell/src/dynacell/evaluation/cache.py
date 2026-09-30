@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -165,10 +166,21 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
 
 
 def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
-    """Persist *manifest* as YAML under *paths.manifest*, creating parents."""
+    """Persist *manifest* as YAML under *paths.manifest*, creating parents.
+
+    The YAML goes to a sibling temp file that is then renamed over the manifest, so a
+    reader that does not hold the manifest lock (``init_cache_context``) sees the old
+    file or the new one, never a truncated one.
+    """
     paths.root.mkdir(parents=True, exist_ok=True)
-    with open(paths.manifest, "w") as f:
-        yaml.dump(manifest, f, Dumper=_ManifestDumper, sort_keys=False, allow_unicode=True)
+    tmp = paths.manifest.with_name(f".{paths.manifest.name}.{socket.gethostname()}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w") as f:
+            yaml.dump(manifest, f, Dumper=_ManifestDumper, sort_keys=False, allow_unicode=True)
+        os.replace(tmp, paths.manifest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def check_cache_identity(

@@ -107,6 +107,23 @@ def test_save_manifest_writes_what_omegaconf_wrote(tmp_path: Path) -> None:
     assert load_manifest(paths) == {**manifest, "gt": None, "cell_segmentation": None}
 
 
+def test_save_manifest_interrupted_leaves_the_old_file(tmp_path: Path, monkeypatch) -> None:
+    """A writer that dies mid-dump leaves the previous manifest intact and no temp file behind."""
+    paths = cache_paths(tmp_path)
+    save_manifest(paths, {"cache_schema_version": CACHE_SCHEMA_VERSION, "artifacts": {"a": 1}})
+    before = paths.manifest.read_bytes()
+
+    def dump_then_die(data, stream, **kwargs):
+        stream.write("cache_schema_version: 1\nartif")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("dynacell.evaluation.cache.yaml.dump", dump_then_die)
+    with pytest.raises(KeyboardInterrupt):
+        save_manifest(paths, {"cache_schema_version": CACHE_SCHEMA_VERSION, "artifacts": {"b": 2}})
+    assert paths.manifest.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["manifest.yaml"]
+
+
 def test_check_cache_identity_version_mismatch(tmp_path: Path) -> None:
     """Wrong cache_schema_version raises with a clear message."""
     manifest = {"cache_schema_version": CACHE_SCHEMA_VERSION + 99, "gt": None, "cell_segmentation": None}
