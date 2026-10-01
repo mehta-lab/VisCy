@@ -78,3 +78,20 @@ def test_unknown_model_slug_is_rejected(tmp_path, monkeypatch):
     """A bad --models filter must fail loudly, not resolve zero and continue."""
     with pytest.raises(SystemExit):
         _run(monkeypatch, ["--dest", str(tmp_path / "release"), "--models", "not-a-model"])
+
+
+def test_every_published_row_is_raw_fluorescence(tmp_path, monkeypatch):
+    """A549/Joint ER/Mito pins are raw retrains, so no row may carry a deconv label.
+
+    Each of those 20 checkpoints was traced to a fit on the 2026-07-06 rebuilt
+    ``a549/mantis`` store whose ``Structure`` channel is raw GFP (see
+    RELEASING_CHECKPOINTS.md). The old tool hardcoded ``deconv->raw`` for exactly
+    these cells; the row-presence check keeps this test from passing vacuously.
+    """
+    manifest = tmp_path / "preview.csv"
+    _run(monkeypatch, ["--dest", str(tmp_path / "release"), "--manifest", str(manifest)])
+
+    rows = list(csv.DictReader(manifest.read_text().splitlines()))
+    formerly_deconv = [r for r in rows if r["train_set"] in {"a549", "joint"} and r["organelle"] in {"er", "mito"}]
+    assert formerly_deconv, "expected A549/Joint ER/Mito rows in the manifest"
+    assert {r["provenance"] for r in rows} == {"raw"}

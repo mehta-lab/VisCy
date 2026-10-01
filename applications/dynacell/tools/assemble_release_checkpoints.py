@@ -3,11 +3,12 @@
 
 This tool builds the ``models/`` tree of the public S3 mirror from the trained
 checkpoints on ``/hpc/projects/comp.micro``. It is **idempotent and
-re-runnable** by design: the ER/Mito A549+Joint models are trained on
-*deconvolved* fluorescence in v1 and will be retrained on *raw* fluorescence;
-when those raw runs finish and their ``predict__*.yml`` configs are re-pinned,
-re-running this tool with ``--execute`` overwrites exactly those leaves and
-refreshes the manifest. See ``RELEASING_CHECKPOINTS.md``.
+re-runnable** by design: when a model is retrained and its ``predict__*.yml``
+configs are re-pinned, re-running this tool with ``--execute`` overwrites exactly
+those leaves and refreshes the manifest. Every published checkpoint is trained on
+*raw* fluorescence (the A549/Joint ER/Mito deconvolved-target v1 checkpoints were
+replaced by raw retrains on the 2026-07-06 rebuilt A549 store). See
+``RELEASING_CHECKPOINTS.md``.
 
 Source of truth
 ---------------
@@ -36,7 +37,7 @@ Status per cell
 ---------------
 - ``resolved``    -- pinned checkpoint exists -> copied.
 - ``pending``     -- model dir exists but the pinned epoch is gone (mid-retrain /
-  awaiting re-pin, e.g. the deconv->raw ER/Mito campaign) -> NOT copied, listed.
+  awaiting re-pin) -> NOT copied, listed.
 - ``not_trained`` -- model dir absent (stale config for a model never trained)
   -> dropped.
 
@@ -119,26 +120,12 @@ ORG_ORDER = ("nucleus", "membrane", "er", "mito")
 # with `--models ...,pix2pix3d` once it belongs in the public release.
 PAPER_MODELS = ("fnet3d", "unext2", "vscyto3d", "unetvit3d", "celldiff")
 
-# In v1, ER/Mito targets for A549 (and therefore the Joint pool) are deconvolved
-# GFP; membrane/nucleus and all iPSC targets are raw. These deconv cells are the
-# ones the raw-fluorescence retrain will replace -- flagged so a re-run updates
-# exactly them. See project_channel_raw_vs_deconv_provenance.
-DECONV_TRAIN = {"a549", "joint"}
-DECONV_ORG = {"er", "mito"}
-
 CKPT_RE = re.compile(
     r"/models/(?P<root>dynacell|cell_diff_vs_viscy)/"
     r"(?P<train>[^/]+)/(?P<gene>[^/]+)/(?P<model>[^/]+)/(?:checkpoints/)?(?P<file>[^/\s]+\.ckpt)"
 )
 EPOCH_RE = re.compile(r"epoch=(\d+)-step=(\d+)")
 BEST_EP_RE = re.compile(r"best_ep(\d+)")
-
-
-def provenance(train_pub: str, organelle: str) -> str:
-    """Return ``"deconv->raw"`` for the cells the raw retrain will replace, else ``"raw"``."""
-    if train_pub in DECONV_TRAIN and organelle in DECONV_ORG:
-        return "deconv->raw"
-    return "raw"
 
 
 def collect_cells(selected_models: set[str]) -> dict[tuple, dict]:
@@ -254,7 +241,7 @@ def resolve(cells: dict[tuple, dict], dest_models: Path) -> list[dict]:
         if resolved_file is not None:
             status = "resolved"
         elif model_dir_exists:
-            status = "pending"  # mid-retrain / awaiting re-pin (e.g. deconv->raw)
+            status = "pending"  # mid-retrain / awaiting re-pin
         else:
             status = "not_trained"
         cfg = None
@@ -270,7 +257,9 @@ def resolve(cells: dict[tuple, dict], dest_models: Path) -> list[dict]:
                 "organelle": organelle,
                 "model_slug": model_slug,
                 "arch": ARCH_PAPER[model_slug],
-                "provenance": provenance(train_pub, organelle),
+                # Every pinned target is raw fluorescence; verified per checkpoint
+                # against its resolved fit YAML in RELEASING_CHECKPOINTS.md.
+                "provenance": "raw",
                 "status": status,
                 "pub_name": resolved_file.name if resolved_file else "",
                 "copy_src": str(resolved_file) if resolved_file else "",
@@ -303,7 +292,7 @@ def report(plan: list[dict], dest_models: Path, execute: bool) -> None:
 
     have = {(p["train_pub"], p["organelle"], p["model_slug"]): p["status"] for p in plan}
     mark = {"resolved": "Y", "pending": "P", "not_trained": "-"}
-    print("Coverage (Y=resolved  P=pending-raw-retrain  -/blank=absent):")
+    print("Coverage (Y=resolved  P=pending-re-pin  -/blank=absent):")
     header = "  " + " " * 17 + "".join(f"{m:>11}" for m in MODEL_ORDER)
     print(header)
     for train in TRAIN_ORDER:
@@ -314,17 +303,13 @@ def report(plan: list[dict], dest_models: Path, execute: bool) -> None:
 
     print("Resolved (will copy):")
     for p in resolved:
-        prov = "" if p["provenance"] == "raw" else f"  [{p['provenance']}]"
         nocfg = "  [NO config.yaml]" if not p["config_src"] else ""
-        print(
-            f"  [{p['size_gb']:5.2f} GB] {p['train_pub']}/{p['organelle']}/{p['model_slug']}/"
-            f"{p['pub_name']}{prov}{nocfg}"
-        )
+        print(f"  [{p['size_gb']:5.2f} GB] {p['train_pub']}/{p['organelle']}/{p['model_slug']}/{p['pub_name']}{nocfg}")
 
     if pending:
-        print("\nPENDING -- pinned checkpoint gone (raw retrain in progress / re-pin needed):")
+        print("\nPENDING -- pinned checkpoint gone (retrain in progress / re-pin needed):")
         for p in pending:
-            print(f"  {p['train_pub']}/{p['organelle']}/{p['model_slug']}  [{p['provenance']}]")
+            print(f"  {p['train_pub']}/{p['organelle']}/{p['model_slug']}")
             print(f"      pinned: {p['pinned_srcs']}")
     if not_trained:
         print("\nNOT TRAINED (stale config, model dir absent -- dropped):")

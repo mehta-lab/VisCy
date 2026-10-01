@@ -3,8 +3,8 @@
 `assemble_release_checkpoints.py` builds the `models/` tree of the public S3
 mirror (`/hpc/projects/virtual_staining/dynacell_v1`) from the trained
 checkpoints on `/hpc/projects/comp.micro`. It is **idempotent** — re-running it
-overwrites only the leaves whose pinned checkpoint changed, which is how the
-recurring **deconv → raw fluorescence** update (see below) is applied.
+overwrites only the leaves whose pinned checkpoint changed, which is how a
+retrained model is published (see *Updating after a retrain* below).
 
 ## Public layout
 
@@ -64,41 +64,53 @@ paper); add it back with `--models fnet3d,unext2,vscyto3d,unetvit3d,celldiff,pix
 |---|---|---|
 | `resolved` | pinned checkpoint exists | copied |
 | `pending` | model dir exists but the pinned epoch is gone (mid-retrain / awaiting re-pin) | **not** copied, listed |
-| `not_trained` | model dir absent (stale config for a model never trained, e.g. Joint ER/Mito Pix2Pix3D) | dropped |
+| `not_trained` | model dir absent (stale config for a model never trained) | dropped |
 
-With the default paper set: `43 resolved · 9 pending · 0 not_trained`
-(~27.9 GB). With `--models …,pix2pix3d` (full zoo): `50 · 9 · 2` — the 59
-evaluated cells + 2 stale Pix2Pix3D configs (Joint ER/Mito, never trained).
+As of 2026-09-30, with the default paper set: `56 resolved · 0 pending · 0
+not_trained` (35.3 GB). UNetViT3D covers only the ER/Mito rows for A549 and
+Joint (plus all four iPSC organelles), which is why it has 8 cells rather than
+12. With `--models …,pix2pix3d` (full zoo): `68 · 0 · 0` (53.4 GB).
 
-## The deconv → raw fluorescence update (recurring)
+## Provenance: every published target is raw fluorescence
 
-In v1, **A549 and Joint ER/Mito** targets are *deconvolved* GFP; everything else
-(all membrane/nucleus, all iPSC) is *raw*. See
-`project_channel_raw_vs_deconv_provenance`. The manifest tags every affected
-cell `provenance = deconv->raw`; these are the "half" that the raw-fluorescence
-retrain replaces. When those runs finish:
+The manifest's `provenance` column is `raw` for every row. v1 A549 and Joint
+ER/Mito models were trained against *deconvolved* GFP: the `Structure` channel
+of `a549/mantis_v1/train/*_all.zarr` is deconvolved (see that dir's
+`CHANNEL_PROVENANCE.md`). Those checkpoints were replaced by retrains on the
+2026-07-06 rebuilt `a549/mantis/train/*_all.zarr`, whose `Structure` channel is
+raw (+93 camera floor) next to a separate `Structure_deconvolved`. All 20
+currently pinned A549/Joint ER/Mito checkpoints were traced on 2026-09-30 to
+fits that start fresh on the rebuilt store, including every `--ckpt_path`
+resume hop. The evidence is in
+`applications/dynacell/experiments/2026-09-30_s3-release-refresh/CHECKPOINTS.md`.
 
-1. **Confirm each raw run is complete**, not just alive — cross-check wandb final
+To re-verify a checkpoint's training data, check its lineage, not `config.yaml`:
+
+- The checkpoint stores model hparams only (no datamodule hparams).
+- The run dir's `config.yaml` is overwritten by every later fit. The S3-mirror
+  copy next to the known-deconv joint/er/vscyto3d `epoch=111` reads
+  `a549/mantis/`, although that checkpoint was trained on `mantis_v1`.
+- Use the `resolved/fit_*.yml` whose timestamp precedes the checkpoint, and
+  follow any `Restoring states from the checkpoint path` line in the run's
+  `slurm/*.err` back to a fresh start. May (deconv) and July (raw) fits shared
+  one `dirpath`, and the May checkpoints sit in `checkpoints/preflip_deconv/`.
+
+## Updating after a retrain
+
+1. **Confirm each new run is complete**, not just alive — cross-check wandb final
    `epoch` vs configured `max_epochs`, `sacct` state/exit code, and the resolved
    fit YAML (see root `CLAUDE.md § Job monitoring`). A `finished` wandb state
    alone is not enough.
-2. **Re-evaluate** the raw models so their `predict__*.yml` `ckpt_path` is
-   re-pinned to the new raw `epoch=NNN-step=MMMM.ckpt` (or edit `ckpt_path` by
-   hand). This tool reads only the config — it does not pick "latest" itself.
-3. **Dry-run** the assembler: the `deconv->raw` cells that were `pending` flip to
-   `resolved`. Confirm the new epochs match the re-evaluated runs.
-4. **`--execute`**: overwrites exactly those ER/Mito leaves and rewrites
-   `checkpoints.csv`. Raw/unaffected leaves are byte-identical re-copies (safe).
-5. **Propagate the provenance flip**: change the affected rows from
-   `deconv->raw` to `raw` here (`DECONV_TRAIN`/`DECONV_ORG` in the script — or
-   drop them once nothing is deconv), update `models/README.md`, the
+2. **Re-evaluate** the models so their `predict__*.yml` `ckpt_path` is re-pinned
+   to the new `epoch=NNN-step=MMMM.ckpt` (or edit `ckpt_path` by hand). This
+   tool reads only the config — it does not pick "latest" itself.
+3. **Dry-run** the assembler and confirm the new epochs match the re-evaluated
+   runs.
+4. **`--execute`**: overwrites exactly the changed leaves and rewrites
+   `checkpoints.csv`. Unchanged leaves are byte-identical re-copies (safe).
+5. Update `models/README.md`, the
    [Confluence "Checkpoints used for evaluations" page][ckpt-page], and re-sync
    `models/` to S3.
-
-Until then, the currently-published `deconv->raw` leaves ship the v1 deconv
-checkpoints (flagged in the manifest); the 9 `pending` deterministic ER/Mito
-cells whose pins were already pruned are simply absent from the release until
-step 2 re-pins them.
 
 [ckpt-page]: https://czbiohub.atlassian.net/wiki/spaces/MUG/pages/5485396007
 
