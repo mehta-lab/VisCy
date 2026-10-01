@@ -241,7 +241,11 @@ ARMS: tuple[Arm, ...] = (
     # ... and the UNeXt2-3D membrane segaux arm itself, so the one arm that improves every
     # in-domain metric gets the full 2x2 (arm draw x baseline draw) on A549, where the
     # FNet-2D arm's two draws disagreed (nucleus Dice +0.15..+0.20 vs +0.01..+0.02).
-    Arm("fcmae_vscyto3d_scratch", "segaux_seed1", ("membrane",), a549=True),
+    # Nucleus too (2026-09-30): vanilla FNet fails out-of-domain by design, so the A549 verdict
+    # rests on the families that already work there; their nucleus arms get a second draw.
+    Arm("fcmae_vscyto3d_scratch", "segaux_seed1", ORGANELLES, a549=True),
+    # pix2pix3d nucleus segaux on A549: Dice 0.863 -> 0.890, mAP 0.385 -> 0.483, PCC 0.708 -> 0.678.
+    Arm("pix2pix3d_unetvit", "segaux_seed1", ("nucleus",), a549=True),
     # Loss-weight sweep on the one cell whose effect held against both baseline draws
     # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
     Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),

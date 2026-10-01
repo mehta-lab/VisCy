@@ -290,6 +290,7 @@ PAPER_KEY: dict[str, str] = {
     "fnet2d_segaux_seed1": "fnet2d_segaux_seed1",
     "fnet3d_paper_segaux_seed1": "fnet3d_segaux_seed1",
     "pix2pix3d_unetvit_v2_seed1": "pix2pix3d_v2_seed1",
+    "pix2pix3d_unetvit_segaux_seed1": "pix2pix3d_segaux_seed1",
     "fcmae_vscyto3d_scratch_v2_seed1": "unext2_v2_seed1",
     "fcmae_vscyto3d_scratch_segaux_seed1": "unext2_segaux_seed1",
     # FNet-3D nucleus loss-weight sweep: the segaux arm at 0.5x and 2x seg_aux_weight.
