@@ -72,6 +72,12 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the pix2pix3d v2 nucleus baseline (--ckpt last, EMA), 2026-10-01: the
+  # baseline seed spread for the OOD-competent family whose segaux arm leads on A549.
+  # Generate with --wave wave2i.
+  wave2i:
+    nucleus:
+      - pix2pix3d_unetvit_v2_seed1
   # FNet-3D nucleus segaux at 0.5x seg_aux_weight (loss-weight sweep, --ckpt best epoch 206),
   # 2026-10-01. Generate with --wave wave2m.
   wave2m:
