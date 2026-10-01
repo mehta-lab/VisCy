@@ -72,6 +72,28 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the pix2pix3d v2 nucleus baseline (--ckpt last, EMA), 2026-10-01: the
+  # baseline seed spread for the OOD-competent family whose segaux arm leads on A549.
+  # Generate with --wave wave2i.
+  wave2i:
+    nucleus:
+      - pix2pix3d_unetvit_v2_seed1
+  # FNet-3D nucleus segaux at 0.5x seg_aux_weight (loss-weight sweep, --ckpt best epoch 206),
+  # 2026-10-01. Generate with --wave wave2m.
+  wave2m:
+    nucleus:
+      - fnet3d_paper_segaux_halfw
+  # FNet-3D nucleus segaux at 2x seg_aux_weight (loss-weight sweep, --ckpt best), 2026-09-30.
+  # Generate with --wave wave2l.
+  wave2l:
+    nucleus:
+      - fnet3d_paper_segaux_doublew
+  # CELL-Diff A549 nucleus legs that finished after wave2j (2026-09-30): all three
+  # CELL-Diff-3D C-joint legs and the CELL-Diff-2D seed1 MOCK leg. Generate with --wave wave2k.
+  wave2k:
+    nucleus:
+      - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__mock]}
   # Second draw of the FNet-3D nucleus segaux arm (fit max_steps 200000, --ckpt best
   # epoch=180-step=156746), 2026-09-30. Generate with --wave wave2h.
   wave2h:
@@ -191,9 +213,8 @@ waves:
   wave1:
     nucleus:
       # Stage 1b (nucleus only for now): mask in the generative process.
-      - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - {model: celldiff_ccond_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
-      - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__zikv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__zikv]}
     membrane:
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__zikv]}
