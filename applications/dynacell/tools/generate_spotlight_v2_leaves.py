@@ -28,7 +28,9 @@ Arms (``<baseline>_<suffix>``):
   older MS-SSIM) and ``pix2pix3d_unetvit`` (Run D; the checkpoint-write halt froze
   its selectable checkpoints at ep <= 25 of 40, while its S arm will have all 40).
   Each model's ``_segaux`` arm is generated from the same baseline leaf in the same
-  pass, so the arm and its v2 control share one recipe by construction.
+  pass, so the arm and its v2 control share one recipe by construction. Also
+  ``fnet3d_vscyto3daug`` (Phase 15 Arm B, nucleus only): vanilla FNet fails out of
+  domain, so the FNet verdict on A549 rests on this recipe, retrained on today's code.
 - UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
@@ -114,6 +116,9 @@ SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
     # UNeXt2-2D membrane on the L1 recipe (the MixedLoss baseline is a failed fit; the l1
     # probe trains, Dice 0.889). Calibrated on the l1 probe's best ckpt: 0.18 [0.15-0.27].
     ("membrane", "fcmae_vscyto2d_scratch_l1segaux"): 0.18,
+    # Calibrated on the July Phase 15 Arm B best ckpt (epoch=28-step=75400-loss=0.776): 4.5 [2.6-6.7],
+    # results/nucleus__fnet3d_vscyto3daug__batches.csv (val replay 0.782 vs recorded 0.776).
+    ("nucleus", "fnet3d_vscyto3daug_segaux"): 4.5,
 }
 # C-joint's mask Dice has no baseline to calibrate against (the baseline has no
 # mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
@@ -154,6 +159,7 @@ class Baseline:
     store_dir: str
     ipsc_predict: str
     engine: str  # "unet" | "gan" | "flow"
+    a549_predicts: tuple[str, ...] = A549_PREDICTS
 
 
 BASELINES: dict[str, Baseline] = {
@@ -176,6 +182,16 @@ BASELINES: dict[str, Baseline] = {
     "celldiff_2d": Baseline("train.yml", "celldiff_2d", "celldiff_2d", "predict__ipsc_confocal.yml", "flow"),
     "celldiff": Baseline(
         "train.yml", "celldiff_r2", "celldiff_r2_iterative", "predict__ipsc_confocal__iterative.yml", "flow"
+    ),
+    # Phase 15 Arm B: FNet-3D on a 384^2 patch with the VSCyto3D augmentation stack, the FNet
+    # that works out of domain (A549 nucleus PCC 0.68 vs 0.04 for fnet3d_paper). Nucleus only.
+    "fnet3d_vscyto3daug": Baseline(
+        "train.yml",
+        "fnet3d_vscyto3daug",
+        "fnet3d_vscyto3daug",
+        "predict__ipsc_confocal.yml",
+        "unet",
+        a549_predicts=tuple(f"predict__a549_mantis_h2b_{c}.yml" for c in ("mock", "denv", "zikv")),
     ),
 }
 
@@ -203,7 +219,7 @@ class Arm:
 
 
 ARMS: tuple[Arm, ...] = (
-    *(Arm(m, "segaux", ORGANELLES, a549=True) for m in BASELINES),
+    *(Arm(m, "segaux", ORGANELLES, a549=True) for m in BASELINES if m != "fnet3d_vscyto3daug"),
     # Seed replicates predict the A549 legs too: most arm effects are A549-transfer effects,
     # and without an A549 seed spread they have no noise floor (readout 2026-09-28).
     *(
@@ -250,6 +266,10 @@ ARMS: tuple[Arm, ...] = (
     # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
     Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
     Arm("fnet3d_paper", "segaux_doublew", ("nucleus",), a549=True),
+    # The FNet-3D verdict on the recipe that works out of domain (vanilla FNet fails there by
+    # design, so its A549 gains are not evidence): the full 2x2 from the start. v2 retrains the
+    # July baseline under today's code, selection and predict path, like the other 3D v2s.
+    *(Arm("fnet3d_vscyto3daug", s, ("nucleus",), a549=True) for s in ("v2", "v2_seed1", "segaux", "segaux_seed1")),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
 SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
@@ -585,7 +605,7 @@ def build_leaves(benchmarks: Path = BENCHMARKS) -> dict[Path, str]:
             src_dir = benchmarks / organelle / arm.baseline / POOL
             dst_dir = benchmarks / organelle / arm.model / POOL
             jobs = [("fit", base.fit_leaf, "train.yml", build_fit)] if arm.fit else []
-            predicts = [base.ipsc_predict, *(A549_PREDICTS if arm.a549 else ())]
+            predicts = [base.ipsc_predict, *(base.a549_predicts if arm.a549 else ())]
             jobs += [("predict", name, name, build_predict) for name in predicts]
             for kind, src_name, dst_name, build in jobs:
                 src = src_dir / src_name

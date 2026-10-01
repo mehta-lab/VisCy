@@ -46,10 +46,10 @@ def test_committed_leaves_match_the_generator(leaves: dict) -> None:
 
 
 def test_leaf_counts_per_arm(leaves: dict) -> None:
-    """Count 58 fits and 234 predicts per arm (fit+predict).
+    """Count 62 fits and 250 predicts per arm (fit+predict).
 
-    segaux 16+64, segauxself 8+32, seed1 9+36, v2 4+16, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
-    l1segaux 1+4, l1seed1 1+4, segaux_seed1 6+24, v2_seed1 4+16,
+    segaux 17+68, segauxself 8+32, seed1 9+36, v2 5+20, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
+    l1segaux 1+4, l1seed1 1+4, segaux_seed1 7+28, v2_seed1 5+20,
     segaux_halfw 1+4, segaux_doublew 1+4.
 
     The jointsteps and safecrop probes are iPSC-only; every other arm also predicts the 3 A549 legs.
@@ -57,10 +57,10 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
     fits = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name == "train.yml")
     predicts = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name != "train.yml")
     assert fits == {
-        "segaux": 16,
+        "segaux": 17,
         "segauxself": 8,
         "seed1": 9,
-        "v2": 4,
+        "v2": 5,
         "jointsteps": 1,
         "l1": 1,
         "safecrop": 1,
@@ -68,17 +68,17 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "ccond": 2,
         "l1segaux": 1,
         "l1seed1": 1,
-        "segaux_seed1": 6,
-        "v2_seed1": 4,
+        "segaux_seed1": 7,
+        "v2_seed1": 5,
         "segaux_halfw": 1,
         "segaux_doublew": 1,
     }
     assert predicts == {
-        "segaux": 64,
+        "segaux": 68,
         "segauxself": 32,
         "last": 8,
         "seed1": 36,
-        "v2": 16,
+        "v2": 20,
         "jointsteps": 1,
         "l1": 4,
         "safecrop": 1,
@@ -86,8 +86,8 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "ccond": 8,
         "l1segaux": 4,
         "l1seed1": 4,
-        "segaux_seed1": 24,
-        "v2_seed1": 16,
+        "segaux_seed1": 28,
+        "v2_seed1": 20,
         "segaux_halfw": 4,
         "segaux_doublew": 4,
     }

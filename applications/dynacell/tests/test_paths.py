@@ -87,6 +87,10 @@ _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_scratch_segaux_seed1",
     "fnet3d_paper_segaux_halfw",
     "fnet3d_paper_segaux_doublew",
+    "fnet3d_vscyto3daug_v2",
+    "fnet3d_vscyto3daug_v2_seed1",
+    "fnet3d_vscyto3daug_segaux",
+    "fnet3d_vscyto3daug_segaux_seed1",
 )
 # Spotlight-v2 post-hoc control stores (no training leaf): each 3D nucleus baseline
 # histogram-matched to its segaux arm. Same longest-prefix hazard as the arms.

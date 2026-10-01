@@ -296,6 +296,12 @@ PAPER_KEY: dict[str, str] = {
     # FNet-3D nucleus loss-weight sweep: the segaux arm at 0.5x and 2x seg_aux_weight.
     "fnet3d_paper_segaux_halfw": "fnet3d_segaux_halfw",
     "fnet3d_paper_segaux_doublew": "fnet3d_segaux_doublew",
+    # FNet-3D on the Phase 15 Arm B recipe (works out of domain): v2 baseline, its second
+    # draw, the segaux arm and its second draw.
+    "fnet3d_vscyto3daug_v2": "fnet3d_vscyto3daug_v2",
+    "fnet3d_vscyto3daug_v2_seed1": "fnet3d_vscyto3daug_v2_seed1",
+    "fnet3d_vscyto3daug_segaux": "fnet3d_vscyto3daug_segaux",
+    "fnet3d_vscyto3daug_segaux_seed1": "fnet3d_vscyto3daug_segaux_seed1",
     # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
     # histogram-matched per volume to its segaux arm's (spatial structure kept).
     "fnet3d_paper_histmatch": "fnet3d_histmatch",
