@@ -72,6 +72,11 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # FNet-3D nucleus segaux at 2x seg_aux_weight (loss-weight sweep, --ckpt best), 2026-09-30.
+  # Generate with --wave wave2l.
+  wave2l:
+    nucleus:
+      - fnet3d_paper_segaux_doublew
   # CELL-Diff A549 nucleus legs that finished after wave2j (2026-09-30): all three
   # CELL-Diff-3D C-joint legs and the CELL-Diff-2D seed1 MOCK leg. Generate with --wave wave2k.
   wave2k:
