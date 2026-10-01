@@ -266,11 +266,16 @@ path from the sbatch helper's `--parallel`.
 A smaller test set that reproduces the full benchmark's model orderings on the selected metrics:
 A549 keeps all 12 FOVs per condition at 5 of 10 timepoints (`build_temporal_subset_zarr.py --mode
 spread -n 5`), iPSC keeps a seeded 50 of 100 FOVs per GT store. Offline, it retains >= 0.895 of the
-model pairs the full benchmark can resolve on every non-GLCM+ selected metric; end to end, a lite eval
-reproduces the full benchmark on the same FOVs and frames to ~2e-5 (pixel) / ~6e-5 relative (deep
-KIDs), wherever the production prediction was made with current predict code (the 24 production
-UNetViT3D A549 stores predate the 2026-07-27 tiling fix and differ). Predict cost is ~0.44x on A549. Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md`
-§11–§13.
+model pairs the full benchmark can resolve on every non-GLCM+ selected metric. End to end, a lite eval
+reproduces the full benchmark on the same FOVs and frames, measured on 2026-10-01 across all four organelles:
+- pixel metrics to <= 7e-5;
+- deep KIDs to <= 3.2e-4 relative (median ~3e-5);
+- semantic-mask Dice (ER, mito) to <= 6e-5.
+
+cpdino instance masks (nucleus, membrane) differ by GPU type, because cellpose runs in bf16. Per-row
+Dice medians stay <= 3e-4, but a single frame can be off by up to ~0.1. Predict cost is ~0.44x on A549.
+Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md` §11–§15 and
+`experiments/2026-09-30_repredict-stale-pred-cache/`.
 
 - **It is a separate dataset, never an override of the full one.** Every per-timepoint artifact
   (segmentation store, GT feature cache `{pos}/t{t}`, focus cache) is indexed by its store's own `t`,
