@@ -1,0 +1,179 @@
+"""Foreground-limited pixel metrics (``FG_*``) against the whole-image ``SI_*`` family.
+
+Real cubic throughout: the invariant under test is that a unit weight map reproduces
+the whole-image columns cubic computes, so a stub would test nothing.
+"""
+
+import math
+import warnings
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+pytest.importorskip("cubic.metrics")
+
+from cubic.metrics import ssim as cubic_ssim  # noqa: E402
+
+from dynacell.evaluation.metrics import (  # noqa: E402
+    FOREGROUND_COLUMNS,
+    compute_pixel_metrics,
+    foreground_pixel_metrics,
+    foreground_weight,
+)
+
+_GOLDEN = Path(__file__).parent / "data" / "pixel_metrics_golden.npz"
+_PAIRS = (("FG_PCC", "PCC"), ("FG_SI_SSIM", "SI_SSIM"), ("FG_SI_NRMSE", "SI_NRMSE"), ("FG_SI_PSNR", "SI_PSNR"))
+
+
+def _blobs(shape=(16, 64, 64), seed=0) -> tuple[np.ndarray, np.ndarray]:
+    """A dim noisy background with bright ellipsoidal blobs; returns (image, blob mask)."""
+    rng = np.random.default_rng(seed)
+    zz, yy, xx = np.meshgrid(*(np.arange(n) for n in shape), indexing="ij")
+    mask = np.zeros(shape, dtype=bool)
+    for cz, cy, cx in ((8, 16, 16), (8, 44, 20), (7, 30, 46)):
+        mask |= ((zz - cz) / 5.0) ** 2 + ((yy - cy) / 9.0) ** 2 + ((xx - cx) / 9.0) ** 2 <= 1.0
+    texture = rng.normal(0.0, 0.3, shape)
+    image = np.where(mask, 3.0 + texture, 0.2 + 0.05 * rng.normal(size=shape))
+    return image.astype(np.float32), mask
+
+
+def test_unit_weight_reproduces_whole_image_metrics():
+    """``weight == 1`` scores PCC/SI_SSIM/SI_NRMSE/SI_PSNR to <= 1e-6 relative on real data."""
+    if not _GOLDEN.exists():
+        pytest.skip("golden fixture not generated")
+    g = np.load(_GOLDEN)
+    pred, target = g["pred"], g["target"]
+    whole = compute_pixel_metrics(pred, target, spacing=list(g["_spacing"]), use_gpu=False)
+    fg = foreground_pixel_metrics(pred, target, np.ones_like(target))
+    for fg_key, key in _PAIRS:
+        assert fg[fg_key] == pytest.approx(float(whole[key]), rel=1e-6), (fg_key, fg[fg_key], whole[key])
+    assert fg["FG_frac"] == 1.0
+
+
+def test_foreground_off_leaves_pixel_metrics_unchanged():
+    """No ``foreground`` adds no column; with it, the base columns keep their exact values."""
+    image, _ = _blobs()
+    pred = image + np.random.default_rng(1).normal(0.0, 0.5, image.shape).astype(np.float32)
+    spacing = [0.29, 0.108, 0.108]
+    off = compute_pixel_metrics(pred, image, spacing=spacing, use_gpu=False)
+    on = compute_pixel_metrics(
+        pred,
+        image,
+        spacing=spacing,
+        use_gpu=False,
+        foreground={"source": "smooth_otsu", "smooth_sigma_um": 0.5, "feather_sigma_um": 0.3},
+    )
+    assert not any(k.startswith("FG_") for k in off)
+    assert list(on) == [*off, *FOREGROUND_COLUMNS]
+    assert all(on[k] == off[k] for k in off)
+
+
+def test_identical_foreground_with_noisy_background_scores_perfect():
+    """A prediction exact inside the GT foreground scores ~1 there while whole-image metrics drop."""
+    image, _ = _blobs()
+    weight = foreground_weight(image, [1.0, 1.0, 1.0], source="otsu", feather_sigma_um=0.0)
+    noise = np.random.default_rng(2).normal(0.0, 2.0, image.shape).astype(np.float32)
+    pred = np.where(weight > 0, image, image + noise)
+    whole = compute_pixel_metrics(pred, image, spacing=[1.0, 1.0, 1.0], use_gpu=False)
+    fg = foreground_pixel_metrics(pred, image, weight)
+    assert fg["FG_PCC"] == pytest.approx(1.0, abs=1e-6)
+    assert fg["FG_SI_SSIM"] == pytest.approx(1.0, abs=1e-5)
+    assert fg["FG_SI_PSNR"] > 100.0  # float32 rounding leaves a ~1e-8 residual, not exact zero
+    assert whole["PCC"] < 0.9 and whole["SI_SSIM"] < 0.5
+
+
+def test_foreground_error_drops_foreground_metrics_more():
+    """Error confined to the foreground costs the FG columns more than the whole-image ones."""
+    image, mask = _blobs()
+    noise = np.random.default_rng(3).normal(0.0, 0.6, image.shape).astype(np.float32)
+    pred = np.where(mask, image + noise, image)
+    whole = compute_pixel_metrics(pred, image, spacing=[1.0, 1.0, 1.0], use_gpu=False)
+    weight = foreground_weight(image, [1.0, 1.0, 1.0], source="otsu", feather_sigma_um=0.0)
+    fg = foreground_pixel_metrics(pred, image, weight)
+    assert fg["FG_PCC"] < whole["PCC"]
+    assert fg["FG_SI_SSIM"] < whole["SI_SSIM"]
+    assert fg["FG_SI_PSNR"] < whole["SI_PSNR"]
+
+
+def test_thin_foreground_keeps_a_defined_ssim():
+    """One-voxel tubes erode to nothing under cubic's masked SSIM; ``FG_SI_SSIM`` stays defined."""
+    rng = np.random.default_rng(4)
+    image = rng.normal(0.0, 0.05, (16, 64, 64)).astype(np.float32)
+    tubes = np.zeros(image.shape, dtype=bool)
+    tubes[:, 10::12, :] = True
+    image[tubes] += 2.0
+    pred = image + rng.normal(0.0, 0.2, image.shape).astype(np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # mean of an empty slice
+        eroded = cubic_ssim(image, pred, mask=tubes, gaussian_weights=True, data_range=float(np.ptp(image)))
+    assert math.isnan(eroded)
+    fg = foreground_pixel_metrics(pred, image, tubes.astype(np.float32))
+    assert np.isfinite(fg["FG_SI_SSIM"]) and 0.0 < fg["FG_SI_SSIM"] < 1.0
+
+
+def test_empty_foreground_is_nan_with_zero_fraction():
+    """A constant target has no foreground: every FG_* is NaN and FG_frac is 0."""
+    target = np.full((16, 32, 32), 5.0, dtype=np.float32)
+    pred = np.random.default_rng(5).normal(size=target.shape).astype(np.float32)
+    weight = foreground_weight(target, [1.0, 1.0, 1.0], smooth_sigma_um=1.0, feather_sigma_um=1.0)
+    assert not weight.any()
+    fg = foreground_pixel_metrics(pred, target, weight)
+    assert fg["FG_frac"] == 0.0
+    assert all(math.isnan(fg[k]) for k in FOREGROUND_COLUMNS[:-1])
+
+
+def test_constant_prediction_scores_zero_pcc_instead_of_vanishing():
+    """A prediction collapsed to a constant scores FG_PCC 0 and finite SI columns (gain 0)."""
+    image, _ = _blobs()
+    weight = foreground_weight(image, [1.0, 1.0, 1.0], source="otsu", feather_sigma_um=1.0)
+    fg = foreground_pixel_metrics(np.full_like(image, 0.7), image, weight)
+    assert fg["FG_PCC"] == 0.0
+    assert all(np.isfinite(fg[k]) for k in ("FG_SI_SSIM", "FG_SI_NRMSE", "FG_SI_PSNR"))
+    # The best affine fit of a constant is the target's weighted mean, i.e. 0 in
+    # standardized units, so the residual RMS is the standardized target's: 1.
+    hard = weight > 0.5
+    data_range = float(np.ptp(image[hard])) / float(np.sqrt(np.cov(image.ravel(), aweights=weight.ravel(), ddof=0)))
+    assert fg["FG_SI_NRMSE"] == pytest.approx(1.0 / data_range, rel=1e-5)
+
+
+def test_foreground_weight_recipes():
+    """Hard mask without feather, soft weights in [0, 1] with it; ``otsu`` ignores the smoothing sigma."""
+    image, mask = _blobs()
+    hard = foreground_weight(image, [0.5, 0.25, 0.25], source="smooth_otsu", smooth_sigma_um=0.0)
+    assert set(np.unique(hard)) == {0.0, 1.0}
+    assert (hard.astype(bool) == mask).mean() > 0.99
+    soft = foreground_weight(image, [0.5, 0.25, 0.25], smooth_sigma_um=0.5, feather_sigma_um=0.5)
+    assert soft.dtype == np.float32 and soft.min() >= 0.0 and soft.max() <= 1.0
+    assert ((soft > 0) & (soft < 1)).any()
+    raw = foreground_weight(image, [0.5, 0.25, 0.25], source="otsu", smooth_sigma_um=3.0)
+    np.testing.assert_array_equal(raw, foreground_weight(image, [0.5, 0.25, 0.25], source="otsu"))
+    with pytest.raises(ValueError, match="source"):
+        foreground_weight(image, [1.0, 1.0, 1.0], source="cell")
+    with pytest.raises(ValueError, match=">= 0"):
+        foreground_weight(image, [1.0, 1.0, 1.0], feather_sigma_um=-1.0)
+
+
+def test_foreground_weight_sigma_is_physical():
+    """Sigmas are in um: halving the spacing doubles the voxel sigma, i.e. widens the feather."""
+    image, _ = _blobs()
+    coarse = foreground_weight(image, [1.0, 1.0, 1.0], source="otsu", feather_sigma_um=1.0)
+    fine = foreground_weight(image, [0.5, 0.5, 0.5], source="otsu", feather_sigma_um=1.0)
+    assert ((fine > 0) & (fine < 1)).sum() > ((coarse > 0) & (coarse < 1)).sum()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="device parity needs a CUDA GPU")
+def test_gpu_matches_cpu():
+    """CuPy inputs give the CPU values (float32 reduction order only)."""
+    from cubic.cuda import ascupy
+
+    image, _ = _blobs()
+    pred = image + np.random.default_rng(6).normal(0.0, 0.5, image.shape).astype(np.float32)
+    kwargs = {"source": "smooth_otsu", "smooth_sigma_um": 0.6, "feather_sigma_um": 0.4}
+    spacing = [0.5, 0.25, 0.25]
+    cpu = foreground_pixel_metrics(pred, image, foreground_weight(image, spacing, **kwargs))
+    gpu_image = ascupy(image)
+    gpu = foreground_pixel_metrics(ascupy(pred), gpu_image, foreground_weight(gpu_image, spacing, **kwargs))
+    for key in FOREGROUND_COLUMNS:
+        assert gpu[key] == pytest.approx(cpu[key], rel=1e-5), key
