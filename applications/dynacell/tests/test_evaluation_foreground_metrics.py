@@ -213,6 +213,20 @@ def test_foreground_inside_the_ssim_border_crop_gives_nan_ssim():
     assert all(np.isfinite(fg[k]) for k in ("FG_PCC", "FG_SI_NRMSE", "FG_SI_PSNR"))
 
 
+def test_target_constant_in_hard_foreground_gives_nan_si_columns():
+    """A target flat where weight > 0.5 but varying in the feather has no data range: FG_SI_* are NaN."""
+    rng = np.random.default_rng(9)
+    target = rng.normal(0.0, 1.0, (16, 32, 32)).astype(np.float32)
+    weight = np.zeros_like(target)
+    weight[2:14, 4:28, 4:28] = 0.3
+    weight[4:12, 8:24, 8:24] = 1.0
+    target[weight == 1.0] = 2.0
+    pred = target + rng.normal(0.0, 0.5, target.shape).astype(np.float32)
+    fg = foreground_pixel_metrics(pred, target, weight)
+    assert all(math.isnan(fg[k]) for k in ("FG_SI_SSIM", "FG_SI_NRMSE", "FG_SI_PSNR"))
+    assert np.isfinite(fg["FG_PCC"])
+
+
 def test_constant_prediction_scores_zero_pcc_instead_of_vanishing():
     """A prediction collapsed to a constant scores FG_PCC 0 and finite SI columns (gain 0)."""
     image, _ = _blobs()

@@ -469,7 +469,9 @@ def foreground_pixel_metrics(prediction, target, weight) -> dict[str, float]:
     ``feather_sigma_um=0``, scores the interior alone).
 
     Degenerate inputs return values instead of raising: no hard foreground (or a
-    constant target inside it) gives NaN for every ``FG_*`` column; a prediction
+    target constant over the whole weight) gives NaN for every ``FG_*`` column; a
+    target constant inside the hard foreground but varying in the feather has no
+    data range, so ``FG_SI_*`` are NaN and ``FG_PCC`` is scored; a prediction
     constant inside the foreground gives ``FG_PCC = 0`` and a zero gain (its best
     affine fit is the target's mean), so a collapsed prediction is scored, not
     dropped from a mean. A foreground lying wholly inside SSIM's border crop gives
@@ -522,6 +524,10 @@ def foreground_pixel_metrics(prediction, target, weight) -> dict[str, float]:
     pred_scaled = pred_zero * gain
     del pred_zero
     data_range = float(target[hard].max() - target[hard].min()) / target_std
+    if data_range == 0:
+        # Flat inside the hard foreground, varying only in the feather: the SI columns
+        # are relative to a zero range, so they are undefined. FG_PCC still is.
+        return empty | {"FG_PCC": fg_pcc}
     residual = target_norm - pred_scaled
     mse = _weighted_mean(residual * residual, weight, total)
     del residual
