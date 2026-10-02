@@ -57,6 +57,77 @@ def test_unit_weight_reproduces_whole_image_metrics(dtype, rel):
     assert fg["FG_frac"] == 1.0
 
 
+def _reference_foreground_metrics(pred, target, weight) -> dict[str, float]:
+    """Brute-force ``FG_*`` from their definitions, sharing no code with ``metrics.py``.
+
+    Weighted moments over the whole volume give the Pearson correlation and the
+    weighted least-squares affine fit. SSIM is evaluated voxel by voxel over
+    skimage's border crop: an explicit 11-voxel Gaussian window (sigma 1.5,
+    truncate 3.5) times the weight gives local moments normalized by the local
+    weight mass, and the SSIM map is averaged with the weight. The crop keeps every
+    window inside the volume, so no boundary mode is involved.
+    """
+    p, t, w = (np.asarray(a, dtype=np.float64) for a in (pred, target, weight))
+
+    def mean(x):
+        return float((w * x).sum() / w.sum())
+
+    t_centred, p_centred = t - mean(t), p - mean(p)
+    t_std = math.sqrt(mean(t_centred**2))
+    pcc = mean(t_centred * p_centred) / math.sqrt(mean(t_centred**2) * mean(p_centred**2))
+    t_norm = t_centred / t_std
+    p_fit = mean(t_norm * p_centred) / mean(p_centred**2) * p_centred
+    data_range = float(np.ptp(t[w > 0.5])) / t_std
+    mse = mean((t_norm - p_fit) ** 2)
+
+    radius = 5
+    taps = np.exp(-0.5 * (np.arange(-radius, radius + 1) / 1.5) ** 2)
+    kernel = taps[:, None, None] * taps[None, :, None] * taps[None, None, :]
+    cov_norm = kernel.size / (kernel.size - 1.0)
+    c1, c2 = (0.01 * data_range) ** 2, (0.03 * data_range) ** 2
+    num = den = 0.0
+    for corner in np.ndindex(*(n - 2 * radius for n in t.shape)):
+        window = tuple(slice(c, c + 2 * radius + 1) for c in corner)
+        centre = tuple(c + radius for c in corner)
+        if w[centre] == 0:
+            continue
+        kw = kernel * w[window]
+        a, b = t_norm[window], p_fit[window]
+        mu_a, mu_b = (kw * a).sum() / kw.sum(), (kw * b).sum() / kw.sum()
+        var_a = cov_norm * ((kw * a * a).sum() / kw.sum() - mu_a**2)
+        var_b = cov_norm * ((kw * b * b).sum() / kw.sum() - mu_b**2)
+        cov_ab = cov_norm * ((kw * a * b).sum() / kw.sum() - mu_a * mu_b)
+        ssim = ((2 * mu_a * mu_b + c1) * (2 * cov_ab + c2)) / ((mu_a**2 + mu_b**2 + c1) * (var_a + var_b + c2))
+        num += w[centre] * ssim
+        den += w[centre]
+    return {
+        "FG_PCC": pcc,
+        "FG_SI_SSIM": num / den,
+        "FG_SI_NRMSE": math.sqrt(mse) / data_range,
+        "FG_SI_PSNR": 10 * math.log10(data_range**2 / mse),
+    }
+
+
+def test_soft_weight_matches_brute_force_reference():
+    """A non-binary weight scores every FG_* column as the brute-force weighted definitions.
+
+    The unit-weight test cannot see how the weight enters: a weight of 1 everywhere
+    makes the local weight-mass normalization, the weighted SSIM-map average and the
+    weighted Pearson indistinguishable from their unweighted forms. Here the weight
+    spans [0, 1] (with exact zeros and ones) and the prediction is noisier where the
+    weight is low, so each of those choices moves the values.
+    """
+    rng = np.random.default_rng(7)
+    shape = (13, 16, 18)
+    target = rng.normal(0.0, 1.0, shape) + 2.0
+    weight = np.clip(rng.uniform(-0.6, 1.4, shape), 0.0, 1.0)
+    pred = 0.5 * target + rng.normal(0.0, 1.0, shape) * (1.5 - weight) + 3.0
+    got = foreground_pixel_metrics(pred, target, weight)
+    expected = _reference_foreground_metrics(pred, target, weight)
+    for key, value in expected.items():
+        assert got[key] == pytest.approx(value, rel=1e-9), (key, got[key], value)
+
+
 def test_foreground_off_leaves_pixel_metrics_unchanged():
     """No ``foreground`` adds no column; with it, the base columns keep their exact values."""
     image, _ = _blobs()
