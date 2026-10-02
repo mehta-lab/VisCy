@@ -225,6 +225,11 @@ class CELLDiff3DVS(nn.Module):
     def _noise_like_target(self, phase: Tensor) -> Tensor:
         """Create Gaussian noise with the network's output channel count.
 
+        Drawn from the CPU generator and then moved to ``phase``'s device: a
+        seeded CUDA ``randn`` gives different numbers on different GPU models
+        (measured A40 vs H100: two runs of one recipe 0.44 relative L2 apart),
+        so a seeded prediction would otherwise depend on the GPU it ran on.
+
         Parameters
         ----------
         phase : Tensor
@@ -237,7 +242,7 @@ class CELLDiff3DVS(nn.Module):
         """
         b, _c, *spatial = phase.shape
         in_ch = self.net.inconv.in_channels
-        return torch.randn(b, in_ch, *spatial, device=phase.device, dtype=phase.dtype)
+        return torch.randn(b, in_ch, *spatial, dtype=phase.dtype).to(phase.device)
 
     def generate(
         self, phase: Tensor, num_steps: int = 100, sampling_method: str = "dopri5", time_schedule: str = "uniform"

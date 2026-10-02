@@ -418,6 +418,16 @@ def test_flow_matching_tile_size_full_extent_slabs():
     assert list(model.model._inference_nets) == [(8, 40, 56)]
 
 
+def test_flow_matching_noise_comes_from_the_cpu_generator():
+    """Initial noise is drawn on the CPU, so a seeded prediction does not depend on the GPU model."""
+    model = DynacellFlowMatching(net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG)
+    phase = torch.zeros(2, 1, 8, 32, 32)
+    torch.manual_seed(0)
+    noise = model.model._noise_like_target(phase)
+    torch.manual_seed(0)
+    torch.testing.assert_close(noise, torch.randn(2, 1, 8, 32, 32), rtol=0, atol=0)
+
+
 def test_pad_to_multiple_pads_trailing_end_only():
     """Replicate padding goes on the trailing end so cropping ``[:D, :H, :W]`` recovers the input."""
     x = torch.arange(2 * 3 * 5, dtype=torch.float32).reshape(1, 1, 2, 3, 5)
