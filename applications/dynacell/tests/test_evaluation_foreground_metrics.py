@@ -200,6 +200,19 @@ def test_empty_foreground_is_nan_with_zero_fraction():
     assert all(math.isnan(fg[k]) for k in FOREGROUND_COLUMNS[:-1])
 
 
+def test_foreground_inside_the_ssim_border_crop_gives_nan_ssim():
+    """Foreground only in the planes SSIM crops away leaves FG_SI_SSIM NaN; the other columns stay defined."""
+    rng = np.random.default_rng(8)
+    image = rng.normal(0.0, 0.05, (16, 64, 64)).astype(np.float32)
+    image[0:3, 20:40, 20:40] += 3.0
+    weight = foreground_weight(image, [1.0, 1.0, 1.0], source="otsu", feather_sigma_um=0.5)
+    assert not weight[5:-5, 5:-5, 5:-5].any()
+    pred = image + rng.normal(0.0, 0.2, image.shape).astype(np.float32)
+    fg = foreground_pixel_metrics(pred, image, weight)
+    assert math.isnan(fg["FG_SI_SSIM"])
+    assert all(np.isfinite(fg[k]) for k in ("FG_PCC", "FG_SI_NRMSE", "FG_SI_PSNR"))
+
+
 def test_constant_prediction_scores_zero_pcc_instead_of_vanishing():
     """A prediction collapsed to a constant scores FG_PCC 0 and finite SI columns (gain 0)."""
     image, _ = _blobs()

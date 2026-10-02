@@ -408,6 +408,7 @@ def _weighted_ssim(image_true, image_test, weight, data_range: float) -> float:
     score 1 there. Window, ``K1``/``K2`` and the sample-covariance factor are
     skimage's, so ``weight == 1`` reproduces
     ``skimage.metrics.structural_similarity(..., gaussian_weights=True)``.
+    Returns NaN when the crop holds no weight (all foreground within the border).
     """
     win_size = 2 * int(_SSIM_TRUNCATE * _SSIM_SIGMA + 0.5) + 1
     if min(image_true.shape) < win_size:
@@ -436,8 +437,11 @@ def _weighted_ssim(image_true, image_test, weight, data_range: float) -> float:
     pad = (win_size - 1) // 2
     crop = tuple(slice(pad, n - pad) for n in ssim_map.shape)
     ssim_map, weight = ssim_map[crop], weight[crop]
+    total = float(weight.sum(dtype=np.float64))
+    if total == 0:
+        return float("nan")
     weighted = np.where(weight > 0, weight * ssim_map, 0.0)
-    return float(weighted.sum(dtype=np.float64)) / float(weight.sum(dtype=np.float64))
+    return float(weighted.sum(dtype=np.float64)) / total
 
 
 def foreground_pixel_metrics(prediction, target, weight) -> dict[str, float]:
@@ -465,7 +469,8 @@ def foreground_pixel_metrics(prediction, target, weight) -> dict[str, float]:
     constant target inside it) gives NaN for every ``FG_*`` column; a prediction
     constant inside the foreground gives ``FG_PCC = 0`` and a zero gain (its best
     affine fit is the target's mean), so a collapsed prediction is scored, not
-    dropped from a mean.
+    dropped from a mean. A foreground lying wholly inside SSIM's border crop gives
+    NaN for ``FG_SI_SSIM`` alone.
 
     Parameters
     ----------
