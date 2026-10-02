@@ -1228,6 +1228,7 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
     Read with ``OmegaConf.select`` so a config without the block (hand-built test
     configs) runs with the ``FG_*`` columns off. A null sigma takes the target's
     default from :data:`~dynacell.evaluation.metrics.FOREGROUND_SIGMAS_UM`. The
+    ``otsu`` source does not smooth, so its ``smooth_sigma_um`` is left out. The
     resolved dict is also what the provenance sidecar records.
 
     Raises
@@ -1237,10 +1238,10 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
     """
     if not bool(OmegaConf.select(config, "pixel_metrics.foreground.enabled", default=False)):
         return None
-    settings: dict[str, Any] = {
-        "source": str(OmegaConf.select(config, "pixel_metrics.foreground.source", default="smooth_otsu"))
-    }
-    for key in ("smooth_sigma_um", "feather_sigma_um"):
+    source = str(OmegaConf.select(config, "pixel_metrics.foreground.source", default="smooth_otsu"))
+    settings: dict[str, Any] = {"source": source}
+    keys = ("feather_sigma_um",) if source == "otsu" else ("smooth_sigma_um", "feather_sigma_um")
+    for key in keys:
         value = OmegaConf.select(config, f"pixel_metrics.foreground.{key}", default=None)
         if value is None:
             if config.target_name not in FOREGROUND_SIGMAS_UM:

@@ -67,6 +67,19 @@ def test_foreground_settings_resolution():
         resolve(cfg)
 
 
+def test_otsu_source_resolves_no_smoothing_sigma():
+    """``otsu`` ignores ``smooth_sigma_um``: it is neither resolved, stamped, nor required to have a default."""
+    resolve = live_pipeline_module()._foreground_settings
+    fg = {"enabled": True, "source": "otsu", "smooth_sigma_um": None, "feather_sigma_um": None}
+    cfg = OmegaConf.create({"target_name": "er", "pixel_metrics": {"spacing": [1.0, 1.0, 1.0], "foreground": fg}})
+    assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.5}
+    cfg.pixel_metrics.foreground.smooth_sigma_um = 3.0
+    assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.5}
+    cfg.target_name = "lysosomes"
+    cfg.pixel_metrics.foreground.feather_sigma_um = 0.25
+    assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.25}
+
+
 def test_default_off_is_byte_identical_and_unstamped(scored, tmp_path: Path):
     """No block and ``enabled: false`` write the same CSV, no FG_* column and no stamp key."""
     pred_path, config = scored
