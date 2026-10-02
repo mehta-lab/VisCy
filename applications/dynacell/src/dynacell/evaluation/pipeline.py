@@ -83,6 +83,7 @@ from dynacell.evaluation.runtime import (
     reset_timings,
     resolve_runtime,
 )
+from dynacell.evaluation.segmentation import require_cubic_workflows
 from dynacell.evaluation.utils import plot_metrics
 
 
@@ -998,6 +999,7 @@ def _process_one_fov(
                                 seg_model=seg_model,
                                 backend=backend,
                                 spacing_zyx=tuple(cache_ctx.spacing),
+                                use_gpu=use_gpu,
                             )
                         ).astype(bool)
                 fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
@@ -2474,6 +2476,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
     check_cubic_pin()
+    require_cubic_workflows(config.target_name)
     apply_dataset_ref(config)
     if _final_metrics_cache_valid(config):
         print("Found existing metrics.")
@@ -2507,6 +2510,7 @@ def evaluate_model(config: DictConfig):
 def evaluate_model_grouped(config: DictConfig):
     """Run grouped multi-condition eval, amortizing model loads across conditions."""
     check_cubic_pin()
+    require_cubic_workflows(config.target_name)
     return evaluate_predictions_grouped(config)
 
 
