@@ -49,6 +49,16 @@ class TestToLatexForegroundColumns:
         assert sum("\\textbf{" in cell for line in lines if "ModelB" in line for cell in line.split("&")) == 4
         assert not any("\\textbf{" in line for line in lines if "ModelA" in line)
 
+    def test_fg_frac_is_never_bolded(self, tmp_path):
+        """FG_frac describes the GT region, not a model: no row of it is bolded as best."""
+        dirs = {}
+        for name, frac in (("ModelA", 0.20), ("ModelB", 0.25)):
+            dirs[name] = tmp_path / name
+            dirs[name].mkdir()
+            _write_csv(dirs[name] / "pixel_metrics.csv", [{"FOV": "A/0/0", "Timepoint": 0, "FG_frac": frac}])
+        table = comparison_table(dirs, metrics=["FG_frac"])
+        assert "\\textbf{" not in to_latex(table, bold_best=True)
+
     def test_fg_columns_are_not_default_pixel_metrics(self):
         """Default tables are unchanged: FG_* are reported only when asked for."""
         from dynacell.reporting.tables import PIXEL_METRICS
