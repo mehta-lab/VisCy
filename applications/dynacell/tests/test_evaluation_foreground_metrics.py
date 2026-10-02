@@ -39,16 +39,21 @@ def _blobs(shape=(16, 64, 64), seed=0) -> tuple[np.ndarray, np.ndarray]:
     return image.astype(np.float32), mask
 
 
-def test_unit_weight_reproduces_whole_image_metrics():
-    """``weight == 1`` scores PCC/SI_SSIM/SI_NRMSE/SI_PSNR to <= 1e-6 relative on real data."""
+@pytest.mark.parametrize(("dtype", "rel"), [(np.float32, 1e-6), (np.float64, 1e-12)])
+def test_unit_weight_reproduces_whole_image_metrics(dtype, rel):
+    """``weight == 1`` scores PCC/SI_SSIM/SI_NRMSE/SI_PSNR as the whole-image columns, on real data.
+
+    float64 pins the formulas (window, crop, sample-covariance factor, SI fit) to
+    machine precision; float32, the production dtype, differs only by rounding.
+    """
     if not _GOLDEN.exists():
         pytest.skip("golden fixture not generated")
     g = np.load(_GOLDEN)
-    pred, target = g["pred"], g["target"]
+    pred, target = g["pred"].astype(dtype), g["target"].astype(dtype)
     whole = compute_pixel_metrics(pred, target, spacing=list(g["_spacing"]), use_gpu=False)
     fg = foreground_pixel_metrics(pred, target, np.ones_like(target))
     for fg_key, key in _PAIRS:
-        assert fg[fg_key] == pytest.approx(float(whole[key]), rel=1e-6), (fg_key, fg[fg_key], whole[key])
+        assert fg[fg_key] == pytest.approx(float(whole[key]), rel=rel), (fg_key, fg[fg_key], whole[key])
     assert fg["FG_frac"] == 1.0
 
 
