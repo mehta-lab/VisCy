@@ -23,10 +23,23 @@ validation patches, 2026-09-24), so it also pulls the prediction toward the
 mask. ``label="target"`` keeps the mask's role in setting ``tau``, ``s`` and
 patch validity but is minimised exactly at ``pred == target``: it isolates a
 segmentation-shaped penalty from that pull.
+
+Two optional, orthogonal extensions (both off by default, which leaves the loss
+bit-identical to the plain soft Dice above):
+
+- ``weighting="sauna"`` weights every voxel's terms in both Dice sums by
+  ``|y~|``, SAUNA's combined boundary/thickness uncertainty map of the patch's
+  mask (:func:`~viscy_utils.losses.seg_aux_maps.sauna_weight_map`), which
+  down-weights the boundary of thick structures and keeps thin ones and deep
+  interiors/backgrounds at full weight.
+- ``topology="cldice"`` replaces the per-patch loss by
+  ``(1 - alpha) * dice + alpha * (1 - clDice)`` with the soft-skeleton clDice.
 """
 
 import torch
 from torch import Tensor, nn
+
+from viscy_utils.losses.seg_aux_maps import sauna_weight_map, soft_skeleton
 
 __all__ = ["SegAuxDice"]
 
@@ -112,9 +125,31 @@ class SegAuxDice(nn.Module):
     label : {"mask", "target"}
         Dice reference: the binary foreground mask, or the target soft-thresholded
         like the prediction (self-consistent; zero loss at ``pred == target``).
+    weighting : {"none", "sauna"}
+        ``"sauna"`` computes ``sum(w * p * r) / (sum(w * p**2) + sum(w * r**2))``
+        with ``w = |y~|`` from the binarized mask, without gradient.
+    spacing : tuple of float or None
+        Physical voxel size per spatial dim, e.g. ``(z, y, x)`` in um; required
+        with ``weighting="sauna"`` (and only then), one entry per spatial dim.
+    topology : {"none", "cldice"}
+        ``"cldice"`` mixes in ``1 - clDice`` with weight ``cldice_alpha``.
+    cldice_alpha : float
+        Weight of ``1 - clDice`` in [0, 1]; the Dice term gets ``1 - cldice_alpha``.
+    cldice_iters : int
+        Soft-skeleton erosion iterations (>= 1).
     """
 
-    def __init__(self, c: float = 0.1, eps: float = 1e-6, label: str = "mask") -> None:
+    def __init__(
+        self,
+        c: float = 0.1,
+        eps: float = 1e-6,
+        label: str = "mask",
+        weighting: str = "none",
+        spacing: tuple[float, ...] | None = None,
+        topology: str = "none",
+        cldice_alpha: float = 0.5,
+        cldice_iters: int = 10,
+    ) -> None:
         super().__init__()
         if c <= 0:
             raise ValueError(f"c must be > 0, got {c}")
@@ -122,9 +157,29 @@ class SegAuxDice(nn.Module):
             raise ValueError(f"eps must be > 0, got {eps}")
         if label not in ("mask", "target"):
             raise ValueError(f"label must be 'mask' or 'target', got {label!r}")
+        if weighting not in ("none", "sauna"):
+            raise ValueError(f"weighting must be 'none' or 'sauna', got {weighting!r}")
+        if weighting == "sauna":
+            if spacing is None:
+                raise ValueError("weighting='sauna' needs spacing (physical voxel size per spatial dim)")
+            if len(spacing) == 0 or any(s <= 0 for s in spacing):
+                raise ValueError(f"spacing must be non-empty and positive, got {spacing}")
+        elif spacing is not None:
+            raise ValueError(f"spacing={spacing} has no effect without weighting='sauna'")
+        if topology not in ("none", "cldice"):
+            raise ValueError(f"topology must be 'none' or 'cldice', got {topology!r}")
+        if not 0.0 <= cldice_alpha <= 1.0:
+            raise ValueError(f"cldice_alpha must be in [0, 1], got {cldice_alpha}")
+        if cldice_iters < 1:
+            raise ValueError(f"cldice_iters must be >= 1, got {cldice_iters}")
         self.c = c
         self.eps = eps
         self.label = label
+        self.weighting = weighting
+        self.spacing = None if spacing is None else tuple(float(s) for s in spacing)
+        self.topology = topology
+        self.cldice_alpha = cldice_alpha
+        self.cldice_iters = cldice_iters
 
     def per_channel(self, pred: Tensor, target: Tensor, fg_mask: Tensor) -> tuple[Tensor, Tensor]:
         """Compute the Dice loss per (sample, channel) and which entries are valid.
@@ -150,6 +205,9 @@ class SegAuxDice(nn.Module):
                 f"{tuple(pred.shape)}, {tuple(target.shape)}, {tuple(fg_mask.shape)}"
             )
         b, c = target.shape[:2]
+        spatial = tuple(target.shape[2:])
+        if self.spacing is not None and len(self.spacing) != len(spatial):
+            raise ValueError(f"spacing {self.spacing} has {len(self.spacing)} entries for {len(spatial)} spatial dims")
         with torch.autocast(device_type=pred.device.type, enabled=False):
             pred_f = pred.float().reshape(b * c, -1)
             mask = (fg_mask.reshape(b * c, -1) > 0.5).float()
@@ -172,10 +230,45 @@ class SegAuxDice(nn.Module):
                 else:
                     ref = mask
             p = torch.sigmoid((pred_f - tau.unsqueeze(-1)) / s.unsqueeze(-1))
-            inter = (p * ref).sum(-1)
-            denom = (p * p).sum(-1) + (ref * ref).sum(-1) + self.eps
+            if self.weighting == "sauna":
+                with torch.no_grad():
+                    w = sauna_weight_map(fg.reshape(b * c, *spatial), self.spacing).reshape(b * c, -1)
+                inter = (w * p * ref).sum(-1)
+                denom = (w * p * p).sum(-1) + (w * ref * ref).sum(-1) + self.eps
+            else:
+                inter = (p * ref).sum(-1)
+                denom = (p * p).sum(-1) + (ref * ref).sum(-1) + self.eps
             dice = 1.0 - 2.0 * inter / denom
+            if self.topology == "cldice":
+                dice = (1.0 - self.cldice_alpha) * dice + self.cldice_alpha * (
+                    1.0 - self._cldice(p, ref, (b * c, 1, *spatial))
+                )
         return dice.reshape(b, c), valid.reshape(b, c)
+
+    def _cldice(self, p: Tensor, ref: Tensor, shape: tuple[int, ...]) -> Tensor:
+        """Soft clDice per row; gradient flows through ``p`` and its skeleton only.
+
+        Parameters
+        ----------
+        p : Tensor
+            Soft prediction, shape ``(R, N)``.
+        ref : Tensor
+            Reference, shape ``(R, N)``.
+        shape : tuple of int
+            ``(R, 1, *spatial)`` to restore the spatial layout.
+
+        Returns
+        -------
+        Tensor
+            clDice per row, shape ``(R,)``.
+        """
+        skel_p = soft_skeleton(p.reshape(shape), self.cldice_iters).reshape(p.shape)
+        with torch.no_grad():
+            skel_r = soft_skeleton(ref.reshape(shape), self.cldice_iters).reshape(ref.shape)
+        # eps on both sides (clDice's "smooth"): an empty skeleton reads as perfect, not 0/0.
+        t_prec = ((skel_p * ref).sum(-1) + self.eps) / (skel_p.sum(-1) + self.eps)
+        t_sens = ((skel_r * p).sum(-1) + self.eps) / (skel_r.sum(-1) + self.eps)
+        return 2.0 * t_prec * t_sens / (t_prec + t_sens + self.eps)
 
     def forward(
         self,
