@@ -50,7 +50,8 @@ When the foreground-limited pixel columns are on, the resolved
 ``pixel_metrics.foreground`` recipe is stamped too (``pixel_foreground``), with the
 ``FOREGROUND_METRICS_VERSION`` of the code and the pixel spacing: the ``FG_*`` values
 depend on all three, so a cache scored with another recipe, code or spacing -- or
-without a recipe -- is refused. With the columns off the key is absent and the payload is unchanged.
+without a recipe -- is refused. A run with the columns off needs nothing from the
+stamp and reuses a cache scored with them. With the columns off the key is absent and the payload is unchanged.
 """
 
 import json
@@ -237,18 +238,19 @@ def metrics_provenance_matches(
     pixel_foreground : dict or None
         Resolved ``pixel_metrics.foreground`` recipe (with FG code version and pixel
         spacing) the current run would score with, ``None`` when the ``FG_*`` columns
-        are off. It must equal the recorded one (absent = ``None``), so turning the
-        columns on or off, or changing a sigma, the code version or the spacing,
-        recomputes.
+        are off. When given, it must equal the recorded one (absent = ``None``), so
+        turning the columns on, or changing a sigma, the code version or the spacing,
+        recomputes. ``None`` accepts any recorded recipe: the cache's extra ``FG_*``
+        columns cost a run without them nothing.
 
     Returns
     -------
     bool
         True when the recorded ``cubic`` version equals the installed one (or both
         are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`),
-        if ``cp_space_sha256`` is given the recorded binding equals it, the recorded
-        foreground recipe equals ``pixel_foreground``, and the prediction check above
-        passes.
+        if ``cp_space_sha256`` is given the recorded binding equals it, if
+        ``pixel_foreground`` is given the recorded recipe equals it, and the
+        prediction check above passes.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -261,7 +263,7 @@ def metrics_provenance_matches(
         return False
     if cp_space_sha256 is not None and payload.get("cp_space_sha256") != cp_space_sha256:
         return False
-    if payload.get("pixel_foreground") != pixel_foreground:
+    if pixel_foreground is not None and payload.get("pixel_foreground") != pixel_foreground:
         return False
     digest = payload.get("prediction_sources_sha256_12")
     if digest is not None:

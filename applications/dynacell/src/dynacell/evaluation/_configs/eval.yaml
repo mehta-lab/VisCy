@@ -134,8 +134,8 @@ pixel_metrics:
   # (Spotlight v1's mask, for comparison). Sigmas are physical (um); null takes the
   # target's default from metrics.FOREGROUND_SIGMAS_UM. Off by default: on adds the
   # columns, and the recipe (+ FG code version and spacing) is stamped in
-  # metrics_provenance.json, so turning it on or changing it recomputes the pixel
-  # metrics instead of reusing a cache.
+  # metrics_provenance.json, so turning it on or changing it reruns the whole
+  # final-metrics pass instead of reusing a cache; turning it off reuses one.
   foreground:
     enabled: false
     source: smooth_otsu   # smooth_otsu | otsu

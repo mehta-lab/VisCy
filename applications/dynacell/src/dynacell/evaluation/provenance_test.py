@@ -91,7 +91,8 @@ def test_foreground_recipe_is_stamped_only_when_on(tmp_path):
     )
     assert json.loads((on / PROVENANCE_FILENAME).read_text())["pixel_foreground"] == recipe
     assert metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=recipe)
-    assert not metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES)
+    # A run without the columns needs nothing from the stamp: the extra columns are harmless.
+    assert metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES)
     other = {**recipe, "smooth_sigma_um": 1.0}
     assert not metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=other)
     assert not metrics_provenance_matches(

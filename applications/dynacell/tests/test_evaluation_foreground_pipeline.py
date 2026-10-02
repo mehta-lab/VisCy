@@ -140,7 +140,7 @@ def test_foreground_on_adds_columns_and_gates_the_cache(scored, tmp_path: Path):
     assert pipeline._final_metrics_cache_valid(on_cfg) is False  # another recipe -> recompute
     on_cfg.pixel_metrics.foreground.feather_sigma_um = 0.5
     on_cfg.pixel_metrics.foreground.enabled = False
-    assert pipeline._final_metrics_cache_valid(on_cfg) is False  # FG rows, run without FG -> recompute
+    assert pipeline._final_metrics_cache_valid(on_cfg) is True  # FG off needs nothing FG wrote: reuse
 
     # A cache scored without FG must not satisfy a run that asks for it.
     off_cfg = config("off", {"enabled": True, "smooth_sigma_um": 1.0, "feather_sigma_um": 0.5})
