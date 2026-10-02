@@ -197,6 +197,26 @@ def test_grouped_rejects_instance_ap_field_override(tmp_path: Path):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
 
 
+@pytest.mark.parametrize("condition", [0, 1])
+def test_grouped_rejects_foreground_override(tmp_path: Path, condition: int):
+    """A per-condition ``pixel_metrics.foreground`` raises: one bucket must not mix FG/no-FG or recipes."""
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["conditions"][condition]["pixel_metrics"] = {
+        "foreground": {"enabled": True, "smooth_sigma_um": 0.5, "feather_sigma_um": 0.5}
+    }
+
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="pixel_metrics.foreground"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
 def test_grouped_warns_loudly_on_process_plus_cache_miss(tmp_path: Path, capsys):
     """``executor=process`` + multiple conditions + cache-miss prints a loud WARNING.
 
