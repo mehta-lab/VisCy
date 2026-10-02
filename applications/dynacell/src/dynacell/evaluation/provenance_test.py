@@ -68,6 +68,37 @@ def test_feature_less_run_ignores_the_cp_key(tmp_path):
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
 
 
+def test_foreground_recipe_is_stamped_only_when_on(tmp_path):
+    """No recipe writes the payload byte-for-byte as before; a recipe must match exactly to reuse."""
+    off, on = tmp_path / "off", tmp_path / "on"
+    off.mkdir()
+    on.mkdir()
+    write_metrics_provenance(off, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST)
+    legacy = json.dumps(
+        {
+            "versions": installed_versions(),
+            "cp_reference_sha256": None,
+            "cp_space_sha256": None,
+            "prediction_sources_sha256_12": _DIGEST,
+        },
+        indent=1,
+        sort_keys=True,
+    )
+    assert (off / PROVENANCE_FILENAME).read_text() == legacy + "\n"
+    recipe = {"source": "smooth_otsu", "smooth_sigma_um": 0.5, "feather_sigma_um": 0.5}
+    write_metrics_provenance(
+        on, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST, pixel_foreground=recipe
+    )
+    assert json.loads((on / PROVENANCE_FILENAME).read_text())["pixel_foreground"] == recipe
+    assert metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=recipe)
+    assert not metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES)
+    other = {**recipe, "smooth_sigma_um": 1.0}
+    assert not metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=other)
+    assert not metrics_provenance_matches(
+        off, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=recipe
+    )
+
+
 def test_other_cp_reference_is_not_a_match(tmp_path):
     """CP values scored in another reference are not reusable after a rebuild."""
     write_metrics_provenance(tmp_path, cp_reference_sha256="ref-old", cp_space_sha256="old", prediction_digest=_DIGEST)

@@ -45,6 +45,11 @@ It also stamps the ``prediction_sources_sha256_12`` of the prediction that was s
 (:func:`dynacell.evaluation.cache.prediction_sources_sha256_12`): a re-predict writes
 into the same ``io.pred_path``, so the path alone cannot tell the final-metrics cache
 gate that its rows describe an older prediction.
+
+When the foreground-limited pixel columns are on, the resolved
+``pixel_metrics.foreground`` recipe is stamped too (``pixel_foreground``): the ``FG_*``
+values depend on it, so a cache scored with another recipe -- or without one -- is
+refused. With the columns off the key is absent and the payload is unchanged.
 """
 
 import json
@@ -149,6 +154,7 @@ def write_metrics_provenance(
     cp_reference_sha256: str | None,
     cp_space_sha256: str | None,
     prediction_digest: str,
+    pixel_foreground: dict[str, Any] | None = None,
 ) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
@@ -168,6 +174,9 @@ def write_metrics_provenance(
         prediction the metrics were scored on, taken before scoring and stored as
         ``prediction_sources_sha256_12``; the final-metrics cache gate compares it with
         the store's current one.
+    pixel_foreground : dict or None
+        Resolved ``pixel_metrics.foreground`` recipe the ``FG_*`` columns were scored
+        with, stored under ``pixel_foreground``; ``None`` (columns off) writes no key.
 
     Raises
     ------
@@ -182,11 +191,17 @@ def write_metrics_provenance(
         "cp_space_sha256": cp_space_sha256,
         "prediction_sources_sha256_12": prediction_digest,
     }
+    if pixel_foreground is not None:
+        payload["pixel_foreground"] = pixel_foreground
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
 def metrics_provenance_matches(
-    save_dir: Path, *, cp_space_sha256: str | None, prediction_sources: dict[str, dict[str, Any]]
+    save_dir: Path,
+    *,
+    cp_space_sha256: str | None,
+    prediction_sources: dict[str, dict[str, Any]],
+    pixel_foreground: dict[str, Any] | None = None,
 ) -> bool:
     """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference, from this prediction.
 
@@ -217,14 +232,20 @@ def metrics_provenance_matches(
         scored from pred caches it had left stale. The grouped leaves'
         ``force_recompute.final_metrics: true`` covers it, and stale legacy caches were
         audited and recomputed.
+    pixel_foreground : dict or None
+        Resolved ``pixel_metrics.foreground`` recipe the current run would score with,
+        ``None`` when the ``FG_*`` columns are off. It must equal the recorded one
+        (absent = ``None``), so turning the columns on or off, or changing a sigma,
+        recomputes.
 
     Returns
     -------
     bool
         True when the recorded ``cubic`` version equals the installed one (or both
         are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`),
-        if ``cp_space_sha256`` is given the recorded binding equals it, and the
-        prediction check above passes.
+        if ``cp_space_sha256`` is given the recorded binding equals it, the recorded
+        foreground recipe equals ``pixel_foreground``, and the prediction check above
+        passes.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -236,6 +257,8 @@ def metrics_provenance_matches(
     if recorded != installed and not (recorded in accepted and installed in accepted):
         return False
     if cp_space_sha256 is not None and payload.get("cp_space_sha256") != cp_space_sha256:
+        return False
+    if payload.get("pixel_foreground") != pixel_foreground:
         return False
     digest = payload.get("prediction_sources_sha256_12")
     if digest is not None:

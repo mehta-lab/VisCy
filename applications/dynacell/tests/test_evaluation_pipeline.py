@@ -29,6 +29,8 @@ def _import_pipeline_with_stubs(monkeypatch):
 
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")
     metrics_module.ascupy = None
+    metrics_module.FOREGROUND_COLUMNS = ()
+    metrics_module.FOREGROUND_SIGMAS_UM = {}
     metrics_module.CP_FEATURE_VERSION = "v2_dist_texture"
     metrics_module.CP_FEATURE_NAMES_BY_VERSION = {"v2_dist_texture": ()}
     metrics_module.fit_microssim = lambda *args, **kwargs: None

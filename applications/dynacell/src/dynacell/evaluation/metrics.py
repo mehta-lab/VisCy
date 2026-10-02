@@ -270,6 +270,20 @@ def compute_pixel_metrics(
 FOREGROUND_SOURCES = ("smooth_otsu", "otsu")
 #: Columns :func:`foreground_pixel_metrics` returns, in order.
 FOREGROUND_COLUMNS = ("FG_PCC", "FG_SI_SSIM", "FG_SI_NRMSE", "FG_SI_PSNR", "FG_frac")
+#: Default ``smooth_otsu`` sigmas (um) per ``target_name``, used when
+#: ``pixel_metrics.foreground`` leaves a sigma null. Chosen 2026-10-01 from XY + XZ
+#: figures on DynaCell-lite (iPSC, 50 FOVs; A549 mock, 12 FOVs): 0.5 um smoothing
+#: gives clean nuclei (raw Otsu is speckled on the noisy iPSC GT; 1 um merges
+#: neighbours), membrane walls + the basal sheet, and mitochondria-rich regions; ER
+#: takes 1 um so the foreground is the ER-filled cytoplasm, gaps between tubules
+#: included, with nuclei excluded. Median ``FG_frac`` (iPSC / A549 mock): nucleus
+#: 0.25 / 0.05, membrane 0.32 / 0.21, ER 0.40 / 0.19, mitochondria 0.13 / 0.09.
+FOREGROUND_SIGMAS_UM: dict[str, dict[str, float]] = {
+    "nucleus": {"smooth_sigma_um": 0.5, "feather_sigma_um": 0.5},
+    "membrane": {"smooth_sigma_um": 0.5, "feather_sigma_um": 0.5},
+    "er": {"smooth_sigma_um": 1.0, "feather_sigma_um": 0.5},
+    "mitochondria": {"smooth_sigma_um": 0.5, "feather_sigma_um": 0.5},
+}
 
 # The SSIM window of the whole-image ``SI_SSIM``: skimage's ``gaussian_weights=True``
 # (sigma 1.5, truncate 3.5 -> an 11-voxel window, K1/K2 defaults). ``FG_SI_SSIM``

@@ -127,6 +127,19 @@ pixel_metrics:
     tail_fraction: 0.2
     apodization: tukey
     nbins_low: 3
+  # Foreground-limited columns FG_PCC, FG_SI_SSIM, FG_SI_NRMSE, FG_SI_PSNR and FG_frac:
+  # the SI_* family (+ PCC) scored against a soft [0, 1] weight map built from the GT
+  # alone (metrics.foreground_weight), so every model is scored on the same region.
+  # smooth_otsu = Gaussian smooth -> Otsu -> Gaussian feather; otsu = raw Otsu
+  # (Spotlight v1's mask, for comparison). Sigmas are physical (um); null takes the
+  # target's default from metrics.FOREGROUND_SIGMAS_UM. Off by default: on adds the
+  # columns, and the recipe is stamped in metrics_provenance.json, so turning it on or
+  # changing it recomputes the pixel metrics instead of reusing a cache.
+  foreground:
+    enabled: false
+    source: smooth_otsu   # smooth_otsu | otsu
+    smooth_sigma_um: null
+    feather_sigma_um: null
 
 feature_metrics:
   patch_size: 256

@@ -32,6 +32,8 @@ from dynacell.evaluation.feature_metrics import (
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
+    FOREGROUND_COLUMNS,
+    FOREGROUND_SIGMAS_UM,
     ascupy,
     build_crops,
     compute_pixel_metrics,
@@ -682,6 +684,7 @@ def _process_one_fov(
     cell_sim_metrics = tuple(OmegaConf.select(config, "cell_similarity.metrics", default=["pcc"]))
     cell_sim_reduce = tuple(OmegaConf.select(config, "cell_similarity.reduce", default=["mean", "median"]))
     compute_fid = _feature_metric_flags(config)["compute_fid"]
+    foreground = _foreground_settings(config)
 
     if predict_cached is not None and target_cached is not None:
         # Reuse arrays already read by _calibrate_microssim (serial mode opt-in
@@ -949,6 +952,7 @@ def _process_one_fov(
                 fsc_kwargs=config.pixel_metrics.fsc,
                 spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
                 use_gpu=use_gpu,
+                foreground=foreground,
             )
         pixel_row = {**data_info, **pixel_metrics}
         if compute_cell_similarity and cell_segmentation is not None:
@@ -1216,6 +1220,37 @@ def _feature_metric_flags(config: DictConfig) -> dict[str, bool]:
         name: bool(OmegaConf.select(config, f"feature_metrics.{name}", default=True))
         for name in ("compute_fid", "compute_prc", "compute_mind")
     }
+
+
+def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
+    """Resolve ``pixel_metrics.foreground`` into ``foreground_weight`` kwargs, or ``None`` when off.
+
+    Read with ``OmegaConf.select`` so a config without the block (hand-built test
+    configs) runs with the ``FG_*`` columns off. A null sigma takes the target's
+    default from :data:`~dynacell.evaluation.metrics.FOREGROUND_SIGMAS_UM`. The
+    resolved dict is also what the provenance sidecar records.
+
+    Raises
+    ------
+    ValueError
+        If a sigma is null and ``target_name`` has no default.
+    """
+    if not bool(OmegaConf.select(config, "pixel_metrics.foreground.enabled", default=False)):
+        return None
+    settings: dict[str, Any] = {
+        "source": str(OmegaConf.select(config, "pixel_metrics.foreground.source", default="smooth_otsu"))
+    }
+    for key in ("smooth_sigma_um", "feather_sigma_um"):
+        value = OmegaConf.select(config, f"pixel_metrics.foreground.{key}", default=None)
+        if value is None:
+            if config.target_name not in FOREGROUND_SIGMAS_UM:
+                raise ValueError(
+                    f"pixel_metrics.foreground.{key} is null and target_name={config.target_name!r} has no default "
+                    f"in FOREGROUND_SIGMAS_UM ({sorted(FOREGROUND_SIGMAS_UM)}); set it explicitly."
+                )
+            value = FOREGROUND_SIGMAS_UM[config.target_name][key]
+        settings[key] = float(value)
+    return settings
 
 
 def _separate_nuclei_path(config: DictConfig) -> str | None:
@@ -1901,6 +1936,14 @@ def evaluate_predictions(
                 embedding_groups[f"gt_{key}"] = (bb.gt_feats, bb.gt_fovs, bb.gt_ts)
             _save_embeddings(save_dir, embedding_groups)
 
+    if _foreground_settings(config) is not None:
+        # A (FOV, t) whose GT has no foreground scores NaN in every FG_* column (see
+        # foreground_pixel_metrics); count them so a mean over fewer rows is visible.
+        empty = sum(not np.isfinite(row["FG_SI_SSIM"]) for row in all_pixel_metrics)
+        print(
+            f"[foreground] {empty} of {len(all_pixel_metrics)} (FOV, t) rows have no GT foreground; FG_* are NaN there."
+        )
+
     dump_timings_csv(save_dir)
 
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
@@ -1972,6 +2015,7 @@ def save_metrics(
         cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
         cp_space_sha256=cp_space.binding_sha256 if cp_space is not None else None,
         prediction_digest=prediction_digest,
+        pixel_foreground=_foreground_settings(config),
     )
 
 
@@ -2018,7 +2062,10 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         current_sha256 = space.binding_sha256
     # A missing prediction store raises FileNotFoundError here, as it would when scoring.
     sources = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
-    if not metrics_provenance_matches(save_dir, cp_space_sha256=current_sha256, prediction_sources=sources):
+    foreground = _foreground_settings(config)
+    if not metrics_provenance_matches(
+        save_dir, cp_space_sha256=current_sha256, prediction_sources=sources, pixel_foreground=foreground
+    ):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename
@@ -2041,6 +2088,9 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     if pixel_ok:
         pixel_rows = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
         if not pixel_rows or not _SCALED_PIXEL_COLUMNS.issubset(pixel_rows[0]):
+            return False
+        # The stamp above already pins the foreground recipe; the columns must be there too.
+        if foreground is not None and not set(FOREGROUND_COLUMNS).issubset(pixel_rows[0]):
             return False
     # Same guard for per-cell similarity, keyed to the exact requested columns:
     # a prior run with a different metrics/reduce set (e.g. PCC-only) must not
