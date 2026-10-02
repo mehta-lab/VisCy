@@ -39,12 +39,17 @@ FEATURE_METRICS = [
     "MorphEm_FID",
 ]
 
+# The foreground-limited ``FG_*`` columns (``pixel_metrics.foreground``, off by default)
+# are ranked here but stay out of PIXEL_METRICS: callers ask for them by name.
 HIGHER_IS_BETTER = {
     "PCC",
     "SSIM",
     "SI_SSIM",
     "PSNR",
     "SI_PSNR",
+    "FG_PCC",
+    "FG_SI_SSIM",
+    "FG_SI_PSNR",
     "Spectral_PCC",
     "MicroMS3IM",
     "Dice",
