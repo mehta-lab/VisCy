@@ -149,6 +149,10 @@ class ODESolver:
         Absolute error tolerance.
     rtol : float
         Relative error tolerance.
+    time_schedule : str
+        ``"uniform"`` (linearly spaced time points) or ``"cosine"``
+        (``t0 + (t1 - t0) * (1 - cos(pi * s)) / 2`` over uniform ``s``, which
+        clusters the points at both ends of the interval).
     """
 
     def __init__(
@@ -161,11 +165,18 @@ class ODESolver:
         num_steps: int,
         atol: float,
         rtol: float,
+        time_schedule: str = "uniform",
     ) -> None:
         if t0 >= t1:
             raise ValueError("ODE solver requires t0 < t1")
         self.drift = drift
-        self.t = torch.linspace(t0, t1, num_steps)
+        if time_schedule == "uniform":
+            self.t = torch.linspace(t0, t1, num_steps)
+        elif time_schedule == "cosine":
+            s = torch.linspace(0.0, 1.0, num_steps, dtype=torch.float64)
+            self.t = (t0 + (t1 - t0) * (1 - torch.cos(torch.pi * s)) / 2).float()
+        else:
+            raise ValueError(f"time_schedule must be 'uniform' or 'cosine', got {time_schedule!r}")
         self.atol = atol
         self.rtol = rtol
         self.sampler_type = sampler_type
