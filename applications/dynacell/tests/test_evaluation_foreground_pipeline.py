@@ -80,6 +80,27 @@ def test_otsu_source_resolves_no_smoothing_sigma():
     assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.25}
 
 
+@pytest.mark.parametrize(
+    ("override", "match"),
+    [({"source": "cell"}, "source"), ({"smooth_sigma_um": -1.0}, ">= 0"), ({"feather_sigma_um": -0.5}, ">= 0")],
+)
+def test_bad_recipe_fails_at_the_cache_gate(scored, override, match):
+    """An invalid recipe raises when the cache gate resolves it, before any model load or scoring.
+
+    ``force_recompute.final_metrics`` makes the gate return early otherwise, so the
+    recipe must be resolved first for both entrypoints to fail fast.
+    """
+    _, config = scored
+    pipeline = live_pipeline_module()
+    fg = {"enabled": True, "source": "smooth_otsu", "smooth_sigma_um": 0.5, "feather_sigma_um": 0.5, **override}
+    cfg = config("bad", fg)
+    with pytest.raises(ValueError, match=match):
+        pipeline._foreground_settings(cfg)
+    cfg.force_recompute.final_metrics = True
+    with pytest.raises(ValueError, match=match):
+        pipeline._final_metrics_cache_valid(cfg)
+
+
 def test_default_off_is_byte_identical_and_unstamped(scored, tmp_path: Path):
     """No block and ``enabled: false`` write the same CSV, no FG_* column and no stamp key."""
     pred_path, config = scored

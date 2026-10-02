@@ -34,6 +34,7 @@ from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
     FOREGROUND_COLUMNS,
     FOREGROUND_SIGMAS_UM,
+    FOREGROUND_SOURCES,
     ascupy,
     build_crops,
     compute_pixel_metrics,
@@ -1234,11 +1235,15 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
     Raises
     ------
     ValueError
-        If a sigma is null and ``target_name`` has no default.
+        If ``source`` is not in
+        :data:`~dynacell.evaluation.metrics.FOREGROUND_SOURCES`, a sigma is negative,
+        or a sigma is null and ``target_name`` has no default.
     """
     if not bool(OmegaConf.select(config, "pixel_metrics.foreground.enabled", default=False)):
         return None
     source = str(OmegaConf.select(config, "pixel_metrics.foreground.source", default="smooth_otsu"))
+    if source not in FOREGROUND_SOURCES:
+        raise ValueError(f"pixel_metrics.foreground.source must be one of {FOREGROUND_SOURCES}; got {source!r}")
     settings: dict[str, Any] = {"source": source}
     keys = ("feather_sigma_um",) if source == "otsu" else ("smooth_sigma_um", "feather_sigma_um")
     for key in keys:
@@ -1250,6 +1255,8 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
                     f"in FOREGROUND_SIGMAS_UM ({sorted(FOREGROUND_SIGMAS_UM)}); set it explicitly."
                 )
             value = FOREGROUND_SIGMAS_UM[config.target_name][key]
+        if float(value) < 0:
+            raise ValueError(f"pixel_metrics.foreground.{key} must be >= 0; got {value!r}")
         settings[key] = float(value)
     return settings
 
@@ -2036,6 +2043,9 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     campaign launcher passes it). Encoding a focus signature into the saved rows would
     let this auto-detect — a follow-up.
     """
+    # Resolved before every early return: both entrypoints call this gate before any
+    # model load, so an invalid recipe fails here rather than after the load.
+    foreground = _foreground_settings(config)
     force = config.force_recompute
     if force.all or force.final_metrics:
         return False
@@ -2063,7 +2073,6 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         current_sha256 = space.binding_sha256
     # A missing prediction store raises FileNotFoundError here, as it would when scoring.
     sources = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
-    foreground = _foreground_settings(config)
     if not metrics_provenance_matches(
         save_dir, cp_space_sha256=current_sha256, prediction_sources=sources, pixel_foreground=foreground
     ):
