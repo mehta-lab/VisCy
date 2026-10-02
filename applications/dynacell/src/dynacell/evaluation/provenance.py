@@ -47,9 +47,10 @@ into the same ``io.pred_path``, so the path alone cannot tell the final-metrics 
 gate that its rows describe an older prediction.
 
 When the foreground-limited pixel columns are on, the resolved
-``pixel_metrics.foreground`` recipe is stamped too (``pixel_foreground``): the ``FG_*``
-values depend on it, so a cache scored with another recipe -- or without one -- is
-refused. With the columns off the key is absent and the payload is unchanged.
+``pixel_metrics.foreground`` recipe is stamped too (``pixel_foreground``), with the
+``FOREGROUND_METRICS_VERSION`` of the code and the pixel spacing: the ``FG_*`` values
+depend on all three, so a cache scored with another recipe, code or spacing -- or
+without a recipe -- is refused. With the columns off the key is absent and the payload is unchanged.
 """
 
 import json
@@ -176,7 +177,8 @@ def write_metrics_provenance(
         the store's current one.
     pixel_foreground : dict or None
         Resolved ``pixel_metrics.foreground`` recipe the ``FG_*`` columns were scored
-        with, stored under ``pixel_foreground``; ``None`` (columns off) writes no key.
+        with, plus the FG code version and pixel spacing, stored under
+        ``pixel_foreground``; ``None`` (columns off) writes no key.
 
     Raises
     ------
@@ -233,9 +235,10 @@ def metrics_provenance_matches(
         ``force_recompute.final_metrics: true`` covers it, and stale legacy caches were
         audited and recomputed.
     pixel_foreground : dict or None
-        Resolved ``pixel_metrics.foreground`` recipe the current run would score with,
-        ``None`` when the ``FG_*`` columns are off. It must equal the recorded one
-        (absent = ``None``), so turning the columns on or off, or changing a sigma,
+        Resolved ``pixel_metrics.foreground`` recipe (with FG code version and pixel
+        spacing) the current run would score with, ``None`` when the ``FG_*`` columns
+        are off. It must equal the recorded one (absent = ``None``), so turning the
+        columns on or off, or changing a sigma, the code version or the spacing,
         recomputes.
 
     Returns

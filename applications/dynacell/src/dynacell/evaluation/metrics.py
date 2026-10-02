@@ -266,6 +266,11 @@ def compute_pixel_metrics(
     return metrics
 
 
+#: Version of the ``FG_*`` computation, stamped with the recipe in
+#: ``metrics_provenance.json``. Bump it on any change that moves an ``FG_*`` value
+#: (weight construction, padding exclusion, hard threshold, SSIM window or crop,
+#: affine fit, data range) so caches scored by the old code are recomputed.
+FOREGROUND_METRICS_VERSION = 1
 #: Foreground sources :func:`foreground_weight` accepts.
 FOREGROUND_SOURCES = ("smooth_otsu", "otsu")
 #: Columns :func:`foreground_pixel_metrics` returns, in order.

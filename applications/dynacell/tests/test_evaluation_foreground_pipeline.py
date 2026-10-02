@@ -127,7 +127,13 @@ def test_foreground_on_adds_columns_and_gates_the_cache(scored, tmp_path: Path):
         assert 0.0 < on["FG_frac"] < 1.0 and np.isfinite(on["FG_SI_SSIM"])
 
     stamp = json.loads((tmp_path / "on" / "metrics_provenance.json").read_text())
-    assert stamp["pixel_foreground"] == {"source": "smooth_otsu", "smooth_sigma_um": 1.0, "feather_sigma_um": 0.5}
+    assert stamp["pixel_foreground"] == {
+        "source": "smooth_otsu",
+        "smooth_sigma_um": 1.0,
+        "feather_sigma_um": 0.5,
+        "version": pipeline.FOREGROUND_METRICS_VERSION,
+        "spacing": [1.0, 1.0, 1.0],
+    }
 
     assert pipeline._final_metrics_cache_valid(on_cfg) is True
     on_cfg.pixel_metrics.foreground.feather_sigma_um = 1.0
@@ -141,6 +147,21 @@ def test_foreground_on_adds_columns_and_gates_the_cache(scored, tmp_path: Path):
     assert pipeline._final_metrics_cache_valid(off_cfg) is False
     off_cfg.pixel_metrics.foreground.enabled = False
     assert pipeline._final_metrics_cache_valid(off_cfg) is True
+
+
+def test_foreground_code_version_or_spacing_change_recomputes(scored, monkeypatch):
+    """FG values depend on the metrics code and on the um -> voxel sigma: either changing invalidates the cache."""
+    pred_path, config = scored
+    pipeline = live_pipeline_module()
+    cfg = config("stamped", {"enabled": True, "smooth_sigma_um": 1.0, "feather_sigma_um": 0.5})
+    _run(pipeline, cfg, pred_path)
+    assert pipeline._final_metrics_cache_valid(cfg) is True
+    cfg.pixel_metrics.spacing = [2.0, 1.0, 1.0]
+    assert pipeline._final_metrics_cache_valid(cfg) is False
+    cfg.pixel_metrics.spacing = [1.0, 1.0, 1.0]
+    assert pipeline._final_metrics_cache_valid(cfg) is True
+    monkeypatch.setattr(pipeline, "FOREGROUND_METRICS_VERSION", pipeline.FOREGROUND_METRICS_VERSION + 1)
+    assert pipeline._final_metrics_cache_valid(cfg) is False
 
 
 def test_stamped_recipe_without_columns_is_recomputed(scored, tmp_path: Path):

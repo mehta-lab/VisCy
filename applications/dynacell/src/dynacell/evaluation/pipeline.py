@@ -33,6 +33,7 @@ from dynacell.evaluation.feature_metrics import (
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
     FOREGROUND_COLUMNS,
+    FOREGROUND_METRICS_VERSION,
     FOREGROUND_SIGMAS_UM,
     FOREGROUND_SOURCES,
     ascupy,
@@ -1229,8 +1230,8 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
     Read with ``OmegaConf.select`` so a config without the block (hand-built test
     configs) runs with the ``FG_*`` columns off. A null sigma takes the target's
     default from :data:`~dynacell.evaluation.metrics.FOREGROUND_SIGMAS_UM`. The
-    ``otsu`` source does not smooth, so its ``smooth_sigma_um`` is left out. The
-    resolved dict is also what the provenance sidecar records.
+    ``otsu`` source does not smooth, so its ``smooth_sigma_um`` is left out.
+    :func:`_foreground_stamp` extends it into what the provenance sidecar records.
 
     Raises
     ------
@@ -1259,6 +1260,24 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
             raise ValueError(f"pixel_metrics.foreground.{key} must be >= 0; got {value!r}")
         settings[key] = float(value)
     return settings
+
+
+def _foreground_stamp(config: DictConfig) -> dict[str, Any] | None:
+    """The ``pixel_foreground`` provenance stamp: the resolved recipe plus what else sets ``FG_*``.
+
+    ``FG_*`` values also depend on the metrics code
+    (:data:`~dynacell.evaluation.metrics.FOREGROUND_METRICS_VERSION`) and on
+    ``pixel_metrics.spacing``, which turns the physical sigmas into voxel sigmas.
+    ``None`` when the columns are off.
+    """
+    settings = _foreground_settings(config)
+    if settings is None:
+        return None
+    return {
+        **settings,
+        "version": FOREGROUND_METRICS_VERSION,
+        "spacing": [float(s) for s in config.pixel_metrics.spacing],
+    }
 
 
 def _separate_nuclei_path(config: DictConfig) -> str | None:
@@ -2023,7 +2042,7 @@ def save_metrics(
         cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
         cp_space_sha256=cp_space.binding_sha256 if cp_space is not None else None,
         prediction_digest=prediction_digest,
-        pixel_foreground=_foreground_settings(config),
+        pixel_foreground=_foreground_stamp(config),
     )
 
 
@@ -2045,7 +2064,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     """
     # Resolved before every early return: both entrypoints call this gate before any
     # model load, so an invalid recipe fails here rather than after the load.
-    foreground = _foreground_settings(config)
+    foreground = _foreground_stamp(config)
     force = config.force_recompute
     if force.all or force.final_metrics:
         return False
