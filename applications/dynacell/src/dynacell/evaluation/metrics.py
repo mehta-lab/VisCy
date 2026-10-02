@@ -387,6 +387,9 @@ def foreground_weight(
     if feather_sigma_um > 0:
         weight = _cubic_ndimage.gaussian_filter(weight, sigma=_voxel_sigma(feather_sigma_um, spacing), mode="reflect")
         weight = np.clip(weight, 0.0, 1.0)
+        if image.ndim == 3:
+            # The feather blurs the edge planes' foreground back into the padding.
+            weight[~signal] = 0.0
     return weight
 
 

@@ -262,6 +262,18 @@ def test_zero_padded_planes_do_not_become_the_background_class(source):
     assert (weight[4:] == reference[4:]).mean() > 0.99
 
 
+@pytest.mark.parametrize("source", ["otsu", "smooth_otsu"])
+def test_feather_does_not_spread_weight_into_zero_padded_planes(source):
+    """The feather runs after the padding is excluded; it must not hand the padding weight back."""
+    image, _ = _blobs()
+    image += 100.0
+    image[:3] = 0.0
+    image[3:6, 10:54, 10:54] += 5.0  # foreground right next to the padding
+    weight = foreground_weight(image, [1.0, 1.0, 1.0], source=source, smooth_sigma_um=0.5, feather_sigma_um=1.0)
+    assert not weight[:3].any()
+    assert ((weight[3:] > 0) & (weight[3:] < 1)).any()
+
+
 def test_foreground_weight_sigma_is_physical():
     """Sigmas are in um: halving the spacing doubles the voxel sigma, i.e. widens the feather."""
     image, _ = _blobs()
