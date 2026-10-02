@@ -15,6 +15,7 @@ from dynacell.engine import (
     DynacellGAN,
     DynacellUNet,
     _blend_weight,
+    _pad_to_multiple,
     _phase_shift_average,
     _sliding_window_inference,
 )
@@ -348,6 +349,82 @@ def test_flow_matching_predict_step_pad_crop(synth_celldiff_batch):
     with torch.no_grad():
         prediction = model.predict_step(batch, batch_idx=0)
     assert prediction.shape == small_source.shape
+
+
+def _count_net_calls(model: DynacellFlowMatching) -> list[int]:
+    """Patch the velocity net's forward to count calls; returns the one-element counter."""
+    calls = [0]
+    forward = model.model.net.forward
+
+    def counted(*args, **kwargs):
+        calls[0] += 1
+        return forward(*args, **kwargs)
+
+    model.model.net.forward = counted
+    return calls
+
+
+@pytest.mark.parametrize(("method", "per_step"), [("euler", 1), ("midpoint", 2)])
+def test_flow_matching_fixed_grid_sampler_nfe(method, per_step):
+    """A fixed-grid sampler takes ``num_generate_steps - 1`` steps of ``per_step`` evaluations per tile."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=4,
+        predict_method="sliding_window",
+        predict_overlap=[0, 0, 0],
+        predict_sampling_method=method,
+    ).eval()
+    calls = _count_net_calls(model)
+    with torch.no_grad():
+        prediction = model.predict_step({"source": torch.randn(1, 1, 16, 32, 32)}, batch_idx=0)
+    assert prediction.shape == (1, 1, 16, 32, 32)
+    assert calls[0] == 2 * 3 * per_step  # two Z tiles
+
+
+def test_flow_matching_generate_whole_volume_larger_than_patch():
+    """``generate`` runs a volume larger than the patch in one pass, padding to the accepted multiples."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=3,
+        predict_method="generate",
+        predict_sampling_method="euler",
+    ).eval()
+    source = torch.randn(1, 1, 14, 36, 50)  # not multiples of (4, 8, 8)
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == source.shape
+    assert torch.isfinite(prediction).all()
+    assert list(model.model._inference_nets) == [(16, 40, 56)]
+
+
+def test_flow_matching_tile_size_full_extent_slabs():
+    """``predict_tile_size`` with -1 tiles Z at the patch depth and takes the whole YX field per tile."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=2,
+        predict_method="iterative",
+        predict_overlap=[4, 0, 0],
+        predict_sampling_method="euler",
+        predict_tile_size=[8, -1, -1],
+    ).eval()
+    source = torch.randn(1, 1, 16, 40, 56)
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == source.shape
+    assert torch.isfinite(prediction).all()
+    assert list(model.model._inference_nets) == [(8, 40, 56)]
+
+
+def test_pad_to_multiple_pads_trailing_end_only():
+    """Replicate padding goes on the trailing end so cropping ``[:D, :H, :W]`` recovers the input."""
+    x = torch.arange(2 * 3 * 5, dtype=torch.float32).reshape(1, 1, 2, 3, 5)
+    padded = _pad_to_multiple(x, (4, 4, 8))
+    assert padded.shape == (1, 1, 4, 4, 8)
+    torch.testing.assert_close(padded[..., :2, :3, :5], x)
+    assert _pad_to_multiple(x, (1, 1, 1)) is x
 
 
 def test_flow_matching_sliding_window_rejects_nonzero_overlap():

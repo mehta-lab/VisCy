@@ -182,6 +182,14 @@ def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
     return DivisiblePad((0, 0, down_factor, down_factor))
 
 
+def _pad_to_multiple(x: Tensor, multiple: Sequence[int]) -> Tensor:
+    """Replicate-pad the trailing end of each spatial dim of ``x`` up to a multiple of ``multiple``."""
+    pad: list[int] = []
+    for size, m in zip(reversed(x.shape[2:]), reversed(tuple(multiple)), strict=True):
+        pad.extend([0, -size % m])
+    return F.pad(x, pad, mode="replicate") if any(pad) else x
+
+
 def _center_crop_to_shape(tensor: Tensor, spatial_shape: tuple[int, ...]) -> Tensor:
     """Center-crop trailing spatial dimensions to the requested shape."""
     slices = [slice(None)] * tensor.ndim
@@ -951,8 +959,10 @@ class DynacellFlowMatching(LightningModule):
         validation loader. Disabled by default to preserve the previous
         cheaper validation behavior.
     predict_method : {"denoise", "generate", "sliding_window", "iterative"}
-        Prediction generation method. ``"generate"`` runs single-patch ODE
-        (default, matches standard HCS tile workflow). ``"sliding_window"``
+        Prediction generation method. ``"generate"`` runs the ODE over the
+        whole input in one pass (default); an input larger than the training
+        patch runs through a weight-sharing view of the network and is padded
+        up to the sizes the network accepts. ``"sliding_window"``
         partitions the volume into **non-overlapping** tiles (ignores
         ``predict_overlap``; passing a non-zero overlap raises so users
         aren't silently misled). ``"iterative"`` slides overlapping tiles
@@ -963,6 +973,23 @@ class DynacellFlowMatching(LightningModule):
         Overlap for ``denoise`` and ``iterative``. Ignored by
         ``sliding_window``; must be ``0`` or ``[0, 0, 0]`` when
         ``predict_method='sliding_window'``.
+    predict_sampling_method : str
+        ``torchdiffeq`` ODE method for ``generate``, ``sliding_window`` and
+        ``iterative``: adaptive ``"dopri5"`` (default), or a fixed-grid method
+        (``"euler"``, ``"midpoint"``, ``"heun2"``, ``"rk4"``) that takes
+        ``num_generate_steps - 1`` steps.
+    predict_time_schedule : {"uniform", "cosine"}
+        Spacing of the ``num_generate_steps`` ODE time points; ``"cosine"``
+        packs a fixed-grid solver's steps toward both ends of the interval,
+        where adaptive dopri5 spends most of its evaluations.
+    predict_compile : bool
+        ``torch.compile`` the velocity network for prediction.
+    predict_tile_size : list of int or None
+        Tile ``[D, H, W]`` for ``sliding_window`` and ``iterative``; ``None``
+        (default) is the training patch, ``-1`` takes the whole (padded) extent
+        of that axis, e.g. ``[8, -1, -1]`` for full-field 8-plane Z slabs. Tiles
+        other than the training patch run through a weight-sharing view of
+        the network.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
@@ -1024,6 +1051,10 @@ class DynacellFlowMatching(LightningModule):
         compute_validation_loss: bool = False,
         predict_method: Literal["denoise", "generate", "sliding_window", "iterative"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
+        predict_sampling_method: str = "dopri5",
+        predict_time_schedule: Literal["uniform", "cosine"] = "uniform",
+        predict_compile: bool = False,
+        predict_tile_size: list[int] | None = None,
         ckpt_path: str | None = None,
         seg_aux: SegAuxDice | None = None,
         seg_aux_weight: float = 0.0,
@@ -1039,6 +1070,10 @@ class DynacellFlowMatching(LightningModule):
             ignore=[
                 "predict_method",
                 "predict_overlap",
+                "predict_sampling_method",
+                "predict_time_schedule",
+                "predict_compile",
+                "predict_tile_size",
                 "num_generate_steps",
                 "num_log_steps",
                 "ckpt_path",
@@ -1078,6 +1113,10 @@ class DynacellFlowMatching(LightningModule):
         self.compute_validation_loss = compute_validation_loss
         self.predict_method = predict_method
         self.predict_overlap = predict_overlap
+        self.predict_sampling_method = predict_sampling_method
+        self.predict_time_schedule = predict_time_schedule
+        self.model.compile_inference = predict_compile
+        self.predict_tile_size = predict_tile_size
         self._training_step_outputs: list = []
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._validation_dice_losses: list[list[tuple[Tensor, int]]] = []
@@ -1279,10 +1318,22 @@ class DynacellFlowMatching(LightningModule):
                 pad.extend([0, max(0, p - s)])
             source = F.pad(source, pad, mode="replicate")
 
+        tile_size = None
+        if self.predict_tile_size is not None:
+            source = _pad_to_multiple(source, self.model.net.spatial_multiple)
+            tile_size = tuple(
+                s if t == -1 else t for s, t in zip(source.shape[2:], self.predict_tile_size, strict=True)
+            )
+
         if self.predict_method == "denoise":
             prediction = self.model.denoise_sliding_window(source, overlap_size=self.predict_overlap)
         elif self.predict_method == "generate":
-            prediction = self.model.generate(source, num_steps=self.num_generate_steps)
+            prediction = self.model.generate(
+                _pad_to_multiple(source, self.model.net.spatial_multiple),
+                num_steps=self.num_generate_steps,
+                sampling_method=self.predict_sampling_method,
+                time_schedule=self.predict_time_schedule,
+            )
         elif self.predict_method == "sliding_window":
             # generate_sliding_window partitions into non-overlapping tiles
             # and does NOT consume predict_overlap. A non-zero overlap means
@@ -1297,12 +1348,21 @@ class DynacellFlowMatching(LightningModule):
                     "Use predict_method='iterative' for overlap-anchored tiled inference, "
                     "or set predict_overlap=[0, 0, 0] to acknowledge the non-overlapping behavior."
                 )
-            prediction = self.model.generate_sliding_window(source, num_steps=self.num_generate_steps)
+            prediction = self.model.generate_sliding_window(
+                source,
+                num_steps=self.num_generate_steps,
+                sampling_method=self.predict_sampling_method,
+                time_schedule=self.predict_time_schedule,
+                tile_size=tile_size,
+            )
         elif self.predict_method == "iterative":
             prediction = self.model.generate_iterative(
                 source,
                 num_steps=self.num_generate_steps,
                 overlap_size=self.predict_overlap,
+                sampling_method=self.predict_sampling_method,
+                time_schedule=self.predict_time_schedule,
+                tile_size=tile_size,
             )
         else:
             raise ValueError(

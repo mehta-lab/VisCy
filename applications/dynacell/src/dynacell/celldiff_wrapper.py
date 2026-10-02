@@ -10,6 +10,7 @@ The reusable backbone and transport numerics live in ``viscy-models``.
 """
 
 import itertools
+from collections.abc import Callable
 
 import torch
 from torch import Tensor, nn
@@ -90,6 +91,8 @@ class CELLDiff3DVS(nn.Module):
         self.seg_aux = seg_aux
         self.seg_aux_t0 = seg_aux_t0
         self.joint_mask = joint_mask
+        self.compile_inference = False
+        self._inference_nets: dict[tuple[int, ...], Callable[[Tensor, Tensor, Tensor], Tensor]] = {}
         if joint_mask and net.inconv.in_channels % 2:
             raise ValueError(f"joint_mask needs net in_channels = 2 x target channels, got {net.inconv.in_channels}")
 
@@ -195,6 +198,30 @@ class CELLDiff3DVS(nn.Module):
             "n_gated": gate.sum().float(),
         }
 
+    def inference_net(self, spatial: tuple[int, ...]) -> Callable[[Tensor, Tensor, Tensor], Tensor]:
+        """Velocity network used by the ``generate*`` methods for one input size.
+
+        The trained network when ``spatial`` is its training patch size, otherwise
+        a weight-sharing view built by :meth:`CELLDiffNet.with_input_size`;
+        wrapped in ``torch.compile`` when ``compile_inference`` is set. Cached
+        per size, so build it after the model is on its inference device.
+
+        Parameters
+        ----------
+        spatial : tuple of int
+            Input spatial size ``(D, H, W)``.
+
+        Returns
+        -------
+        callable
+            ``net(xt, cond, t) -> velocity``.
+        """
+        key = tuple(int(s) for s in spatial)
+        if key not in self._inference_nets:
+            net = self.net if list(key) == list(self.net.input_spatial_size) else self.net.with_input_size(key)
+            self._inference_nets[key] = torch.compile(net, dynamic=False) if self.compile_inference else net
+        return self._inference_nets[key]
+
     def _noise_like_target(self, phase: Tensor) -> Tensor:
         """Create Gaussian noise with the network's output channel count.
 
@@ -212,15 +239,29 @@ class CELLDiff3DVS(nn.Module):
         in_ch = self.net.inconv.in_channels
         return torch.randn(b, in_ch, *spatial, device=phase.device, dtype=phase.dtype)
 
-    def generate(self, phase: Tensor, num_steps: int = 100) -> Tensor:
-        """Generate virtual staining via ODE sampling.
+    def generate(
+        self, phase: Tensor, num_steps: int = 100, sampling_method: str = "dopri5", time_schedule: str = "uniform"
+    ) -> Tensor:
+        """Generate virtual staining via ODE sampling over the whole input.
+
+        An input larger than the training patch runs through a weight-sharing
+        view of the network (see :meth:`inference_net`), so a whole volume is
+        generated in one pass with no tile seams.
 
         Parameters
         ----------
         phase : Tensor
             Phase contrast input of shape ``(B, 1, D, H, W)``.
         num_steps : int
-            Number of ODE integration steps.
+            Number of ODE output time points; for a fixed-grid
+            ``sampling_method`` the solver steps on this grid, so it takes
+            ``num_steps - 1`` steps.
+        sampling_method : str
+            ``torchdiffeq`` method: adaptive ``"dopri5"`` (default) or a
+            fixed-grid one such as ``"euler"``, ``"midpoint"`` or ``"heun2"``.
+        time_schedule : str
+            Spacing of the time points, ``"uniform"`` or ``"cosine"`` (dense at
+            both ends, where the velocity field changes fastest).
 
         Returns
         -------
@@ -228,10 +269,13 @@ class CELLDiff3DVS(nn.Module):
             Predicted fluorescence of shape ``(B, in_channels, D, H, W)``.
         """
         target = self._noise_like_target(phase)
-        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+        sample_fn = self.transport_sampler.sample_ode(
+            sampling_method=sampling_method, num_steps=num_steps, time_schedule=time_schedule
+        )
+        net = self.inference_net(tuple(phase.shape[-3:]))
 
         def fn(xt: Tensor, t: Tensor) -> Tensor:
-            return self.net(xt, phase, t)
+            return net(xt, phase, t)
 
         with torch.no_grad():
             target = sample_fn(target, fn)[-1]
@@ -263,7 +307,14 @@ class CELLDiff3DVS(nn.Module):
         with torch.no_grad():
             return sample_fn(target, fn)  # (num_steps, B, C, D, H, W)
 
-    def generate_sliding_window(self, phase: Tensor, num_steps: int = 100) -> Tensor:
+    def generate_sliding_window(
+        self,
+        phase: Tensor,
+        num_steps: int = 100,
+        sampling_method: str = "dopri5",
+        tile_size: tuple[int, ...] | None = None,
+        time_schedule: str = "uniform",
+    ) -> Tensor:
         """Generate virtual staining via tiled sliding window (stride == patch size).
 
         Partitions the input into non-overlapping patches of size
@@ -279,6 +330,13 @@ class CELLDiff3DVS(nn.Module):
             Phase contrast input of shape ``(..., D, H, W)``.
         num_steps : int
             Number of ODE integration steps per patch.
+        sampling_method : str
+            ``torchdiffeq`` method, as in :meth:`generate`.
+        tile_size : tuple of int or None
+            Tile ``(D, H, W)``; ``None`` is the training patch size. Any other
+            size runs through a weight-sharing view (see :meth:`inference_net`).
+        time_schedule : str
+            Spacing of the time points, as in :meth:`generate`.
 
         Returns
         -------
@@ -286,14 +344,17 @@ class CELLDiff3DVS(nn.Module):
             Predicted fluorescence of shape ``(..., D, H, W)``.
         """
         spatial = tuple(phase.shape[-3:])
-        patch_spatial = tuple(self.net.input_spatial_size)
+        patch_spatial = tuple(tile_size) if tile_size is not None else tuple(self.net.input_spatial_size)
         n_spatial = 3
         start_lists = window_starts(spatial, patch_spatial, (0, 0, 0))
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
         out = torch.empty(out_shape, device=phase.device, dtype=phase.dtype)
-        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+        sample_fn = self.transport_sampler.sample_ode(
+            sampling_method=sampling_method, num_steps=num_steps, time_schedule=time_schedule
+        )
+        net = self.inference_net(patch_spatial)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):
@@ -308,7 +369,7 @@ class CELLDiff3DVS(nn.Module):
                     t_: Tensor,
                     _p: Tensor = phase_patch,
                 ) -> Tensor:
-                    return self.net(xt_, _p, t_)
+                    return net(xt_, _p, t_)
 
                 out[tuple(slicer)] = sample_fn(xt, fn)[-1]
 
@@ -383,6 +444,9 @@ class CELLDiff3DVS(nn.Module):
         phase: Tensor,
         num_steps: int = 100,
         overlap_size: int | tuple[int, ...] = 256,
+        sampling_method: str = "dopri5",
+        tile_size: tuple[int, ...] | None = None,
+        time_schedule: str = "uniform",
     ) -> Tensor:
         """Generate virtual staining via overlapping sliding window with velocity anchoring.
 
@@ -408,6 +472,12 @@ class CELLDiff3DVS(nn.Module):
         overlap_size : int or tuple of int
             Overlap in each spatial dimension ``(od, oh, ow)``.
             A single int applies the same overlap to all three dimensions.
+        sampling_method : str
+            ``torchdiffeq`` method, as in :meth:`generate`.
+        tile_size : tuple of int or None
+            Tile ``(D, H, W)``, as in :meth:`generate_sliding_window`.
+        time_schedule : str
+            Spacing of the time points, as in :meth:`generate`.
 
         Returns
         -------
@@ -427,14 +497,17 @@ class CELLDiff3DVS(nn.Module):
             )
 
         spatial = tuple(phase.shape[-3:])
-        patch_spatial = tuple(self.net.input_spatial_size)
+        patch_spatial = tuple(tile_size) if tile_size is not None else tuple(self.net.input_spatial_size)
         n_spatial = 3
         start_lists = window_starts(spatial, patch_spatial, overlap_size)
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
         out = torch.full(out_shape, float("nan"), device=phase.device, dtype=phase.dtype)
-        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+        sample_fn = self.transport_sampler.sample_ode(
+            sampling_method=sampling_method, num_steps=num_steps, time_schedule=time_schedule
+        )
+        net = self.inference_net(patch_spatial)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):
@@ -454,7 +527,7 @@ class CELLDiff3DVS(nn.Module):
                     _out: Tensor = out_patch,
                     _mask: Tensor = known_mask,
                 ) -> Tensor:
-                    v = self.net(xt_, _p, t_)
+                    v = net(xt_, _p, t_)
                     # Infer x0 from the Linear-path formula: x0 = xt - t*v.
                     t_exp = t_.reshape(t_.shape[0], *([1] * (xt_.dim() - 1)))
                     x0_ = xt_ - t_exp * v
