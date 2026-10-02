@@ -8,6 +8,7 @@ module with the unified bottleneck interface
 Requires ``diffusers`` (for Attention and FeedForward).
 """
 
+import copy
 from collections.abc import Sequence
 
 import torch
@@ -23,6 +24,46 @@ from viscy_models.celldiff.modules.transformer import (
 )
 
 __all__ = ["ViTBottleneck3D"]
+
+
+def _latent_grid_size(
+    input_spatial_size: Sequence[int],
+    num_downsamples: int,
+    downsample_z: bool,
+    patch_size: tuple[int, int, int],
+) -> list[int]:
+    """Token grid ``[D, H, W]`` for an input size, validating every divisibility constraint."""
+    # Stride-2 convolutions require exact divisibility; floor division
+    # silently accepts odd sizes that cause encoder/decoder shape mismatches.
+    factor = 2**num_downsamples
+    dim_names = ["D", "H", "W"]
+    downsampled_dims = [True, True, True] if downsample_z else [False, True, True]
+    for s, name, is_down in zip(input_spatial_size, dim_names, downsampled_dims):
+        if is_down and s % factor != 0:
+            raise ValueError(
+                f"Input {name}={s} is not divisible by {factor} "
+                f"({num_downsamples} stride-2 downsamples). "
+                f"Use a multiple of {factor} to avoid encoder/decoder shape mismatches."
+            )
+    if downsample_z:
+        latent_size = [s // factor for s in input_spatial_size]
+    else:
+        latent_size = [input_spatial_size[0]] + [s // factor for s in input_spatial_size[1:]]
+
+    # ── Validate patch divisibility ─────────────────────────────────
+    # Checked per axis: a Z-preserving 2D configuration runs D=1 with a
+    # patch of (1, p, p), where a cubic p would be neither divisible nor
+    # convolvable.
+    for dim_val, name, orig, p in zip(latent_size, dim_names, input_spatial_size, patch_size):
+        if dim_val % p != 0:
+            raise ValueError(
+                f"Latent {name} dimension {dim_val} (from input {name}={orig}) "
+                f"is not divisible by its patch extent {p} (patch_size={tuple(patch_size)}). "
+                f"Each spatial dimension after {num_downsamples} encoder downsamples "
+                f"must be divisible by the patch extent on that axis."
+            )
+
+    return [s // p for s, p in zip(latent_size, patch_size)]
 
 
 class ViTBottleneck3D(nn.Module):
@@ -83,38 +124,10 @@ class ViTBottleneck3D(nn.Module):
         self._in_channels = in_channels
         self._patch_size = normalize_patch_size(patch_size)
 
-        # ── Compute latent spatial size after encoder downsamples ────────
-        # Stride-2 convolutions require exact divisibility; floor division
-        # silently accepts odd sizes that cause encoder/decoder shape mismatches.
-        factor = 2**num_downsamples
-        dim_names = ["D", "H", "W"]
-        downsampled_dims = [True, True, True] if downsample_z else [False, True, True]
-        for s, name, is_down in zip(input_spatial_size, dim_names, downsampled_dims):
-            if is_down and s % factor != 0:
-                raise ValueError(
-                    f"Input {name}={s} is not divisible by {factor} "
-                    f"({num_downsamples} stride-2 downsamples). "
-                    f"Use a multiple of {factor} to avoid encoder/decoder shape mismatches."
-                )
-        if downsample_z:
-            latent_size = [s // factor for s in input_spatial_size]
-        else:
-            latent_size = input_spatial_size[:1] + [s // factor for s in input_spatial_size[1:]]
-
-        # ── Validate patch divisibility ─────────────────────────────────
-        # Checked per axis: a Z-preserving 2D configuration runs D=1 with a
-        # patch of (1, p, p), where a cubic p would be neither divisible nor
-        # convolvable.
-        for dim_val, name, orig, p in zip(latent_size, dim_names, input_spatial_size, self._patch_size):
-            if dim_val % p != 0:
-                raise ValueError(
-                    f"Latent {name} dimension {dim_val} (from input {name}={orig}) "
-                    f"is not divisible by its patch extent {p} (patch_size={patch_size}). "
-                    f"Each spatial dimension after {num_downsamples} encoder downsamples "
-                    f"must be divisible by the patch extent on that axis."
-                )
-
-        self.latent_grid_size = [s // p for s, p in zip(latent_size, self._patch_size)]
+        self._num_downsamples = num_downsamples
+        self._downsample_z = downsample_z
+        self._hidden_size = hidden_size
+        self.latent_grid_size = _latent_grid_size(input_spatial_size, num_downsamples, downsample_z, self._patch_size)
 
         # ── Patch embedding ─────────────────────────────────────────────
         self.img_embedding = PatchEmbed3D(
@@ -152,6 +165,35 @@ class ViTBottleneck3D(nn.Module):
             out_channels=in_channels,
             time_embed_dim=time_embed_dim,
         )
+
+    def with_input_size(self, input_spatial_size: Sequence[int]) -> "ViTBottleneck3D":
+        """Return a view of this bottleneck for another input size that shares every weight.
+
+        Only the fixed sinusoidal positional embedding and the token grid depend on
+        the input size. Both are rebuilt for the new grid; the embedding is a
+        function of integer grid coordinates, so every token position the
+        training grid also has keeps exactly its trained embedding.
+
+        Parameters
+        ----------
+        input_spatial_size : Sequence[int]
+            New input spatial size ``[D, H, W]`` before any encoding.
+
+        Returns
+        -------
+        ViTBottleneck3D
+            A shallow copy whose submodules and learned parameters are the
+            originals' (not copies).
+        """
+        grid = _latent_grid_size(input_spatial_size, self._num_downsamples, self._downsample_z, self._patch_size)
+        view = copy.copy(self)
+        view._modules = dict(self._modules)
+        view._parameters = dict(self._parameters)
+        view._buffers = dict(self._buffers)
+        view.latent_grid_size = grid
+        pos = torch.from_numpy(get_3d_sincos_pos_embed(self._hidden_size, grid)).float().unsqueeze(0)
+        view.img_pos_embed = nn.Parameter(pos.to(self.img_pos_embed), requires_grad=False)
+        return view
 
     def forward(self, x: Tensor, time_embeds: Tensor | None = None) -> Tensor:
         """Forward pass through the ViT bottleneck.

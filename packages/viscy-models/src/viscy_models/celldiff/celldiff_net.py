@@ -9,6 +9,7 @@ The flow-matching training wrapper (``CELLDiff3DVS``) belongs in the
 application layer and is not part of this package.
 """
 
+import copy
 from collections.abc import Sequence
 
 import torch
@@ -112,6 +113,42 @@ class CELLDiffNet(UNet3DBase):
         )
         self.input_spatial_size = input_spatial_size
         self.cond_channels = cond_channels
+
+    @property
+    def spatial_multiple(self) -> tuple[int, int, int]:
+        """Multiples ``(D, H, W)`` every input size must be, e.g. for :meth:`with_input_size`.
+
+        Z is never downsampled, so D only needs the Z patch extent; H and W are
+        halved once per encoder level before patching.
+        """
+        pd, ph, pw = self.bottleneck._patch_size
+        return pd, self._divisor * ph, self._divisor * pw
+
+    def with_input_size(self, input_spatial_size: Sequence[int]) -> "CELLDiffNet":
+        """Return a view of this network for another input size that shares every weight.
+
+        The convolutional encoder and decoder are size-agnostic; only the ViT
+        bottleneck's positional embedding and token grid depend on the input
+        size, and :meth:`ViTBottleneck3D.with_input_size` rebuilds those. Use it
+        to run a model trained on patches over a whole volume at inference.
+
+        Parameters
+        ----------
+        input_spatial_size : Sequence[int]
+            New input spatial size ``[D, H, W]``. D must be divisible by the Z
+            patch extent, H and W by ``2 ** num_downsamples`` times theirs.
+
+        Returns
+        -------
+        CELLDiffNet
+            A shallow copy sharing every submodule and learned parameter with
+            this network, whose ``forward`` accepts ``input_spatial_size``.
+        """
+        view = copy.copy(self)
+        view._modules = dict(self._modules)
+        view.bottleneck = self.bottleneck.with_input_size(input_spatial_size)
+        view.input_spatial_size = list(input_spatial_size)
+        return view
 
     def forward(self, x: Tensor, cond: Tensor, t: Tensor) -> Tensor:
         """Predict velocity field for flow-matching.
