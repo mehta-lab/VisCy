@@ -2203,6 +2203,12 @@ _MODEL_LOADING_FIELDS: tuple[str, ...] = (
     "instance_metrics.iou_thresholds",
 )
 
+#: Fields every condition of a grouped run must share although no shared model depends
+#: on them. ``pixel_metrics.foreground`` sets the ``FG_*`` columns and their scoring
+#: region, so one bucket must not mix FG and no-FG rows or two recipes. (Not all of
+#: ``pixel_metrics``: ``spacing`` legitimately follows each condition's dataset_ref.)
+_GROUPED_SHARED_FIELDS: tuple[str, ...] = ("pixel_metrics.foreground",)
+
 
 def _snapshot_field(cfg: DictConfig, cfg_field: str):
     """Resolve a model-loading field to a comparable plain Python value."""
@@ -2291,6 +2297,12 @@ def _check_grouped_field_invariants(
                 f"Condition {condition_name!r}: overrides changed model-loading field "
                 f"{cfg_field!r}. Move it to the base config or run this condition separately."
             )
+    for cfg_field in _GROUPED_SHARED_FIELDS:
+        if base_snapshot[cfg_field] != _snapshot_field(merged, cfg_field):
+            raise ValueError(
+                f"Condition {condition_name!r}: overrides changed {cfg_field!r}, which every condition "
+                f"of a grouped run must share. Move it to the base config or run this condition separately."
+            )
     if _seg_model_required(merged) and not base_seg_required:
         raise ValueError(
             f"Condition {condition_name!r}: io.pred_cache_dir override flips "
@@ -2318,7 +2330,8 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     Conditions may freely override ``io.*``, ``save.*``, ``runtime.*``,
     ``limit_positions``, and ``force_recompute.*``. They must NOT change
     ``target_name``, ``feature_extractor.*``, ``compute_feature_metrics``,
-    or ``use_gpu`` — those gate which models get loaded.
+    or ``use_gpu`` — those gate which models get loaded — nor
+    ``pixel_metrics.foreground``, which must be uniform across one bucket.
 
     Parameters
     ----------
@@ -2386,7 +2399,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     models_base = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
     if "conditions" in models_base:
         del models_base["conditions"]
-    base_snapshot = {field: _snapshot_field(models_base, field) for field in _MODEL_LOADING_FIELDS}
+    base_snapshot = {
+        field: _snapshot_field(models_base, field) for field in (*_MODEL_LOADING_FIELDS, *_GROUPED_SHARED_FIELDS)
+    }
     base_seg_required = _seg_model_required(models_base)
 
     models: EvalModels | None = None
