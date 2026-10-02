@@ -142,6 +142,17 @@ SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
     # clDice at 5 iterations 0.878 [0.636-1.70]. results/nucleus__fnet3d_vscyto3daug__variants.csv.
     ("nucleus", "fnet3d_vscyto3daug_segaux_sauna"): 5.3,
     ("nucleus", "fnet3d_vscyto3daug_segaux_cldice"): 0.88,
+    # ER/mito arms, same protocol on the v2 baseline's best ckpt while it was still training (ER
+    # epoch=28-step=63713, mito epoch=18-step=49400; batch fg_frac .07-.11 from the classical masks).
+    # results/{er,mito}__fnet3d_vscyto3daug_v2__variants.csv. ER: Dice 0.220 [0.185-0.345], SAUNA 0.211
+    # [0.177-0.333], clDice 0.236 [0.196-0.361]. Mito: Dice 0.774 [0.617-0.936], SAUNA 0.661
+    # [0.517-0.784], clDice 0.712 [0.547-0.824].
+    ("er", "fnet3d_vscyto3daug_segaux"): 0.22,
+    ("er", "fnet3d_vscyto3daug_segaux_sauna"): 0.21,
+    ("er", "fnet3d_vscyto3daug_segaux_cldice"): 0.24,
+    ("mito", "fnet3d_vscyto3daug_segaux"): 0.77,
+    ("mito", "fnet3d_vscyto3daug_segaux_sauna"): 0.66,
+    ("mito", "fnet3d_vscyto3daug_segaux_cldice"): 0.71,
 }
 # C-joint's mask Dice has no baseline to calibrate against (the baseline has no
 # mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
@@ -307,6 +318,7 @@ ARMS: tuple[Arm, ...] = (
     # from the eval's classical ER/mito segmenter (CLAHE+Otsu fills the ER cytoplasm). The two
     # baseline draws need no mask, so they train first; the arms are calibrated on their ckpt.
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("v2", "v2_seed1")),
+    *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("segaux", *TOPOLOGY_ARGS)),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
 SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
