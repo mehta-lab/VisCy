@@ -399,12 +399,14 @@ def _weighted_ssim(image_true, image_test, weight, data_range: float) -> float:
     """Normalized-convolution SSIM averaged with ``weight``.
 
     Local means, variances and covariance come from ``weight``-weighted Gaussian
-    windows normalized by the local weight mass (normalized convolution; Gao et al.
-    2022's masked SSIM, with a Gaussian-weighted mass where dycheck's partial
-    convolution counts window voxels), so out-of-foreground voxels inform no
-    local statistic and nothing is zeroed or eroded. The per-voxel SSIM is then
-    averaged with ``weight`` over skimage's border crop. Window, ``K1``/``K2`` and
-    the sample-covariance factor are skimage's, so ``weight == 1`` reproduces
+    windows normalized by the local weight mass (normalized convolution), so
+    out-of-foreground voxels inform no local statistic and nothing is zeroed or
+    eroded. The per-voxel SSIM is then averaged with ``weight`` over skimage's
+    border crop. This follows the masked SSIM of Gao et al. 2022 (dycheck), which
+    instead normalizes by the count of mask pixels in the window (partial
+    convolution) and averages the map over every pixel, so windows holding no mask
+    score 1 there. Window, ``K1``/``K2`` and the sample-covariance factor are
+    skimage's, so ``weight == 1`` reproduces
     ``skimage.metrics.structural_similarity(..., gaussian_weights=True)``.
     """
     win_size = 2 * int(_SSIM_TRUNCATE * _SSIM_SIGMA + 0.5) + 1
@@ -454,7 +456,10 @@ def foreground_pixel_metrics(prediction, target, weight) -> dict[str, float]:
     - ``FG_frac``: ``mean(weight)``.
 
     ``weight == 1`` reproduces ``PCC``, ``SI_NRMSE``, ``SI_PSNR`` and ``SI_SSIM``.
-    Nothing is zeroed or eroded, so a thin foreground keeps its score.
+    Nothing is zeroed or eroded, so a thin foreground keeps its score. A feathered
+    weight reaches past the GT boundary, so the object edges count too: the columns
+    reward placing the objects as well as matching their interior (a hard weight,
+    ``feather_sigma_um=0``, scores the interior alone).
 
     Degenerate inputs return values instead of raising: no hard foreground (or a
     constant target inside it) gives NaN for every ``FG_*`` column; a prediction
