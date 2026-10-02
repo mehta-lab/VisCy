@@ -241,6 +241,20 @@ def test_constant_prediction_scores_zero_pcc_instead_of_vanishing():
     assert fg["FG_SI_NRMSE"] == pytest.approx(1.0 / data_range, rel=1e-5)
 
 
+def test_tiny_prediction_scale_does_not_read_as_constant():
+    """FG_PCC is affine invariant: a centred prediction scaled by 1e-7 scores as unscaled; a constant scores 0."""
+    image, _ = _blobs()
+    weight = foreground_weight(image, [1.0, 1.0, 1.0], source="otsu", feather_sigma_um=1.0)
+    pred = image + np.random.default_rng(10).normal(0.0, 2.0, image.shape).astype(np.float32)
+    pred -= pred.mean()
+    unscaled = foreground_pixel_metrics(pred, image, weight)
+    scaled = foreground_pixel_metrics(pred * np.float32(1e-7), image, weight)
+    assert 0.1 < unscaled["FG_PCC"] < 0.9
+    for key in ("FG_PCC", "FG_SI_SSIM", "FG_SI_NRMSE", "FG_SI_PSNR"):
+        assert scaled[key] == pytest.approx(unscaled[key], rel=1e-4), key
+    assert foreground_pixel_metrics(np.full_like(image, 1e-9), image, weight)["FG_PCC"] == 0.0
+
+
 def test_foreground_weight_recipes():
     """Hard mask without feather, soft weights in [0, 1] with it; ``otsu`` ignores the smoothing sigma."""
     image, mask = _blobs()

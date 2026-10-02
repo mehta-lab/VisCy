@@ -294,8 +294,6 @@ _SSIM_K1 = 0.01
 _SSIM_K2 = 0.03
 #: Weight above which a voxel counts as hard foreground (data range, emptiness).
 _HARD_FOREGROUND = 0.5
-#: Weighted prediction variance below which the prediction is constant in the foreground.
-_CONSTANT_VARIANCE = 1e-12
 
 
 def _voxel_sigma(sigma_um: float, spacing: Sequence[float]) -> tuple[float, ...]:
@@ -515,7 +513,11 @@ def foreground_pixel_metrics(prediction, target, weight) -> dict[str, float]:
     del target_zero
     pred_zero = prediction - _weighted_mean(prediction, weight, total)
     pred_var = _weighted_mean(pred_zero * pred_zero, weight, total)
-    if pred_var < _CONSTANT_VARIANCE:
+    # Constant means every weighted voxel holds one value: an exact test, so a
+    # prediction on any scale keeps its score (an absolute variance floor would
+    # call a correct but tiny-valued prediction constant).
+    support = prediction[weight > 0]
+    if pred_var == 0 or not bool(support.max() > support.min()):
         fg_pcc, gain = 0.0, 0.0
     else:
         covar = _weighted_mean(target_norm * pred_zero, weight, total)
