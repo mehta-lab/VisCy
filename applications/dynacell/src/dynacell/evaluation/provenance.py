@@ -46,6 +46,10 @@ It also stamps the ``prediction_sources_sha256_12`` of the prediction that was s
 into the same ``io.pred_path``, so the path alone cannot tell the final-metrics cache
 gate that its rows describe an older prediction.
 
+Feature FID records its solver identity independently of cubic. A requested FID
+accepts only the current or a measured-equivalent solver. Missing identities
+denote the original torch-fidelity helper; unknown explicit identities are refused.
+
 When the foreground-limited pixel columns are on, the resolved
 ``pixel_metrics.foreground`` recipe is stamped too (``pixel_foreground``), with the
 ``FOREGROUND_METRICS_VERSION`` of the code and the pixel spacing: the ``FG_*`` values
@@ -130,6 +134,26 @@ PROVENANCE_FILENAME = "metrics_provenance.json"
 #: gated on absent evidence that they move a value.
 _RECORDED_PACKAGES = ("cubic", "numpy", "scikit-image")
 
+#: FID solver identity, independent of the cubic pin. Both feature-metric callers
+#: use float64 sample-space SVD only when max(n_pred, n_target) < d, and otherwise
+#: keep the original torch-fidelity eigvals helper.
+FID_IMPLEMENTATION_VERSION = "sample-space-svd-v1"
+
+#: Legacy sidecars carry no FID identity because the only solver was this helper.
+_LEGACY_FID_IMPLEMENTATION = "torch-fidelity-eigvals-v1"
+
+#: Numerical compatibility policy: |new - old| <= 1e-5 + 2e-6 * |old|. The
+#: absolute allowance is needed near zero, where the legacy non-symmetric
+#: covariance eigvals lose accuracy; this is not bitwise equivalence. Measured
+#: 2026-10-02 on captured A549 mock ER inputs: 120 (FOV, t) cohorts for each of
+#: CP, DINOv3, DynaCLR, CELL-DINO and MorphEm, plus their five pooled datasets.
+#: CP is selected, standardized and clipped with the bound production reference.
+#: Every cohort passed this contract; all five dataset values use the dense path
+#: and are exactly unchanged. An unknown explicit solver identity is refused.
+FID_IMPLEMENTATIONS_EQUIVALENT_TO = {
+    FID_IMPLEMENTATION_VERSION: frozenset({_LEGACY_FID_IMPLEMENTATION}),
+}
+
 
 def installed_versions() -> dict[str, str]:
     """Return the installed versions of the packages recorded in the sidecar.
@@ -179,6 +203,7 @@ def write_metrics_provenance(
     cp_space_sha256: str | None,
     prediction_digest: str,
     pixel_foreground: dict[str, Any] | None = None,
+    compute_fid: bool = False,
 ) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
@@ -202,6 +227,9 @@ def write_metrics_provenance(
         Resolved ``pixel_metrics.foreground`` recipe the ``FG_*`` columns were scored
         with, plus the FG code version and pixel spacing, stored under
         ``pixel_foreground``; ``None`` (columns off) writes no key.
+    compute_fid : bool
+        Whether feature FID was requested. When True, record the implementation
+        under ``fid_implementation``; False writes no key.
 
     Raises
     ------
@@ -218,6 +246,8 @@ def write_metrics_provenance(
     }
     if pixel_foreground is not None:
         payload["pixel_foreground"] = pixel_foreground
+    if compute_fid:
+        payload["fid_implementation"] = FID_IMPLEMENTATION_VERSION
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
@@ -227,6 +257,7 @@ def metrics_provenance_matches(
     cp_space_sha256: str | None,
     prediction_sources: dict[str, dict[str, Any]],
     pixel_foreground: dict[str, Any] | None = None,
+    compute_fid: bool = False,
 ) -> bool:
     """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference, from this prediction.
 
@@ -264,6 +295,11 @@ def metrics_provenance_matches(
         turning the columns on, or changing a sigma, the code version or the spacing,
         recomputes. ``None`` accepts any recorded recipe: the cache's extra ``FG_*``
         columns cost a run without them nothing.
+    compute_fid : bool
+        When True, require the current or a measured-equivalent FID solver.
+        A missing identity denotes the legacy torch-fidelity implementation;
+        unknown explicit identities are refused. False reuses no FID value and
+        ignores its solver identity.
 
     Returns
     -------
@@ -272,7 +308,8 @@ def metrics_provenance_matches(
         are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`),
         if ``cp_space_sha256`` is given the recorded binding equals it, if
         ``pixel_foreground`` is given the recorded recipe equals it, and the
-        prediction check above passes.
+        prediction check above passes. When ``compute_fid`` is True the recorded
+        FID solver must also be current or measured-equivalent.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -287,6 +324,13 @@ def metrics_provenance_matches(
         return False
     if pixel_foreground is not None and payload.get("pixel_foreground") != pixel_foreground:
         return False
+    if compute_fid:
+        fid_implementation = payload.get("fid_implementation", _LEGACY_FID_IMPLEMENTATION)
+        accepted_fid = FID_IMPLEMENTATIONS_EQUIVALENT_TO.get(FID_IMPLEMENTATION_VERSION, frozenset()) | {
+            FID_IMPLEMENTATION_VERSION
+        }
+        if not isinstance(fid_implementation, str) or fid_implementation not in accepted_fid:
+            return False
     digest = payload.get("prediction_sources_sha256_12")
     if digest is not None:
         return digest == prediction_sources_sha256_12(prediction_sources)

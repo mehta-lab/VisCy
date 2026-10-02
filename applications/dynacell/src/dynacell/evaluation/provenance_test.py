@@ -145,6 +145,8 @@ def test_foreign_cubic_version_is_not_a_match(tmp_path):
 @pytest.fixture
 def running_the_declared_pin(monkeypatch):
     """Report the declared cubic as installed, whatever the test venv holds."""
+    # Pipeline fixtures reload evaluation modules. Patch the module these imported
+    # functions belong to, rather than a potentially newer sys.modules entry.
     monkeypatch.setattr(provenance, "version", lambda _name: REQUIRED_CUBIC_VERSION)
 
 
@@ -257,3 +259,44 @@ def test_prediction_sources_must_match_the_stamp_or_predate_the_sidecar(tmp_path
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=older)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=newer)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=blank)
+
+
+def test_fid_solver_is_stamped_only_when_requested(tmp_path):
+    """The FID implementation is auditable while FID-free stamps keep their payload."""
+    write_metrics_provenance(
+        tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST, compute_fid=True
+    )
+    payload = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
+    assert payload["fid_implementation"] == "sample-space-svd-v1"
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES, compute_fid=True)
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST)
+    assert "fid_implementation" not in json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
+
+
+@pytest.mark.parametrize("identity", [None, "torch-fidelity-eigvals-v1"])
+def test_measured_legacy_fid_solver_cache_is_reused(tmp_path, identity):
+    """Pre-change sidecars and explicitly identified legacy FID share the measured contract."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_digest=_DIGEST)
+    path = tmp_path / PROVENANCE_FILENAME
+    payload = json.loads(path.read_text())
+    if identity is not None:
+        payload["fid_implementation"] = identity
+    path.write_text(json.dumps(payload))
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256="abc", prediction_sources=_SOURCES, compute_fid=True)
+    assert not metrics_provenance_matches(
+        tmp_path, cp_space_sha256="other", prediction_sources=_SOURCES, compute_fid=True
+    )
+
+
+@pytest.mark.parametrize("identity", ["unknown-solver-v99", None, {"solver": "unknown"}])
+def test_unknown_fid_solver_is_rejected_only_when_fid_is_requested(tmp_path, identity):
+    """A foreign solver cannot silently certify FID, but an FID-free run reuses no FID value."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_digest=_DIGEST)
+    path = tmp_path / PROVENANCE_FILENAME
+    payload = json.loads(path.read_text())
+    payload["fid_implementation"] = identity
+    path.write_text(json.dumps(payload))
+    assert not metrics_provenance_matches(
+        tmp_path, cp_space_sha256="abc", prediction_sources=_SOURCES, compute_fid=True
+    )
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256="abc", prediction_sources=_SOURCES, compute_fid=False)
