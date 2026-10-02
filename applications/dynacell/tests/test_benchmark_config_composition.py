@@ -1236,7 +1236,7 @@ def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
         f"{leaf.relative_to(BENCHMARKS)}: unknown hardware profile {profile!r}. Add it to "
         f"_PREDICT_PROFILE_TIME with a measured wall limit."
     )
-    is_celldiff = any(part.startswith("celldiff") for part in leaf.parts)
+    is_celldiff = any(part.startswith("celldiff") for part in leaf.relative_to(BENCHMARKS).parts)
     assert is_celldiff == (profile == "hardware_predict_celldiff.yml"), (
         f"{leaf.relative_to(BENCHMARKS)}: celldiff={is_celldiff} but profile={profile!r}. "
         f"CELL-Diff predicts must use hardware_predict_celldiff.yml and nothing else may."
