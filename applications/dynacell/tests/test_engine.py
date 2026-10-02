@@ -10,6 +10,7 @@ from lightning.pytorch import Trainer, seed_everything
 from monai.data import MetaTensor
 from torch import nn
 
+from dynacell.celldiff_wrapper import _channels_last_copy, _ChannelsLastGroupNorm
 from dynacell.engine import (
     DynacellFlowMatching,
     DynacellGAN,
@@ -393,6 +394,46 @@ def test_flow_matching_compiled_inference_net_stays_out_of_the_state_dict():
     assert set(model.state_dict()) == keys
     model.model.compile_inference = False
     assert model.model.inference_net() is model.model.net
+
+
+def test_flow_matching_channels_last_copy_matches_the_net():
+    """The compiled-inference copy predicts the net's velocity from channels-last convs and the NDHWC
+    GroupNorm, takes the autocast dtype for its conv weights, and leaves the net itself untouched."""
+    # dims 16: two channels per GroupNorm group, so a wrong channel grouping cannot pass.
+    net_config = {**CELLDIFF_TEST_NET_CONFIG, "dims": [16, 32]}
+    net = DynacellFlowMatching(net_config=net_config, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG).model.net
+    net.eval()
+    for norm in net.modules():
+        if isinstance(norm, nn.GroupNorm):
+            nn.init.normal_(norm.weight)
+            nn.init.normal_(norm.bias)
+    fast = _channels_last_copy(net)
+
+    def convs(m: nn.Module) -> list[nn.Module]:
+        return [c for c in m.modules() if isinstance(c, (nn.Conv3d, nn.ConvTranspose3d))]
+
+    assert all(c.weight.is_contiguous(memory_format=torch.channels_last_3d) for c in convs(fast))
+    assert {type(m) for m in fast.modules() if isinstance(m, nn.GroupNorm)} == {_ChannelsLastGroupNorm}
+    assert {type(m) for m in net.modules() if isinstance(m, nn.GroupNorm)} == {nn.GroupNorm}
+    assert all(c.weight.is_contiguous() and c.weight.dtype == torch.float32 for c in convs(net))
+    x, cond = torch.randn(2, 1, 8, 32, 32), torch.randn(2, 1, 8, 32, 32)
+    t = torch.tensor([0.2, 0.7])
+    with torch.no_grad():
+        torch.testing.assert_close(fast(x, cond, t), net(x, cond, t), rtol=1e-4, atol=1e-5)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        assert {c.weight.dtype for c in convs(_channels_last_copy(net))} == {torch.bfloat16}
+
+
+def test_flow_matching_train_drops_the_compiled_inference_net():
+    """Entering train mode drops the compiled copy, whose weights would otherwise go stale."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG, predict_compile=True
+    )
+    compiled = model.model.inference_net()
+    model.eval()
+    assert model.model.inference_net() is compiled
+    model.train()
+    assert model.model.inference_net() is not compiled
 
 
 def test_flow_matching_noise_comes_from_the_cpu_generator():
