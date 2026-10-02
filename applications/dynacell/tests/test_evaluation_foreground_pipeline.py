@@ -114,7 +114,7 @@ def test_default_off_is_byte_identical_and_unstamped(scored, tmp_path: Path):
 
 
 def test_foreground_on_adds_columns_and_gates_the_cache(scored, tmp_path: Path):
-    """On: FG_* columns appended (base columns untouched), recipe stamped, and a recipe change recomputes."""
+    """On: FG_* columns added (base columns untouched), recipe stamped, and a recipe change recomputes."""
     pred_path, config = scored
     pipeline = live_pipeline_module()
     off_rows = _run(pipeline, config("off"), pred_path)
@@ -122,7 +122,8 @@ def test_foreground_on_adds_columns_and_gates_the_cache(scored, tmp_path: Path):
     on_rows = _run(pipeline, on_cfg, pred_path)
 
     for off, on in zip(off_rows, on_rows, strict=True):
-        assert list(on) == [*off, *_FG_COLUMNS]
+        # Membership only: in production the FG_* columns sit before Spectral_PCC/FSC/PerCell_*.
+        assert set(on) == set(off) | set(_FG_COLUMNS)
         assert all(on[k] == off[k] for k in off)
         assert 0.0 < on["FG_frac"] < 1.0 and np.isfinite(on["FG_SI_SSIM"])
 
