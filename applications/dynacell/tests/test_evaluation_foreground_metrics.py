@@ -155,6 +155,24 @@ def test_foreground_weight_recipes():
         foreground_weight(image, [1.0, 1.0, 1.0], feather_sigma_um=-1.0)
 
 
+@pytest.mark.parametrize("source", ["otsu", "smooth_otsu"])
+def test_zero_padded_planes_do_not_become_the_background_class(source):
+    """All-zero leading planes (A549 SEC61B/TOMM20 GT padding) stay out of the Otsu split.
+
+    Without the exclusion Otsu separates the padding from everything else and
+    calls ~95% of the volume foreground.
+    """
+    image, mask = _blobs()
+    image += 100.0  # camera offset: real GT sits far above the zero padding
+    padded = image.copy()
+    padded[:2] = 0.0
+    weight = foreground_weight(padded, [1.0, 1.0, 1.0], source=source, smooth_sigma_um=0.5)
+    assert not weight[:2].any()
+    assert weight.mean() < 2 * mask.mean()
+    reference = foreground_weight(image, [1.0, 1.0, 1.0], source=source, smooth_sigma_um=0.5)
+    assert (weight[4:] == reference[4:]).mean() > 0.99
+
+
 def test_foreground_weight_sigma_is_physical():
     """Sigmas are in um: halving the spacing doubles the voxel sigma, i.e. widens the feather."""
     image, _ = _blobs()

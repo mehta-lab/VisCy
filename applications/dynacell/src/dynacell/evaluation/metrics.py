@@ -324,7 +324,9 @@ def foreground_weight(
     -------
     array
         Weight map on ``target``'s device, float32 (float64 for a float64 target).
-        All zeros when the (smoothed) target is constant: there is no foreground.
+        Exactly constant z-planes (zero padding) are neither thresholded nor
+        foreground. All zeros when the (smoothed) target is constant: there is no
+        foreground.
 
     Raises
     ------
@@ -342,11 +344,32 @@ def foreground_weight(
         raise ValueError(f"foreground_weight expects a 2-D or 3-D target; got shape {tuple(target.shape)}")
     spacing = list(spacing)[-target.ndim :]
     image = target.astype(np.result_type(target.dtype, np.float32), copy=False)
-    if source == "smooth_otsu" and smooth_sigma_um > 0:
-        image = _cubic_ndimage.gaussian_filter(image, sigma=_voxel_sigma(smooth_sigma_um, spacing), mode="reflect")
-    if not float(image.max()) > float(image.min()):
+    # Exactly constant z-planes carry no signal: some A549 SEC61B/TOMM20 GT FOVs start
+    # with all-zero planes, which on their own form one of Otsu's two classes and turn
+    # every other voxel into foreground. Like fit_microssim's constant GT slices, they
+    # are left out of the threshold and of the foreground.
+    planes = image.reshape(image.shape[0] if image.ndim == 3 else 1, -1)
+    signal = planes.max(axis=1) > planes.min(axis=1)
+    if not bool(signal.any()):
         return np.zeros_like(image)
-    weight = (image > float(_cubic_filters.threshold_otsu(image))).astype(image.dtype)
+    if source == "smooth_otsu" and smooth_sigma_um > 0:
+        sigma = _voxel_sigma(smooth_sigma_um, spacing)
+        if bool(signal.all()):
+            image = _cubic_ndimage.gaussian_filter(image, sigma=sigma, mode="reflect")
+        else:
+            # Average over signal planes only (normalized convolution): blurring the
+            # padding into its neighbours would dim them into a third Otsu class.
+            support = np.broadcast_to(signal.reshape(-1, 1, 1), image.shape).astype(image.dtype)
+            mass = _cubic_ndimage.gaussian_filter(support, sigma=sigma, mode="reflect")
+            image = _cubic_ndimage.gaussian_filter(image * support, sigma=sigma, mode="reflect")
+            image = image / np.where(mass > 0, mass, 1.0)
+    values = image[signal] if image.ndim == 3 else image
+    if not float(values.max()) > float(values.min()):
+        return np.zeros_like(image)
+    binary = image > float(_cubic_filters.threshold_otsu(values))
+    if image.ndim == 3:
+        binary[~signal] = False
+    weight = binary.astype(image.dtype)
     if feather_sigma_um > 0:
         weight = _cubic_ndimage.gaussian_filter(weight, sigma=_voxel_sigma(feather_sigma_um, spacing), mode="reflect")
         weight = np.clip(weight, 0.0, 1.0)
