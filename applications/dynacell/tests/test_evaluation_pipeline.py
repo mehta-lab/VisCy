@@ -71,6 +71,7 @@ def _import_pipeline_with_stubs(monkeypatch):
 
     segmentation_module = types.ModuleType("dynacell.evaluation.segmentation")
     segmentation_module.segment = lambda *args, **kwargs: None
+    segmentation_module.require_cubic_workflows = lambda *args, **kwargs: None
     segmentation_module.prepare_segmentation_model = lambda *args, **kwargs: None
 
     # Stub hydra if not installed
@@ -101,6 +102,7 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     make_hcs_plate(pred_path, "prediction", seed=0)
     config = OmegaConf.create(
         {
+            "target_name": "nucleus",
             "compute_feature_metrics": False,
             "io": {"pred_path": str(pred_path), "pred_channel_name": "prediction"},
             "force_recompute": {

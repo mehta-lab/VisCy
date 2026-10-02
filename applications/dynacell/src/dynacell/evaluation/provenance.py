@@ -22,9 +22,9 @@ every ``SI_*``, ``PerCell_*``, every ``AP_*`` / ``mAP`` / ``instance_dice``,
 
 This module makes that boundary detectable and non-repeatable:
 
-* :func:`check_cubic_pin` fails a run whose environment holds neither the
-  version the repo declares nor one measured equivalent to it, instead of
-  silently producing values from a different numeric stack.
+* :func:`check_cubic_pin` rejects unsupported runtime versions. Target-specific
+  workflow capabilities are checked separately at startup, so old environments
+  can still run targets that do not need the new workflows.
 * :func:`write_metrics_provenance` stamps the versions beside the metrics,
   and :func:`metrics_provenance_matches` lets the final-metrics cache gate
   refuse a cache built by a different ``cubic``.
@@ -68,7 +68,12 @@ from dynacell.evaluation.cache import prediction_sources_sha256_12, source_preda
 #: The ``cubic`` version this repo is built against. Must equal the pin in
 #: ``applications/dynacell/pyproject.toml``; ``provenance_test.py`` asserts
 #: they cannot drift apart.
-REQUIRED_CUBIC_VERSION = "0.9.0a3"
+REQUIRED_CUBIC_VERSION = "0.9.0a4"
+
+# These installed versions may run code paths whose API requirements they meet.
+# ER/mitochondria additionally require the new workflows at eval startup.
+# Cache equivalence is a separate, measured contract below.
+CUBIC_RUNTIME_VERSIONS = frozenset({"0.9.0a3", "0.9.0a2", "0.9.0a1"})
 
 #: For each declared ``cubic`` version, the earlier versions whose metric values it
 #: reproduces within a stated tolerance, so their caches stay reusable. Keyed by the
@@ -99,7 +104,25 @@ REQUIRED_CUBIC_VERSION = "0.9.0a3"
 #: resample_isotropic control moves 1.8-6.1% under the same harness, so the
 #: comparison can see a change. 0.9.0a1 stays listed: it reproduces 0.9.0a2
 #: (entry above), which 0.9.0a3 reproduces exactly.
-CUBIC_VERSIONS_EQUIVALENT_TO = {"0.9.0a3": frozenset({"0.9.0a2", "0.9.0a1"})}
+#: 0.9.0a3 -> 0.9.0a4 ports ER/mitochondria workflows and accelerates metric
+#: reductions. MEASURED 2026-10-02 on A40 / AMD EPYC 7313P (AVX2, no AVX-512):
+#: five full 48x640x960 A549 volumes (ER mock/DENV predictions, ER mock GT,
+#: mitochondria DENV prediction and mock GT) have CPU/GPU mask XOR 0 voxels;
+#: eight private cold VisCy cache cases write/read the same masks. A one-voxel
+#: perturbation is detected, and the AICS baseline mutates its input while the
+#: cubic path does not. On captured A549 mock-ER metric inputs, nine pixel
+#: columns and ten MicroMS3IM timepoints are exact; Spectral_PCC changes by
+#: 7.6400518e-9 absolute / 4.3105157e-7 relative (tolerance: 1e-6 relative).
+#: Calibration parameters are identical; a 0.01 score perturbation is detected.
+#: On thirteen captured cells, four per-cell PCC/SSIM values and seven GLCM
+#: columns are exact; all twenty-two CP columns differ by <=3.4e-15 absolute
+#: (tolerance: 1e-12 absolute). A flipped-image feature control changes by 2.596.
+#: Other cell lines, AVX-512 hosts and genuinely 2D inputs were not measured.
+#: The older entries remain by the measured equivalences above.
+CUBIC_VERSIONS_EQUIVALENT_TO = {
+    "0.9.0a3": frozenset({"0.9.0a2", "0.9.0a1"}),
+    "0.9.0a4": frozenset({"0.9.0a3", "0.9.0a2", "0.9.0a1"}),
+}
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
 PROVENANCE_FILENAME = "metrics_provenance.json"
@@ -149,22 +172,21 @@ def _accepted_cubic_versions() -> frozenset[str]:
 
 
 def check_cubic_pin() -> None:
-    """Raise when the installed ``cubic`` is neither the declared one nor measured-equivalent to it.
+    """Require the declared runtime or a supported older environment.
 
-    An equivalent version is accepted because its values are, by measurement, the
-    declared pin's values: that is what lets eval jobs queued on the previous
-    venv keep running across a measured-equivalent bump.
+    Cache equivalence does not grant runtime API capabilities. Eval entry points
+    additionally call ``require_cubic_workflows`` for their target.
 
     Raises
     ------
     RuntimeError
         If the installed ``cubic`` version is not :data:`REQUIRED_CUBIC_VERSION`
-        or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`. Fails closed
+        or listed in :data:`CUBIC_RUNTIME_VERSIONS`. Fails closed
         on purpose: a mismatched stack writes plausible values under the wrong
         numeric contract, which is exactly the failure this module exists to prevent.
     """
     installed = version("cubic")
-    if installed not in _accepted_cubic_versions():
+    if installed not in CUBIC_RUNTIME_VERSIONS | {REQUIRED_CUBIC_VERSION}:
         raise RuntimeError(
             f"cubic {installed!r} is installed but this repo declares "
             f"{REQUIRED_CUBIC_VERSION!r}. Metric values are not comparable across "

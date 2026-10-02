@@ -220,6 +220,20 @@ def test_check_cubic_pin_rejects_a_mismatch(monkeypatch):
         check_cubic_pin()
 
 
+def test_runtime_versions_do_not_depend_on_cache_equivalence(monkeypatch):
+    monkeypatch.setattr(provenance, "CUBIC_VERSIONS_EQUIVALENT_TO", {})
+    monkeypatch.setattr(provenance, "version", lambda _name: "0.9.0a3")
+    check_cubic_pin()
+    monkeypatch.setattr(
+        provenance,
+        "CUBIC_VERSIONS_EQUIVALENT_TO",
+        {REQUIRED_CUBIC_VERSION: frozenset({"0.8.0a2"})},
+    )
+    monkeypatch.setattr(provenance, "version", lambda _name: "0.8.0a2")
+    with pytest.raises(RuntimeError, match="not comparable across"):
+        check_cubic_pin()
+
+
 def test_stamp_without_a_cp_space_binding_is_not_a_match(tmp_path):
     """A stamp carrying only the whole-reference hash (no dataset binding) is refused by a CP-scoring run."""
     payload = {"versions": {"cubic": version("cubic")}, "cp_reference_sha256": "abc"}

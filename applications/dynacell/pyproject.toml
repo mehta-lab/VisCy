@@ -69,7 +69,10 @@ optional-dependencies.eval = [
   # 576x640x960 float32) and a ValueError on empty input; measured equivalent.
   # v0.9.0a3 fixes single-image FSC/FRC splitting (binomial path, sampling-floor
   # warning); production's two-image FSC/FRC is untouched -- measured exact.
-  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a3",
+  # v0.9.0a4 adds device-agnostic ER/mitochondria workflows and faster metric
+  # kernels. Runtime workflow capabilities are checked separately from cache
+  # equivalence in dynacell.evaluation.provenance / segmentation.
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a4",
   "dinov3 @ git+https://github.com/facebookresearch/dinov3",
   "dynaclr",
   "hydra-core>=1.2",
@@ -106,7 +109,7 @@ optional-dependencies.eval_gpu = [
 # selection->waveorder, segmentation->cellpose (cellpose imported lazily).
 optional-dependencies.preprocess = [
   "cellpose>=4.2",
-  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a3",
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a4",
   "iohub>=0.3.6",
   "tqdm",
   "waveorder",
