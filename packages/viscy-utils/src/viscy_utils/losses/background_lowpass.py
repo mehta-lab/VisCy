@@ -83,9 +83,10 @@ class BackgroundLowPass(nn.Module):
 
     ``x' = w * x + (1 - w) * B``, ``m = dilate(fg_mask > 0.5, r)``,
     ``w = clamp(G_f(m), 0, 1)``, ``B = G_lp(x * (1 - m)) / G_lp(1 - m)``.
-    Where ``w == 1`` (the dilated mask shrunk by the feather's radius,
-    ``int(4 * sigma_feather + 0.5)``) ``x'`` equals ``x`` up to float32 rounding
-    of the kernel sum; where ``w == 0`` it is ``B``. Where no background pixel is
+    ``w`` is exactly 1 where the feather kernel lies entirely inside ``m`` (the
+    dilated mask shrunk by its radius, ``int(4 * sigma_feather + 0.5)``), so
+    ``x' = x`` exactly there, and exactly 0 where the kernel misses ``m``, so
+    ``x' = B`` exactly there. Where no background pixel is
     within the low-pass kernel's reach, e.g. in a patch the dilated mask covers
     entirely, ``B`` is undefined and is replaced by ``x``, so ``x'`` stays finite.
 
@@ -172,7 +173,7 @@ class BackgroundLowPass(nn.Module):
         return mask.reshape(fg_mask.shape)
 
     def blend_weight(self, dilated: Tensor) -> Tensor:
-        """Return ``w = clamp(G_f(m), 0, 1)`` in float32.
+        """Return ``w = clamp(G_f(m), 0, 1)`` in float32, exactly 1 under an all-``m`` kernel.
 
         Parameters
         ----------
@@ -185,10 +186,17 @@ class BackgroundLowPass(nn.Module):
             Float32 weights in [0, 1], shape of ``dilated``.
         """
         b, c = dilated.shape[:2]
+        spatial = dilated.shape[2:]
         with torch.autocast(device_type=dilated.device.type, enabled=False):
             sigmas = (self.sigma_feather_z, self.sigma_feather, self.sigma_feather)
-            w = _gaussian_blur(dilated.float().reshape(b * c, *dilated.shape[2:]), sigmas).clamp(0.0, 1.0)
-            return w.reshape(dilated.shape)
+            blurred = _gaussian_blur(dilated.float().reshape(b * c, *spatial), sigmas)
+            # The normalized kernel sums to 1 only up to rounding (0.99999982 at sigma 0.5).
+            # Edge replication makes the blur of ones the same value at every voxel, computed
+            # by the same operations as any all-ones window of m: dividing by it gives exactly
+            # 1 there. Size-2 axes reproduce it (size 1 is skipped, like in the full tensor).
+            ones = torch.ones((1, *(min(n, 2) for n in spatial)), device=dilated.device)
+            unit = _gaussian_blur(ones, sigmas)[0, 0, 0, 0]
+            return (blurred / unit).clamp(0.0, 1.0).reshape(dilated.shape)
 
     def background(self, target: Tensor, dilated: Tensor) -> Tensor:
         """Return the background estimate ``B`` in float32, ``target`` where undefined.

@@ -136,6 +136,19 @@ def test_empty_mask_blurs_everything():
         np.testing.assert_allclose(op(target, mask).numpy(), blurred, atol=1e-5)
 
 
+@pytest.mark.parametrize("sigma_feather", [0.5, 1.0, 2.0, 3.0])
+def test_all_foreground_plane_has_w_exactly_one_and_is_returned_unchanged(sigma_feather):
+    """Under an all-foreground plane w == 1 exactly (not 1 - rounding), so the plane comes back bit-identical."""
+    target, mask = _square_batch((2, 1, 3, 32, 32), 8, 20)
+    mask[:, :, 1] = 1.0
+    for sigma_lp in (2.0, None):
+        op = BackgroundLowPass(sigma_lp=sigma_lp, sigma_feather=sigma_feather, dilate_radius=4)
+        assert torch.equal(op.blend_weight(op.dilated_mask(mask))[:, :, 1], torch.ones(2, 1, 32, 32))
+        out = op(target, mask)
+        assert torch.equal(out[:, :, 1], target[:, :, 1])
+        assert not torch.equal(out[:, :, 0], target[:, :, 0])
+
+
 @pytest.mark.parametrize("sigma_lp", [2.0, None], ids=["smooth", "flat"])
 def test_patch_without_background_passes_through_finite(sigma_lp):
     """Where the dilated mask covers the patch, B is undefined: x' = x, finite; other patches are unaffected."""
