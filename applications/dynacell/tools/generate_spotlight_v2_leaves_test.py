@@ -11,6 +11,8 @@ from generate_spotlight_v2_leaves import (
     ARMS,
     BASELINES,
     BENCHMARKS,
+    BG_LOWPASS_ARGS,
+    ORGANELLES,
     POOL,
     SEED_SOURCES,
     SEG_AUX_WEIGHTS,
@@ -23,10 +25,13 @@ from generate_spotlight_v2_leaves import (
     build_leaves,
     changed_keys,
 )
+from jsonargparse import ArgumentParser
 
 from dynacell._compose_hook import _dynacell_ref_resolver
+from dynacell.engine import DynacellFlowMatching
 from dynacell.evaluation.paths import PAPER_KEY, canonical_model_name
 from viscy_utils.compose import load_composed_config
+from viscy_utils.losses import BackgroundLowPass
 
 
 def _suffix(leaf_dir_name: str) -> str:
@@ -50,7 +55,7 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
 
     segaux 17+68, segauxself 8+32, seed1 9+36, v2 7+28, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
     l1segaux 1+4, l1seed1 1+4, segaux_seed1 7+28, v2_seed1 7+28,
-    segaux_halfw 1+4, segaux_doublew 1+4, segaux_sauna 1+4, segaux_cldice 1+4.
+    segaux_halfw 1+4, segaux_doublew 1+4, segaux_sauna 1+4, segaux_cldice 1+4, bglp 2+8.
 
     The jointsteps and safecrop probes are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
@@ -74,6 +79,7 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "segaux_doublew": 1,
         "segaux_sauna": 1,
         "segaux_cldice": 1,
+        "bglp": 2,
     }
     assert predicts == {
         "segaux": 68,
@@ -94,6 +100,7 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "segaux_doublew": 4,
         "segaux_sauna": 4,
         "segaux_cldice": 4,
+        "bglp": 8,
     }
 
 
@@ -265,3 +272,24 @@ def test_weight_sweep_arms_differ_from_the_segaux_arm_by_the_weight_only(leaves:
             w_src = src["model"]["init_args"].pop("seg_aux_weight")
             assert w_arm == pytest.approx(w_src * WEIGHT_SCALES[arm.suffix])
             assert changed_keys(src, arm_leaf) == _FIT_RENAMES
+
+
+@pytest.mark.parametrize("organelle", ORGANELLES)
+def test_bglp_composes_and_instantiates_with_only_the_target_op_added(organelle: str) -> None:
+    """Composed, the bglp fit is the celldiff_2d baseline + fg_mask_key + target_bg_lowpass; its model builds."""
+    load = lambda model: load_composed_config(  # noqa: E731
+        BENCHMARKS / organelle / model / POOL / "train.yml", resolver=_dynacell_ref_resolver
+    )
+    base, arm = load("celldiff_2d"), load("celldiff_2d_bglp")
+    renames, _ = allowed_diff(Arm("celldiff_2d", "bglp", (organelle,), a549=False), "fit")
+    changed = changed_keys(base, arm) - renames
+    op_key = "model.init_args.target_bg_lowpass"
+    assert {op_key if k.startswith(op_key + ".") else k for k in changed} == {"data.init_args.fg_mask_key", op_key}
+    assert arm["data"]["init_args"]["fg_mask_key"] == "fg_mask"
+    parser = ArgumentParser()
+    parser.add_subclass_arguments(DynacellFlowMatching, "model")
+    module = parser.instantiate_classes(parser.parse_object({"model": arm["model"]})).model
+    op = module.target_bg_lowpass
+    assert isinstance(op, BackgroundLowPass)
+    assert {k: getattr(op, k) for k in BG_LOWPASS_ARGS} == BG_LOWPASS_ARGS
+    assert (op.sigma_lp_z, op.sigma_feather_z, op.dilate_radius_z) == (0.0, 0.0, 0)

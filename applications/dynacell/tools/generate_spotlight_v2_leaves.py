@@ -60,6 +60,12 @@ Arms (``<baseline>_<suffix>``):
   ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice sums
   weighted by the patch mask's SAUNA map, or mixed with soft-clDice. Each carries its own
   calibrated ``seg_aux_weight``, since the change rescales the term's gradient.
+- ``bglp`` -- Track H on ``celldiff_2d`` nucleus/membrane: data gains ``fg_mask_key: fg_mask``
+  and the model ``target_bg_lowpass: BackgroundLowPass(**BG_LOWPASS_ARGS)``, a training-only
+  target transform that keeps the target inside the dilated, feathered foreground and
+  low-passes it in the background (the background stays supervised, unlike a masked loss).
+  Validation stays raw, so ``--ckpt best`` selects on the baseline's criterion; predict
+  leaves equal the baseline's. Normalization is the baseline's.
 
 Leaves are emitted with ``yaml.safe_dump``, so they carry no inline comments: the
 recipe rationale stays in the baseline leaf each header names, and the reasons for
@@ -160,6 +166,9 @@ MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "celldiff_2d_cjoint"): 2.5,
     ("nucleus", "celldiff_cjoint"): 1.4,
 }
+# Track H (2026-10-03) BackgroundLowPass args for the bglp arm, in pixels. PROVISIONAL: the
+# final sigma_lp / sigma_feather / dilate_radius come from the H0 band-power spectra.
+BG_LOWPASS_ARGS: dict[str, float | int] = {"sigma_lp": 2.0, "sigma_feather": 2.0, "dilate_radius": 4}
 JOINTSTEPS_MAX_EPOCHS = 320
 # Second draws (see SEED_SOURCES) inherit their source arm's wall.
 LONG_WALL_MODELS: frozenset[str] = frozenset({"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux"})
@@ -319,6 +328,8 @@ ARMS: tuple[Arm, ...] = (
     # baseline draws need no mask, so they train first; the arms are calibrated on their ckpt.
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("v2", "v2_seed1")),
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("segaux", *TOPOLOGY_ARGS)),
+    # Track H: CellDiff-2D trained on a background-low-passed target (H1; launched as H2).
+    Arm("celldiff_2d", "bglp", ORGANELLES, a549=True),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
 SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
@@ -362,6 +373,9 @@ _DESCRIPTION: dict[str, str] = {
     f"mask_velocity_weight {MASK_VELOCITY_WEIGHT}, seg_aux_t0 {SEG_AUX_T0}",
     "ccond": "data fg_mask_key: fg_mask; model net_config.cond_channels 2, mask_mode cond, mask_corruption "
     "(MaskCorruption defaults)",
+    "bglp": "data fg_mask_key: fg_mask; model target_bg_lowpass (BackgroundLowPass "
+    + ", ".join(f"{k}={v}" for k, v in BG_LOWPASS_ARGS.items())
+    + "), a training-only target transform; validation and prediction see the raw target",
 }
 
 # Keys every fit / predict arm renames so it owns its run dir, wandb run and job.
@@ -464,6 +478,8 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
             "model.init_args.mask_mode",
             "model.init_args.mask_corruption",
         }
+    elif arm.suffix == "bglp":
+        recipe |= {"data.init_args.fg_mask_key", "model.init_args.target_bg_lowpass"}
     if _long_wall(arm):
         recipe.add("base")
     return _FIT_RENAMES, frozenset(recipe)
@@ -545,6 +561,12 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
         model_args.setdefault("net_config", {})["cond_channels"] = 2
         model_args["mask_mode"] = "cond"
         model_args["mask_corruption"] = {"class_path": "dynacell.mask_conditioning.MaskCorruption"}
+    elif arm.suffix == "bglp":
+        data_args["fg_mask_key"] = "fg_mask"
+        model_args["target_bg_lowpass"] = {
+            "class_path": "viscy_utils.losses.BackgroundLowPass",
+            "init_args": dict(BG_LOWPASS_ARGS),
+        }
     elif arm.suffix != "v2":
         raise ValueError(f"unknown arm suffix {arm.suffix!r}")
     # Drop containers the arm did not need (v2/seed1 add no data/model keys).
