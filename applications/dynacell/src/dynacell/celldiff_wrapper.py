@@ -36,7 +36,7 @@ class _ChannelsLastGroupNorm(nn.GroupNorm):
     """
 
     def forward(self, x: Tensor) -> Tensor:
-        """Normalize ``x`` of shape ``(B, C, D, H, W)``; returns ``channels_last_3d`` in ``x.dtype``."""
+        """Normalize ``x`` of shape ``(B, C, D, H, W)``; returns ``x.dtype`` in ``x``'s memory format."""
         with torch.autocast(x.device.type, enabled=False):
             n, c = x.shape[:2]
             xl = x.permute(0, 2, 3, 4, 1)
