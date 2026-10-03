@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 import pytest
 import torch
-from lightning.pytorch import Trainer, seed_everything
+from lightning.pytorch import Callback, Trainer, seed_everything
 from monai.data import MetaTensor
 from torch import nn
 
@@ -437,6 +437,49 @@ def test_flow_matching_compiles_inference_for_one_predict_run():
     assert model.model.inference_net() is model.model.net
     model.on_predict_start()
     assert model.model.inference_net() is not compiled
+
+
+def test_flow_matching_compiled_predict_matches_eager_under_bf16():
+    """``Trainer.predict`` with ``predict_compile`` and bf16 autocast samples through the compiled
+    channels-last copy, matches the eager net on the same weights, seed and input up to bf16 fusion
+    error, and leaves no compiled copy behind."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=3,
+        predict_method="sliding_window",
+        predict_overlap=[0, 0, 0],
+        predict_sampling_method="midpoint",
+        predict_time_schedule="cosine",
+    )
+    loader = torch.utils.data.DataLoader([{"source": torch.randn(1, 8, 32, 32)}], batch_size=1)
+    compiled_during_batch: list[bool] = []
+
+    class _RecordCompiled(Callback):
+        def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+            compiled_during_batch.append("net" in pl_module.model._compiled)
+
+    def predict(compile_inference: bool) -> torch.Tensor:
+        model.predict_compile = compile_inference
+        seed_everything(0)
+        trainer = Trainer(
+            accelerator="cpu",
+            precision="bf16-mixed",
+            logger=False,
+            enable_checkpointing=False,
+            enable_progress_bar=False,
+            enable_model_summary=False,
+            callbacks=[_RecordCompiled()],
+        )
+        return trainer.predict(model, dataloaders=loader)[0].float()
+
+    eager = predict(False)
+    compiled = predict(True)
+    assert compiled_during_batch == [False, True]
+    assert not model.model._compiled and model.model.inference_net() is model.model.net
+    assert torch.isfinite(compiled).all()
+    # Measured 0.0026, the same size as eager bf16 vs fp32 (0.0028); a wrong GroupNorm grouping is O(1).
+    assert (compiled - eager).norm() / eager.norm() < 0.02
 
 
 def test_flow_matching_noise_comes_from_the_cpu_generator(monkeypatch):
