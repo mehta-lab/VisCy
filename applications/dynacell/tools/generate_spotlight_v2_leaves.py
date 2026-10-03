@@ -169,13 +169,16 @@ MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "celldiff_2d_cjoint"): 2.5,
     ("nucleus", "celldiff_cjoint"): 1.4,
 }
-# Track H (2026-10-03) BackgroundLowPass args per arm, in pixels: bglp smooths the background
-# (small sigma_lp), bgflat flattens it to each plane's background mean (sigma_lp None); both
-# share the feather and dilation. PROVISIONAL: the final values come from the H0 spectra.
-_BG_FEATHER_DILATE: dict[str, float | int] = {"sigma_feather": 2.0, "dilate_radius": 4}
+# Track H (2026-10-03) BackgroundLowPass args per arm, in pixels, measured on the GT by the H0
+# step (experiments/2026-09-24_spotlight-v2/trackh/: target_op_check2.csv, mask_recall.csv).
+# bglp smooths the background (sigma_lp 2 removes 97% of its 1-px power and keeps 99% of its
+# low frequencies); r2/f1 leaves 3% of that 1-px power in the ring, r4/f2 12-15%. A nucleus the
+# mask misses is only blurred, so the tight ring is safe. bgflat flattens the background to
+# each plane's mean, which erases any nucleus the mask misses: r4/f2 for recall (cpdino GT
+# nuclei <50% covered, iPSC 1.2% at r4 vs 2.9% at r2).
 BG_TARGET_ARGS: dict[str, dict[str, float | int | None]] = {
-    "bglp": {"sigma_lp": 2.0, **_BG_FEATHER_DILATE},
-    "bgflat": {"sigma_lp": None, **_BG_FEATHER_DILATE},
+    "bglp": {"sigma_lp": 2.0, "sigma_feather": 1.0, "dilate_radius": 2},
+    "bgflat": {"sigma_lp": None, "sigma_feather": 2.0, "dilate_radius": 4},
 }
 JOINTSTEPS_MAX_EPOCHS = 320
 # Second draws (see SEED_SOURCES) inherit their source arm's wall.
