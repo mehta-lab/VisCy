@@ -72,6 +72,11 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the UNeXt2-3D MEMBRANE segaux arm (--ckpt best epoch 164), 2026-10-02: all four legs.
+  # Generate with --wave wave2o.
+  wave2o:
+    membrane:
+      - fcmae_vscyto3d_scratch_segaux_seed1
   # Second draw of the pix2pix3d v2 MEMBRANE baseline (--ckpt last, EMA), 2026-10-02: all four legs. The DENV
   # and MOCK jobs hit their 20 h wall after writing all 12 FOVs (markers 22:09 / 22:16, kill 22:41).
   # Generate with --wave wave2n.
