@@ -147,11 +147,11 @@ class CELLDiff3DVS(nn.Module):
         self.seg_aux = seg_aux
         self.seg_aux_t0 = seg_aux_t0
         self.joint_mask = joint_mask
-        self.compile_inference = False
         # The compiled velocity net, built on first use from a converted copy of the weights (see
         # inference_net). Kept in a dict: assigning a Module attribute would register it as a
         # submodule and duplicate the weights in the state dict.
         self._compiled: dict[str, Callable[[Tensor, Tensor, Tensor], Tensor]] = {}
+        self.compile_inference = False
         if joint_mask and net.inconv.in_channels % 2:
             raise ValueError(f"joint_mask needs net in_channels = 2 x target channels, got {net.inconv.in_channels}")
 
@@ -257,13 +257,24 @@ class CELLDiff3DVS(nn.Module):
             "n_gated": gate.sum().float(),
         }
 
+    @property
+    def compile_inference(self) -> bool:
+        """Whether :meth:`inference_net` returns the compiled copy; setting it drops any copy built so far."""
+        return self._compile_inference
+
+    @compile_inference.setter
+    def compile_inference(self, enabled: bool) -> None:
+        self._compiled.clear()
+        self._compile_inference = enabled
+
     def inference_net(self) -> Callable[[Tensor, Tensor, Tensor], Tensor]:
         """Velocity network used by the ``generate*`` methods.
 
         When ``compile_inference`` is set, ``torch.compile`` of a
         channels-last copy of :attr:`net` (:func:`_channels_last_copy`), built
-        on first use under the caller's autocast state and reused until
-        :meth:`train` drops it; otherwise the network itself.
+        on first use from the current weights, device and autocast state and
+        reused until ``compile_inference`` is set again; otherwise the network
+        itself.
 
         Returns
         -------
@@ -275,12 +286,6 @@ class CELLDiff3DVS(nn.Module):
         if "net" not in self._compiled:
             self._compiled["net"] = torch.compile(_channels_last_copy(self.net), dynamic=False)
         return self._compiled["net"]
-
-    def train(self, mode: bool = True) -> "CELLDiff3DVS":
-        """Set training mode; entering it drops the compiled copy, whose weights would go stale."""
-        if mode:
-            self._compiled.clear()
-        return super().train(mode)
 
     def _noise_like_target(self, phase: Tensor) -> Tensor:
         """Create Gaussian noise with the network's output channel count.

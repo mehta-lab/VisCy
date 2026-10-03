@@ -388,12 +388,11 @@ def test_flow_matching_compiled_inference_net_stays_out_of_the_state_dict():
         net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG, predict_compile=True
     )
     keys = set(model.state_dict())
+    model.on_predict_start()
     compiled = model.model.inference_net()
     assert compiled is not model.model.net
     assert model.model.inference_net() is compiled
     assert set(model.state_dict()) == keys
-    model.model.compile_inference = False
-    assert model.model.inference_net() is model.model.net
 
 
 def test_flow_matching_channels_last_copy_matches_the_net():
@@ -424,15 +423,19 @@ def test_flow_matching_channels_last_copy_matches_the_net():
         assert {c.weight.dtype for c in convs(_channels_last_copy(net))} == {torch.bfloat16}
 
 
-def test_flow_matching_train_drops_the_compiled_inference_net():
-    """Entering train mode drops the compiled copy, whose weights would otherwise go stale."""
+def test_flow_matching_compiles_inference_for_one_predict_run():
+    """The compiled copy exists only inside a predict run: validation sampling uses the live net, and a
+    later run rebuilds the copy instead of reusing an earlier run's weights, device or autocast dtype."""
     model = DynacellFlowMatching(
         net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG, predict_compile=True
     )
+    assert model.model.inference_net() is model.model.net
+    model.on_predict_start()
     compiled = model.model.inference_net()
-    model.eval()
-    assert model.model.inference_net() is compiled
-    model.train()
+    assert compiled is not model.model.net
+    model.on_predict_end()
+    assert model.model.inference_net() is model.model.net
+    model.on_predict_start()
     assert model.model.inference_net() is not compiled
 
 

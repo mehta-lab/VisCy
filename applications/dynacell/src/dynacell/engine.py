@@ -973,7 +973,9 @@ class DynacellFlowMatching(LightningModule):
         packs a fixed-grid solver's steps toward both ends of the interval,
         where adaptive dopri5 spends most of its evaluations.
     predict_compile : bool
-        ``torch.compile`` the velocity network for prediction.
+        ``torch.compile`` the velocity network for prediction. The compiled
+        copy lives for one predict run (built from the weights at its start,
+        dropped at its end); validation sampling stays uncompiled.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
@@ -1097,7 +1099,7 @@ class DynacellFlowMatching(LightningModule):
         self.predict_overlap = predict_overlap
         self.predict_sampling_method = predict_sampling_method
         self.predict_time_schedule = predict_time_schedule
-        self.model.compile_inference = predict_compile
+        self.predict_compile = predict_compile
         self._training_step_outputs: list = []
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._validation_dice_losses: list[list[tuple[Tensor, int]]] = []
@@ -1259,6 +1261,18 @@ class DynacellFlowMatching(LightningModule):
         self._validation_losses.clear()
         self._validation_dice_losses.clear()
         self._validation_mask_velocity_losses.clear()
+
+    def on_predict_start(self) -> None:
+        """Turn on the compiled velocity net for this predict run when ``predict_compile`` is set.
+
+        Setting the flag drops any earlier copy, so this run's copy is built from the current
+        weights, device and autocast state.
+        """
+        self.model.compile_inference = self.predict_compile
+
+    def on_predict_end(self) -> None:
+        """Drop the compiled copy, so validation sampling and later runs use the live weights."""
+        self.model.compile_inference = False
 
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Generate virtual staining for one batch via ODE sampling.
