@@ -26,6 +26,11 @@ Everything here is **derived** — one production file in, one lite file out:
 - ``predict__<set>_lite.yml`` beside each production predict leaf in the roster:
   same checkpoint, overlays and normalization (so a lite prediction of a FOV
   equals the full one), lite predict set, output rebased onto the lite root.
+  CELL-Diff is the one exception: its lite leaves keep the checkpoint but swap the
+  production sampler (adaptive dopri5 over overlapping 512^2 tiles, ~100 GPU-h per
+  A549 condition) for the fast recipe in ``celldiff_predict_lite.yml``
+  (:func:`lite_celldiff_leaf`), so a lite CELL-Diff prediction is a different
+  sample, not a subset of the full one.
 - ``leaf/grouped/<bucket>__lite/eval_grouped.yaml``: the production bucket's roster
   conditions on the lite datasets, lite pred/cache/save paths, no
   ``nuclei_gt_path`` (the lite GT store holds the nuclei), and the metrics the
@@ -65,12 +70,14 @@ A549_DATASETS: tuple[str, ...] = tuple(
 IPSC_N_POSITIONS = 50
 IPSC_SEED = 0
 
-# Check-F roster: single-pass models only (CELL-Diff is 86 % of predict GPU-h).
+# Check-F roster plus CELL-Diff, which runs the lite on its fast predict recipe.
+CELLDIFF_MODEL = "celldiff"
 ROSTER_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_pretrained",
     "fcmae_vscyto3d_scratch",
     "fnet3d_paper",
     "unetvit3d",
+    CELLDIFF_MODEL,
 )
 ROSTER_TRAIN_DIRS: tuple[str, ...] = ("ipsc_confocal", "a549_mantis")
 ROSTER_ORGANELLES: tuple[str, ...] = ("nucleus", "membrane", "er", "mito")
@@ -80,6 +87,16 @@ _BUCKET_TRAIN: dict[str, str] = {
     "a549_mantis": "a549_trained",
     "joint_ipsc_confocal_a549_mantis": "joint",
 }
+# Train dirs a model adds beyond ROSTER_TRAIN_DIRS: CELL-Diff's joint fits are on the lite too.
+_MODEL_EXTRA_TRAIN_DIRS: dict[str, tuple[str, ...]] = {CELLDIFF_MODEL: ("joint_ipsc_confocal_a549_mantis",)}
+# Only CELL-Diff's iterative leaves are the benchmark's CELL-Diff; denoise / sliding_window are variants.
+_CELLDIFF_PREDICT_METHOD = "iterative"
+# Base swaps (production -> lite) and the leaf-level keys the fast overlay must own.
+_CELLDIFF_BASE_SWAPS: dict[str, str] = {
+    "model_overlays/celldiff_predict.yml": "model_overlays/celldiff_predict_lite.yml",
+    "launcher_profiles/hardware_predict_celldiff.yml": "launcher_profiles/hardware_predict_celldiff_lite.yml",
+}
+_CELLDIFF_RECIPE_KEYS: tuple[str, ...] = ("predict_method", "predict_overlap", "num_generate_steps")
 # Config-dir organelle -> grouped-bucket organelle spelling (the buckets spell mito out).
 _BUCKET_ORGANELLE: dict[str, str] = {"mito": "mitochondria"}
 # Metrics the lite does not report (none is in the paper's selected set).
@@ -253,6 +270,29 @@ def lite_predict_leaf(production: dict, lite_sets: set[str]) -> dict:
     return lite
 
 
+def lite_celldiff_leaf(lite: dict) -> dict:
+    """Switch a derived CELL-Diff lite leaf to the fast predict recipe.
+
+    Swaps the predict overlay and hardware profile for their ``_lite`` versions and
+    drops the leaf-level sampler keys, which would otherwise override the overlay.
+
+    Raises
+    ------
+    ValueError
+        If a base to swap is not composed exactly once.
+    """
+    out = copy.deepcopy(lite)
+    for old, new in _CELLDIFF_BASE_SWAPS.items():
+        hits = [i for i, b in enumerate(out["base"]) if b.endswith("/" + old)]
+        if len(hits) != 1:
+            raise ValueError(f"expected one base ending in {old}, found {len(hits)}")
+        out["base"][hits[0]] = out["base"][hits[0]].removesuffix(old) + new
+    init_args = out["model"]["init_args"]
+    for key in _CELLDIFF_RECIPE_KEYS:
+        init_args.pop(key, None)
+    return out
+
+
 def lite_grouped_leaf(production: dict, predictions: set[Path]) -> dict:
     """Derive a lite grouped eval leaf, keeping the conditions whose lite prediction is generated.
 
@@ -315,10 +355,14 @@ def plan_outputs(organelles: tuple[str, ...], models: tuple[str, ...], train_dir
             lite_sets.add(src.stem)
             out[_PREDICT_SETS / f"{src.stem}{LITE_SET_SUFFIX}.yml"] = _dump(lite_predict_set(prod), src)
 
+    bucket_train_dirs = [
+        *train_dirs,
+        *sorted({d for m in models for d in _MODEL_EXTRA_TRAIN_DIRS.get(m, ()) if d not in train_dirs}),
+    ]
     predictions: set[Path] = set()
     for organelle in organelles:
         for model in models:
-            for train_dir in train_dirs:
+            for train_dir in (*train_dirs, *_MODEL_EXTRA_TRAIN_DIRS.get(model, ())):
                 leaf_dir = _CONFIG_ROOT / organelle / model / train_dir
                 for src in sorted(leaf_dir.glob("predict__*.yml")):
                     if src.stem.endswith(LITE_SET_SUFFIX):
@@ -327,11 +371,18 @@ def plan_outputs(organelles: tuple[str, ...], models: tuple[str, ...], train_dir
                     set_stem = next((Path(b).stem for b in prod.get("base", []) if "/predict_sets/" in b), None)
                     if set_stem not in lite_sets:
                         continue
+                    if (
+                        model == CELLDIFF_MODEL
+                        and prod["model"]["init_args"]["predict_method"] != _CELLDIFF_PREDICT_METHOD
+                    ):
+                        continue
                     lite = lite_predict_leaf(prod, lite_sets)
+                    if model == CELLDIFF_MODEL:
+                        lite = lite_celldiff_leaf(lite)
                     predictions.add(Path(_writer(lite)["output_store"]))
                     out[leaf_dir / f"{src.stem}{LITE_SET_SUFFIX}.yml"] = _dump(lite, src)
 
-        for train_dir in train_dirs:
+        for train_dir in bucket_train_dirs:
             bucket = f"{_BUCKET_ORGANELLE.get(organelle, organelle)}_{_BUCKET_TRAIN[train_dir]}"
             src = _GROUPED / bucket / "eval_grouped.yaml"
             lite = lite_grouped_leaf(_load(src), predictions)

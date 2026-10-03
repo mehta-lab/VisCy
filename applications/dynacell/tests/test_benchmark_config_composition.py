@@ -1196,6 +1196,7 @@ def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
 _PREDICT_PROFILE_TIME: dict[str, str] = {
     "hardware_predict_any_gpu.yml": "2-00:00:00",
     "hardware_predict_celldiff.yml": "7-00:00:00",
+    "hardware_predict_celldiff_lite.yml": "02:00:00",
     "hardware_h200_single.yml": "4-00:00:00",
 }
 
@@ -1230,6 +1231,9 @@ def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
     full-Z test store (one window per plane). Its wall need is unmeasured, so it
     inherits the 7-day CELL-Diff cap rather than getting a speculative profile of
     its own -- tighten it to a dedicated profile once real runs give a number.
+
+    CELL-Diff's ``*_lite`` leaves run the fast recipe (celldiff_predict_lite.yml)
+    on one H100, 5-35 min per lite condition, so they get their own 2 h profile.
     """
     profile = _composed_hardware_profile(leaf)
     assert profile in _PREDICT_PROFILE_TIME, (
@@ -1237,9 +1241,13 @@ def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
         f"_PREDICT_PROFILE_TIME with a measured wall limit."
     )
     is_celldiff = any(part.startswith("celldiff") for part in leaf.relative_to(BENCHMARKS).parts)
-    assert is_celldiff == (profile == "hardware_predict_celldiff.yml"), (
+    celldiff_profile = (
+        "hardware_predict_celldiff_lite.yml" if leaf.stem.endswith("_lite") else "hardware_predict_celldiff.yml"
+    )
+    assert is_celldiff == (profile == celldiff_profile), (
         f"{leaf.relative_to(BENCHMARKS)}: celldiff={is_celldiff} but profile={profile!r}. "
-        f"CELL-Diff predicts must use hardware_predict_celldiff.yml and nothing else may."
+        f"CELL-Diff predicts must use {celldiff_profile} (the lite fast recipe gets its own, "
+        f"measured profile) and nothing else may."
     )
     time_limit = load_composed_config(leaf)["launcher"]["sbatch"]["time"]
     assert time_limit == _PREDICT_PROFILE_TIME[profile], (
