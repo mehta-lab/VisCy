@@ -43,7 +43,8 @@ def test_cubic_cpu_workflows_match_the_reference(target_name, reference):
 
 @pytest.mark.parametrize("target_name,name", [("er", "workflow_sec61b"), ("mitochondria", "workflow_tomm20")])
 @pytest.mark.parametrize("use_gpu", [False, True])
-def test_cubic_workflow_respects_the_requested_device(monkeypatch, target_name, name, use_gpu):
+@pytest.mark.parametrize("cuda", [False, True])
+def test_cubic_workflow_respects_the_requested_device(monkeypatch, target_name, name, use_gpu, cuda):
     image = np.zeros((4, 8, 8), dtype=np.float32)
     calls = []
 
@@ -59,9 +60,21 @@ def test_cubic_workflow_respects_the_requested_device(monkeypatch, target_name, 
 
     monkeypatch.setattr(segmentation, "ascupy", upload)
     monkeypatch.setattr(segmentation._cubic_segmentation, name, workflow)
+    monkeypatch.setattr(segmentation.torch.cuda, "is_available", lambda: cuda)
     result = segment(image, target_name, use_gpu=use_gpu)
-    assert calls == (["upload", "workflow"] if use_gpu else ["workflow"])
+    assert calls == (["upload", "workflow"] if use_gpu and cuda else ["workflow"])
     assert isinstance(result, np.ndarray) and result.dtype == bool and result.all()
+
+
+@pytest.mark.parametrize("target_name", ["er", "mitochondria"])
+def test_cubic_workflow_falls_back_to_cpu_without_a_gpu(monkeypatch, target_name):
+    """The default use_gpu=True must not crash a node with no visible GPU."""
+    rng = np.random.default_rng(17)
+    image = rng.gamma(2.0, 1.0, size=(8, 64, 64)).astype(np.float32)
+    image[3:5, 16:48, 30:34] += 20.0
+    expected = segment(image, target_name, use_gpu=False)
+    monkeypatch.setattr(segmentation.torch.cuda, "is_available", lambda: False)
+    np.testing.assert_array_equal(segment(image, target_name, use_gpu=True), expected)
 
 
 @pytest.mark.parametrize("target_name,name", [("er", "workflow_sec61b"), ("mitochondria", "workflow_tomm20")])

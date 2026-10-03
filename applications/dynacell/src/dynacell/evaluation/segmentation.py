@@ -106,8 +106,9 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
     spacing_zyx :
         Physical voxel size ``(z, y, x)`` µm; required for ``backend="cellpose"``.
     use_gpu : bool
-        Transfer ER/mitochondria inputs to cubic's GPU backend. False keeps
-        these workflows on CPU. Outputs are always NumPy boolean masks.
+        Transfer ER/mitochondria inputs to cubic's GPU backend when CUDA is
+        available. False, or no visible GPU, keeps these workflows on CPU, whose
+        masks match the GPU path. Outputs are always NumPy boolean masks.
 
     Returns
     -------
@@ -143,7 +144,7 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
     elif target_name in _CUBIC_WORKFLOWS:
         require_cubic_workflows(target_name)
         workflow = getattr(_cubic_segmentation, _CUBIC_WORKFLOWS[target_name])
-        img_dev = ascupy(img) if use_gpu else img
+        img_dev = ascupy(img) if use_gpu and torch.cuda.is_available() else img
         mask = asnumpy(workflow(img_dev))
     elif target_name in ("nucleoli", "lysosomes"):
         _require_aicssegmentation()
