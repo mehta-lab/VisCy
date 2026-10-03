@@ -1083,10 +1083,11 @@ def _bg_lowpass_batch(shape: tuple[int, ...]) -> dict:
     return {"source": torch.randn(shape), "target": target, "fg_mask": mask}
 
 
+@pytest.mark.parametrize("sigma_lp", [BG_LOWPASS_TEST_ARGS["sigma_lp"], None], ids=["smooth", "flat"])
 @pytest.mark.parametrize("dim", list(MASK_MODE_DIMS))
 @pytest.mark.parametrize("seg_aux", [False, True], ids=["plain", "seg_aux"])
-def test_flow_matching_bg_lowpass_fast_dev_run(tmp_path, tiny_hcs_zarr, dim, seg_aux):
-    """The target op trains and validates on real generate_fg_masks output, 2D and 3D, alone and with seg_aux."""
+def test_flow_matching_bg_lowpass_fast_dev_run(tmp_path, tiny_hcs_zarr, dim, seg_aux, sigma_lp):
+    """The target op trains and validates on real fg_mask output: 2D/3D, smooth/flat, with and without seg_aux."""
     generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"])
     net_config, z_window_size = MASK_MODE_DIMS[dim]
     seed_everything(42)
@@ -1097,7 +1098,7 @@ def test_flow_matching_bg_lowpass_fast_dev_run(tmp_path, tiny_hcs_zarr, dim, seg
         compute_validation_loss=True,
         num_log_steps=2,
         log_batches_per_epoch=1,
-        target_bg_lowpass=BackgroundLowPass(**BG_LOWPASS_TEST_ARGS),
+        target_bg_lowpass=BackgroundLowPass(**{**BG_LOWPASS_TEST_ARGS, "sigma_lp": sigma_lp}),
         **aux,
     )
     trainer = _cpu_trainer(tmp_path, fast_dev_run=True)

@@ -1012,9 +1012,10 @@ class DynacellFlowMatching(LightningModule):
         Training-only target transform (Spotlight v2 Track H): the training
         step replaces ``target`` by ``target_bg_lowpass(target, fg_mask)``,
         which keeps the target inside the dilated, feathered foreground and
-        low-passes it in the background, so the flow is not asked to generate
-        background noise that phase cannot predict. The background stays
-        supervised, toward a smooth field. It runs after normalization and
+        replaces the background by a smooth (or flat) estimate from background
+        pixels only, so the flow is not asked to generate background noise or
+        illumination that phase cannot predict. The background stays
+        supervised, toward that estimate. It runs after normalization and
         the GPU augmentations; every training-loss term (``seg_aux``, C-joint,
         C-cond) and the logged training samples see the transformed target.
         Validation, its logged samples and prediction see the raw target, so
