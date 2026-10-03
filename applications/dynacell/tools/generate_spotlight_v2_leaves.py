@@ -65,7 +65,7 @@ Arms (``<baseline>_<suffix>``):
   arm's ``BG_TARGET_ARGS``, a training-only target transform that keeps the target inside
   the dilated, feathered foreground and replaces the background by an estimate from
   background pixels only: a small-sigma normalized convolution (``bglp``, background high
-  frequencies removed) or the patch's background mean (``bgflat``, autofluorescence and
+  frequencies removed) or each plane's background mean (``bgflat``, autofluorescence and
   illumination removed too). The background stays supervised, unlike a masked loss.
   Validation stays raw, so ``--ckpt best`` selects on the baseline's criterion; predict
   leaves equal the baseline's. Normalization is the baseline's.
@@ -170,7 +170,7 @@ MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "celldiff_cjoint"): 1.4,
 }
 # Track H (2026-10-03) BackgroundLowPass args per arm, in pixels: bglp smooths the background
-# (small sigma_lp), bgflat flattens it to the patch's background mean (sigma_lp None); both
+# (small sigma_lp), bgflat flattens it to each plane's background mean (sigma_lp None); both
 # share the feather and dilation. PROVISIONAL: the final values come from the H0 spectra.
 _BG_FEATHER_DILATE: dict[str, float | int] = {"sigma_feather": 2.0, "dilate_radius": 4}
 BG_TARGET_ARGS: dict[str, dict[str, float | int | None]] = {
