@@ -356,7 +356,7 @@ class CELLDiff3DVS(nn.Module):
         phase : Tensor
             Phase contrast input of shape ``(B, 1, D, H, W)``.
         num_steps : int
-            Number of ODE integration steps.
+            Number of ODE output time points (trajectory frames).
 
         Returns
         -------
@@ -394,7 +394,7 @@ class CELLDiff3DVS(nn.Module):
         phase : Tensor
             Phase contrast input of shape ``(..., D, H, W)``.
         num_steps : int
-            Number of ODE integration steps per patch.
+            Number of ODE time points per patch; see :meth:`generate`.
         sampling_method : str
             ``torchdiffeq`` method, as in :meth:`generate`.
         time_schedule : str
@@ -451,7 +451,7 @@ class CELLDiff3DVS(nn.Module):
         phase : Tensor
             Phase contrast input of shape ``(B, 1, D, H, W)``.
         num_steps : int
-            Number of ODE integration steps per patch.
+            Number of ODE output time points per patch (trajectory frames).
 
         Returns
         -------
@@ -529,7 +529,7 @@ class CELLDiff3DVS(nn.Module):
         phase : Tensor
             Phase contrast input of shape ``(..., D, H, W)``.
         num_steps : int
-            Number of ODE integration steps per patch.
+            Number of ODE time points per patch; see :meth:`generate`.
         overlap_size : int or tuple of int
             Overlap in each spatial dimension ``(od, oh, ow)``.
             A single int applies the same overlap to all three dimensions.
@@ -623,7 +623,7 @@ class CELLDiff3DVS(nn.Module):
         phase : Tensor
             Phase contrast input of shape ``(B, 1, D, H, W)``.
         num_steps : int
-            Number of ODE integration steps per patch.
+            Number of ODE output time points per patch (trajectory frames).
         overlap_size : int or tuple of int
             Overlap in each spatial dimension ``(od, oh, ow)``.
             A single int applies the same overlap to all three dimensions.
@@ -754,7 +754,7 @@ class CELLDiff3DVS(nn.Module):
         phase : Tensor
             Phase contrast input of shape ``(B, 1, D, H, W)``.
         num_steps : int
-            Number of ODE integration steps per patch.
+            Number of ODE output time points per patch (trajectory frames).
         overlap_size : int or tuple of int
             Overlap in each spatial dimension ``(od, oh, ow)``.
             A single int applies the same overlap to all three dimensions.
