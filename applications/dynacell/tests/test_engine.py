@@ -439,14 +439,29 @@ def test_flow_matching_compiles_inference_for_one_predict_run():
     assert model.model.inference_net() is not compiled
 
 
-def test_flow_matching_noise_comes_from_the_cpu_generator():
-    """Initial noise is drawn on the CPU, so a seeded prediction does not depend on the GPU model."""
+def test_flow_matching_noise_comes_from_the_cpu_generator(monkeypatch):
+    """Initial noise is drawn by the seeded CPU generator and then moved to the conditioning tensor's device,
+    so a seeded prediction does not depend on the GPU model. A ``meta`` conditioning tensor stands in for a
+    GPU: drawing on its device instead would put the draw itself on ``meta``."""
     model = DynacellFlowMatching(net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG)
-    phase = torch.zeros(2, 1, 8, 32, 32)
     torch.manual_seed(0)
-    noise = model.model._noise_like_target(phase)
+    noise = model.model._noise_like_target(torch.zeros(2, 1, 8, 32, 32))
     torch.manual_seed(0)
     torch.testing.assert_close(noise, torch.randn(2, 1, 8, 32, 32), rtol=0, atol=0)
+
+    draws: list[torch.device] = []
+    randn = torch.randn
+
+    def recording_randn(*args, **kwargs):
+        out = randn(*args, **kwargs)
+        draws.append(out.device)
+        return out
+
+    monkeypatch.setattr(torch, "randn", recording_randn)
+    noise = model.model._noise_like_target(torch.zeros(2, 1, 8, 32, 32, device="meta"))
+    assert draws == [torch.device("cpu")]
+    assert noise.device == torch.device("meta")
+    assert noise.shape == (2, 1, 8, 32, 32)
 
 
 def test_flow_matching_sliding_window_rejects_nonzero_overlap():
