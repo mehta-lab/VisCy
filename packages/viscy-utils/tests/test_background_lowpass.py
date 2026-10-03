@@ -29,14 +29,16 @@ def _reference(op: BackgroundLowPass, target: torch.Tensor, mask: torch.Tensor) 
         (mask.numpy() > 0.5).astype(np.float64), size=(1, 1, 2 * rz + 1, 2 * r + 1, 2 * r + 1), mode="constant"
     )
     w = _gaussian(dilated, op.sigma_feather_z, op.sigma_feather).clip(0.0, 1.0)
+    flat = x.copy()  # planes without background keep x
+    for i, j, d in np.ndindex(*x.shape[:3]):
+        if (dilated[i, j, d] == 0).any():
+            flat[i, j, d] = x[i, j, d][dilated[i, j, d] == 0].mean()
     if op.sigma_lp is None:
-        bg = np.empty_like(x)
-        for i, j in np.ndindex(*x.shape[:2]):
-            bg[i, j] = x[i, j][dilated[i, j] == 0].mean()
+        bg = flat
     else:
         num = _gaussian(x * (1.0 - dilated), op.sigma_lp_z, op.sigma_lp)
         den = _gaussian(1.0 - dilated, op.sigma_lp_z, op.sigma_lp)
-        bg = np.where(den > 1e-6, num / np.maximum(den, 1e-6), x)
+        bg = np.where(den > 1e-6, num / np.maximum(den, 1e-6), flat)
     return w, w * x + (1.0 - w) * bg
 
 
@@ -78,39 +80,58 @@ def test_identity_where_w_is_one_and_background_where_w_is_zero():
 
 
 def test_background_estimate_does_not_leak_the_foreground():
-    """A bright blob halos into a plain blur of the target, never into the normalized convolution B."""
+    """On a constant background B is that constant everywhere, even next to a bright blob a plain blur halos."""
     op = BackgroundLowPass(sigma_lp=4.0, sigma_feather=1.0, dilate_radius=2)
-    g = torch.Generator().manual_seed(0)
-    target = 0.1 * torch.randn((1, 1, 1, 64, 64), generator=g)
-    mask = torch.zeros_like(target)
+    mask = torch.zeros((1, 1, 1, 64, 64))
     mask[..., 16:48, 16:48] = 1.0
-    target = target + 10.0 * mask
+    target = 0.7 + 10.0 * mask
     dilated = op.dilated_mask(mask)
     ring = (..., slice(50, 54), slice(16, 48))  # just outside the dilated square [14, 50)
     assert torch.equal(dilated[ring], torch.zeros(1, 1, 1, 4, 32))
     plain = _gaussian(target.double().numpy(), 0.0, op.sigma_lp)
-    assert plain[ring].max() > 2.0
+    assert plain[ring].max() > 2.7  # the halo a plain G_lp(x) would teach
     background = op.background(target, dilated)
-    assert background[dilated == 0].abs().max() < 0.15
+    torch.testing.assert_close(background, torch.full_like(target, 0.7), rtol=0.0, atol=1e-6)
+    out = op(target, mask)
+    torch.testing.assert_close(out[dilated == 0], torch.full_like(out[dilated == 0], 0.7), rtol=0.0, atol=1e-6)
 
 
-def test_flat_background_is_the_masked_mean():
-    """sigma_lp=None: wherever w == 0, x' is one constant per sample and channel, the background mean."""
+def test_flat_background_is_the_masked_mean_per_plane():
+    """sigma_lp=None: wherever w == 0, x' is one constant per (sample, channel, plane), its background mean."""
     op = BackgroundLowPass(sigma_lp=None, sigma_feather=2.0, dilate_radius=4)
     target, mask = _square_batch((2, 2, 3, 64, 64), 16, 48)
-    mask[0, :, 1] = 0.0  # planes differ: the mean spans them all
-    target = target + torch.linspace(-1.0, 1.0, 64)  # an illumination gradient the flat estimate removes
+    mask[0, :, 1] = 0.0  # planes differ
+    target = target + torch.arange(3.0).reshape(3, 1, 1) + torch.linspace(-1.0, 1.0, 64)  # per-plane offset + ramp
     out = op(target, mask)
     dilated = op.dilated_mask(mask)
     zero_w = op.blend_weight(dilated) == 0
-    for i, j in np.ndindex(2, 2):
-        expected = target[i, j][dilated[i, j] == 0].double().mean().item()
-        values = out[i, j][zero_w[i, j]]
-        assert values.numel() > 1000
+    for i, j, d in np.ndindex(2, 2, 3):
+        expected = target[i, j, d][dilated[i, j, d] == 0].double().mean().item()
+        values = out[i, j, d][zero_w[i, j, d]]
+        assert values.numel() > 300
         torch.testing.assert_close(values, torch.full_like(values, expected), rtol=0.0, atol=1e-5)
-    # An empty mask flattens the whole patch to its mean.
+    # An empty mask flattens every plane to its own mean.
     flat = op(target, torch.zeros_like(target))
-    torch.testing.assert_close(flat, target.mean(dim=(2, 3, 4), keepdim=True).expand_as(target), rtol=0.0, atol=1e-5)
+    torch.testing.assert_close(flat, target.mean(dim=(3, 4), keepdim=True).expand_as(target), rtol=0.0, atol=1e-5)
+
+
+@pytest.mark.parametrize("sigma_lp", [None, 8.0], ids=["bgflat", "bglp"])
+def test_backlight_ramp_is_removed_by_flat_and_kept_by_smooth(sigma_lp):
+    """A linear backlight ramp: bgflat flattens it, bglp (even at a large sigma) keeps it."""
+    op = BackgroundLowPass(sigma_lp=sigma_lp, sigma_feather=2.0, dilate_radius=4)
+    slope = 0.02
+    mask = torch.zeros((1, 1, 1, 96, 96))
+    mask[..., 40:56, 40:56] = 1.0
+    target = slope * torch.arange(96.0) + 5.0 * mask
+    out = op(target, mask)
+    zero_w = op.blend_weight(op.dilated_mask(mask)) == 0
+    values = out[zero_w]
+    if sigma_lp is None:
+        assert torch.unique(values).numel() == 1
+    else:
+        cols = torch.arange(96.0).expand_as(target)[zero_w]
+        fitted = np.polyfit(cols.numpy(), values.numpy(), 1)[0]
+        assert 0.8 * slope < fitted < 1.2 * slope
 
 
 def test_background_keeps_the_local_mean():
@@ -150,19 +171,34 @@ def test_all_foreground_plane_has_w_exactly_one_and_is_returned_unchanged(sigma_
 
 
 @pytest.mark.parametrize("sigma_lp", [2.0, None], ids=["smooth", "flat"])
-def test_patch_without_background_passes_through_finite(sigma_lp):
-    """Where the dilated mask covers the patch, B is undefined: x' = x, finite; other patches are unaffected."""
+def test_patch_without_background_is_returned_unchanged(sigma_lp):
+    """Where the dilated mask covers the patch, B = x and w == 1: x' = x exactly; other patches are unaffected."""
     op = BackgroundLowPass(sigma_lp=sigma_lp, sigma_feather=2.0, dilate_radius=4)
     target, mask = _square_batch((2, 1, 1, 32, 32), 8, 20)
     mask[0] = 1.0
     mask[0, ..., 5:7, 9:11] = 0.0  # a hole the dilation fills
     dilated = op.dilated_mask(mask)
     assert torch.equal(dilated[0], torch.ones_like(dilated[0]))
+    assert torch.equal(op.blend_weight(dilated)[0], torch.ones_like(dilated[0]))
     assert torch.equal(op.background(target, dilated)[0], target[0])
     out = op(target, mask)
-    assert torch.isfinite(out).all()
-    torch.testing.assert_close(out[0], target[0], rtol=0.0, atol=1e-6)
-    torch.testing.assert_close(out[1:], op(target[1:], mask[1:]), rtol=0.0, atol=0.0)
+    assert torch.equal(out[0], target[0])
+    assert torch.equal(out[1:], op(target[1:], mask[1:]))
+
+
+def test_thin_background_ring_falls_back_to_the_plane_mean():
+    """Pixels the normalized convolution cannot reach take the plane's flat mean; nothing is NaN or Inf."""
+    op = BackgroundLowPass(sigma_lp=2.0, sigma_feather=2.0, dilate_radius=1)
+    target, mask = _square_batch((1, 1, 1, 48, 48), 3, 45)  # dilated: [2, 46), a 2-px background ring
+    dilated = op.dilated_mask(mask)
+    background = op.background(target, dilated)
+    den = _gaussian(1.0 - dilated.double().numpy(), 0.0, op.sigma_lp)
+    unreached = torch.from_numpy(den <= 1e-6)
+    assert unreached.sum() > 100  # the kernel's support (radius 8) misses the ring from the centre
+    ring_mean = target[dilated == 0].mean()
+    torch.testing.assert_close(background[unreached], torch.full_like(background[unreached], ring_mean.item()))
+    assert torch.isfinite(background).all()
+    assert torch.isfinite(op(target, mask)).all()
 
 
 def test_planes_are_independent_by_default():

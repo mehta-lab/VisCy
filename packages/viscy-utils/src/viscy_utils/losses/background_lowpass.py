@@ -10,7 +10,7 @@ two without a seam.
 ``B`` is a normalized convolution: a plain ``G_lp(x)`` would bleed bright
 foreground into the background as a halo, while ``B`` averages background
 pixels only, so a foreground blob never reaches it. With ``sigma_lp=None`` (its
-``sigma_lp -> inf`` limit) ``B`` is flat: the mean of the patch's background
+``sigma_lp -> inf`` limit) ``B`` is flat: the mean of each plane's background
 pixels, which also removes autofluorescence and uneven illumination.
 
 It changes the target, never the loss: the background stays supervised toward a
@@ -32,8 +32,8 @@ from torch import Tensor, nn
 
 __all__ = ["BackgroundLowPass"]
 
-# Below this fraction of the low-pass kernel's mass on background pixels, B is
-# undefined (no background in reach) and the target is kept: there w ~ 1 anyway.
+# At or below this fraction of the low-pass kernel's mass on background pixels the
+# normalized convolution has no background in reach; B falls back to the plane's flat mean.
 _MIN_BACKGROUND_WEIGHT = 1e-6
 
 
@@ -86,13 +86,15 @@ class BackgroundLowPass(nn.Module):
     ``w`` is exactly 1 where the feather kernel lies entirely inside ``m`` (the
     dilated mask shrunk by its radius, ``int(4 * sigma_feather + 0.5)``), so
     ``x' = x`` exactly there, and exactly 0 where the kernel misses ``m``, so
-    ``x' = B`` exactly there. Where no background pixel is
-    within the low-pass kernel's reach, e.g. in a patch the dilated mask covers
-    entirely, ``B`` is undefined and is replaced by ``x``, so ``x'`` stays finite.
+    ``x' = B`` exactly there.
 
-    ``sigma_lp=None`` makes ``B`` flat: per sample and channel, the mean of ``x``
-    over every background voxel of the patch (all Z planes), the
-    ``sigma_lp -> inf`` limit of the normalized convolution.
+    ``sigma_lp=None`` makes ``B`` flat: per sample, channel and Z plane, the mean
+    of ``x`` over the plane's background pixels, the ``sigma_lp -> inf`` limit of
+    the normalized convolution. Where the normalized convolution has at most
+    ``1e-6`` of its kernel mass on background (a thin background ring narrower
+    than its support, say), ``B`` falls back to that flat mean. A plane with no
+    background pixel at all has no estimate: ``B = x`` there, and with the
+    per-plane feather ``w == 1``, so the plane is returned unchanged.
 
     By default every operation acts in XY, per Z plane: Z is anisotropic, and
     2D models have ``D = 1``. The ``*_z`` parameters extend each to Z.
@@ -111,7 +113,7 @@ class BackgroundLowPass(nn.Module):
         Dilation radius in XY, in voxels (>= 0): a ``(2r + 1)``-wide square.
     sigma_lp_z : float
         Background-estimate sigma along Z, in voxels (>= 0; 0 = per plane).
-        Must be 0 with a flat background, which already spans Z.
+        Must be 0 with a flat background, which is per plane.
     sigma_feather_z : float
         Feather sigma along Z, in voxels (>= 0; 0 = per plane).
     dilate_radius_z : int
@@ -199,7 +201,7 @@ class BackgroundLowPass(nn.Module):
             return (blurred / unit).clamp(0.0, 1.0).reshape(dilated.shape)
 
     def background(self, target: Tensor, dilated: Tensor) -> Tensor:
-        """Return the background estimate ``B`` in float32, ``target`` where undefined.
+        """Return the background estimate ``B`` in float32; ``target`` on planes without background.
 
         Parameters
         ----------
@@ -218,16 +220,16 @@ class BackgroundLowPass(nn.Module):
         with torch.autocast(device_type=target.device.type, enabled=False):
             x = target.float()
             bg = 1.0 - dilated.float()
+            count = bg.sum(dim=(-2, -1), keepdim=True)
+            plane_mean = (x * bg).sum(dim=(-2, -1), keepdim=True) / count.clamp(min=1.0)
+            flat = torch.where(count > 0, plane_mean, x)
             if self.sigma_lp is None:
-                den = bg.flatten(2).sum(-1)
-                mean = (x * bg).flatten(2).sum(-1) / den.clamp(min=1.0)
-                per_patch = (b, c, *([1] * len(spatial)))
-                return torch.where(den.reshape(per_patch) > 0, mean.reshape(per_patch), x)
+                return flat
             sigmas = (self.sigma_lp_z, self.sigma_lp, self.sigma_lp)
             num = _gaussian_blur((x * bg).reshape(b * c, *spatial), sigmas).reshape(x.shape)
             den = _gaussian_blur(bg.reshape(b * c, *spatial), sigmas).reshape(x.shape)
             defined = den > _MIN_BACKGROUND_WEIGHT
-            return torch.where(defined, num / den.clamp(min=_MIN_BACKGROUND_WEIGHT), x)
+            return torch.where(defined, num / den.clamp(min=_MIN_BACKGROUND_WEIGHT), flat)
 
     def forward(self, target: Tensor, fg_mask: Tensor) -> Tensor:
         """Return the target with its background replaced by ``B``.
