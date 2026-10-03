@@ -1,0 +1,54 @@
+# FCMAE-2D Pretrained (VSCyto2D) predict: mito trained on joint_ipsc_confocal_a549_mantis,
+# tested on a549-mantis-tomm20-zikv. In-focus 2D track. Runs the 2D model over the
+# full-Z 3D test store (z_window_size=1 -> one window per z-plane;
+# the writer keys each output to its z-index) so the existing
+# focus-aware eval consumes the result unchanged.
+#
+# Source normalization reproduces the fit overlay exactly
+# (Phase3D fov_statistics mean/std); a mismatch here would
+# silently degrade every prediction.
+#
+# ckpt_path pins the lowest-val-loss retained checkpoint of the
+# 2026-08-01 revived fit (the earlier cohort froze at init under
+# 16-mixed and its checkpoints are NOT usable). Submit with
+# `--ckpt best` to re-resolve against the live best at submit time.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_tomm20_zikv.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: a549_mantis_tomm20_zikv
+  model_name: fcmae_vscyto2d_pretrained
+  experiment_id: mito__joint_ipsc_confocal_a549_mantis__fcmae_vscyto2d_pretrained__a549_mantis_tomm20_zikv
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/fcmae_vscyto2d_pretrained/checkpoints/epoch=5-step=4308-loss=0.741.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto2d_pretrained/joint/a549__zikv/prediction.zarr
+
+launcher:
+  job_name: FCMAE2D_Pretrained_PRED_JOINT_TOMM20_ON_A549_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto2d_pretrained/joint/a549__zikv

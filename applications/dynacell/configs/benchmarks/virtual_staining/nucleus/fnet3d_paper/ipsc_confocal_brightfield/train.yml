@@ -1,0 +1,83 @@
+# FNet3D paper-baseline fit on nucleus — AICS iPSC confocal, BRIGHTFIELD input.
+#
+# Brightfield-input ablation arm of nucleus/fnet3d_paper/ipsc_confocal/train.yml.
+# Every hyperparameter is identical to that baseline; the only change is the model
+# input channel (Brightfield instead of the Phase3D volume reconstructed from it),
+# which enters via train_sets/ipsc_confocal_brightfield.yml's
+# dataset_ref.source_channel.
+#
+# The three transform lists are re-authored here because they name channels
+# explicitly. Values are copied from the composed baseline, NOT from the target
+# fragment: data_overlays/fnet3d_paper_fit.yml composes after targets/nucleus.yml
+# and replaces all three lists (deep_merge replaces lists wholesale), so the live
+# values are 32x64x64 crops with num_samples 8, not the target's 13x624x624 / 2.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal_brightfield.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal_brightfield
+  model_name: fnet3d_paper
+  experiment_id: nucleus__ipsc_confocal_brightfield__fnet3d_paper
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Brightfield]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          roi_size: [32, 64, 64]
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_iPSCbf_NUCL_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_paper/checkpoints
+
+launcher:
+  job_name: FNet3DPaperBF_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_paper
+  # cell.zarr-backed preload pushes MaxVMSize past the shared 256G cap
+  # (observed 264G on the first launch; worker OOM-killed in validation).
+  sbatch:
+    mem: "512G"

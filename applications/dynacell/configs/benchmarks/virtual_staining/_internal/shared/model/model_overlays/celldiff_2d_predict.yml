@@ -1,0 +1,35 @@
+# CellDiff-2D predict overlay for the in-focus 2D benchmark track. Binds the
+# celldiff_fm_2d model recipe + predict trainer recipe, then layers predict-time
+# model hparams and data-loader settings. Predict-time normalizations and
+# data_path are leaf-owned (leaf overrides target-inherited values to match each
+# organelle's test store).
+#
+# CRITICAL: predict rebuilds the model from the celldiff_fm_2d recipe's
+# net_config (input_spatial_size [1,512,512], patch_size [1,4,4]) and then loads
+# the trained weights; data.z_window_size MUST be 1 so the datamodule emits one
+# window per z-plane of the full-Z 3D test store, matching the Z-preserving 2D
+# checkpoint. A z_window_size mismatch would feed a multi-plane window into a
+# Z=1 network and error. Same contract as fnet2d_predict.yml.
+#
+# predict_overlap Z is 0, NOT the 3D overlay's 4: `window_starts` requires
+# 0 <= overlap < patch on every axis, and the Z patch is 1 here, so any non-zero
+# Z overlap raises. XY overlap stays 256 — `iterative` anchors overlapping tiles
+# via velocity, which is what keeps tile seams out of the 640x960 A549 stores
+# (the same lattice/seam problem the pix2pix3d de-latticing fixed).
+base:
+  - ../../../../../../recipes/models/celldiff_fm_2d.yml
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    net_config:
+      input_spatial_size: [1, 512, 512]
+    num_generate_steps: 100
+    predict_method: iterative
+    predict_overlap: [0, 256, 256]
+data:
+  init_args:
+    z_window_size: 1
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]

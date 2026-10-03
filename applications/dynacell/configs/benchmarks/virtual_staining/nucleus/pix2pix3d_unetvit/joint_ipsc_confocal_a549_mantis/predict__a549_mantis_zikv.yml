@@ -24,7 +24,7 @@ model:
     # Best loss/validate_ema checkpoint, modernized Run-D 40ep run (job
     # 33502019, best at epoch 39, validate_ema=1.00041). predict_step uses
     # generator_ema (use_ema_at_predict=True default).
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=39-step=214400.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/pix2pix3d_unetvit/checkpoints/epoch=39-step=214400.ckpt
 
 data:
   init_args:
@@ -43,8 +43,13 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_zikv.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__zikv/prediction.zarr
+        # Take each plane from the depth window centred on it instead of the mean
+        # of all 8 covering windows: that mean halves mid-band power (0.045 ->
+        # 0.021 of ground truth on an in-domain membrane FOV) and cancels none of
+        # the XY lattice, since all 8 share one XY grid.
+        z_reduction: center
 
 launcher:
   job_name: pix2pix3d_unetvit_JOINT_PRED_NUCL_ON_A549_h2b_zikv
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__zikv

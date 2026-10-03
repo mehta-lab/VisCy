@@ -22,9 +22,10 @@ except ImportError:
     ContrastiveEncoder = None  # type: ignore[assignment, misc]
 
 try:
-    from viscy_models.foundation import CellDinoModel
+    from viscy_models.foundation import CellDinoModel, MorphEmModel
 except ImportError:
     CellDinoModel = None  # type: ignore[assignment, misc]
+    MorphEmModel = None  # type: ignore[assignment, misc]
 
 matplotlib.use("Agg")
 from pathlib import Path
@@ -61,8 +62,27 @@ def _require_cell_dino():
         )
 
 
+def _require_morphem():
+    if MorphEmModel is None:
+        raise ImportError(
+            "viscy_models.foundation.MorphEmModel is required for MorphEmFeatureExtractor. "
+            "Install the in-tree workspace package via `uv sync --all-packages --all-extras` "
+            "from the VisCy repo root, or `pip install -e packages/viscy-models`."
+        )
+
+
 class DynaCLRFeatureExtractor:
-    """DynaCLR-based contrastive feature extractor for cell images."""
+    """DynaCLR-based contrastive feature extractor for cell images.
+
+    DynaCLR is trained on ``NormalizeSampled`` z-scored inputs (per-FOV or
+    per-(FOV, timepoint) mean/std), so this extractor per-crop z-scores each
+    2-D crop before the encoder to match the training input *shape*
+    (zero-mean / unit-std). Per-crop statistics are used because the exact
+    training-time per-FOV/timepoint stats are not available at eval for every
+    store (e.g. the read-only A549 ``.ozx``); this leaves a scope difference
+    (per masked crop vs whole-FOV) but closes the shape gap that raw [0, 1]
+    crops left open.
+    """
 
     # Version tag for the input-side preprocessing recipe. Stored alongside
     # cached features in the per-cache-dir manifest under
@@ -71,7 +91,26 @@ class DynaCLRFeatureExtractor:
     # input changes (normalization, channel handling, resize, etc.). The
     # cache layer compares cached vs current version on context init and
     # auto-invalidates the cached features for this extractor on mismatch.
-    PREPROCESS_VERSION = "v1"
+    # The v2 bump folds two changes over the v1 raw-[0, 1] recipe: (1)
+    # ``build_crops`` switched from raw min-max to robust percentile (1-99
+    # clip + min-max) normalization upstream, and (2) per-crop spatial
+    # z-score here, to match DynaCLR's ``NormalizeSampled`` z-scored training
+    # distribution instead of feeding it bounded [0, 1] crops.
+    PREPROCESS_VERSION = "v2"
+
+    @staticmethod
+    def _zscore(x: torch.Tensor) -> torch.Tensor:
+        """Per-image spatial z-score over the trailing ``(H, W)`` dims.
+
+        Uses the same ``(x - m) / (s + 1e-7)`` form (biased std) as
+        :meth:`viscy_models.foundation.CellDinoModel.preprocess_2d` and the
+        MorphEm wrapper, so all non-DINOv3 backbones share one z-score
+        convention. Operates per leading index, so a batched ``(N, 1, 1, H, W)``
+        tensor is normalized independently per crop.
+        """
+        m = x.mean(dim=(-2, -1), keepdim=True)
+        s = x.std(dim=(-2, -1), unbiased=False, keepdim=True)
+        return (x - m) / (s + 1e-7)
 
     def __init__(self, checkpoint: str, encoder_config: dict):
         """Load DynaCLR model from checkpoint.
@@ -105,6 +144,7 @@ class DynaCLRFeatureExtractor:
             1-D embedding vector of shape ``(embedding_dim,)``.
         """
         image = torch.as_tensor(image, device=self.model.device)[None, None, None, ...]
+        image = self._zscore(image)
         with torch.inference_mode():
             features, _ = self.model(image)
         return features
@@ -113,12 +153,15 @@ class DynaCLRFeatureExtractor:
         """Run the encoder over a batch of 2-D crops in one or more chunks.
 
         Stacks the crops to ``(N, 1, 1, H, W)`` so the contrastive encoder
-        sees a real batch. Chunks at ``batch_size`` to bound VRAM.
+        sees a real batch. Each crop is per-image z-scored (see
+        :meth:`_zscore`) before the encoder. Chunks at ``batch_size`` to
+        bound VRAM.
         """
         out_chunks: list[torch.Tensor] = []
         for i in range(0, len(images), batch_size):
             chunk = np.stack(images[i : i + batch_size], axis=0)
             batch = torch.as_tensor(chunk, device=self.model.device)[:, None, None, ...]
+            batch = self._zscore(batch)
             with torch.inference_mode():
                 features, _ = self.model(batch)
             out_chunks.append(features)
@@ -130,16 +173,19 @@ class DinoV3FeatureExtractor:
 
     # Version tag for the input-side preprocessing recipe. Stored under
     # ``artifacts.dinov3_features.<slug>.preprocess_version`` in the cache
-    # manifest. Current recipe is per-image min/max scale to ``[0, 1]``
-    # (already done upstream by ``build_crops``) followed by ImageNet
-    # ``(mean, std)`` normalization via ``AutoImageProcessor`` with
-    # ``do_rescale=False`` — the processor's default ``rescale_factor``
-    # of ``1/255`` would otherwise divide our [0, 1] float crops a second
-    # time, leaving the model with essentially-black inputs and features
-    # cosine-uncorrelated with the intended representation. The v2 bump
-    # invalidates every v1 cache entry, which was extracted with the
-    # buggy double-rescale path.
-    PREPROCESS_VERSION = "imagenet_normalize_v2"
+    # manifest. Current recipe is per-image robust percentile-clip
+    # (``[1, 99]``) + min-max scale to ``[0, 1]`` (done upstream by
+    # ``build_crops``) followed by ImageNet ``(mean, std)`` normalization
+    # via ``AutoImageProcessor`` with ``do_rescale=False`` — the processor's
+    # default ``rescale_factor`` of ``1/255`` would otherwise divide our
+    # [0, 1] float crops a second time, leaving the model with
+    # essentially-black inputs and features cosine-uncorrelated with the
+    # intended representation. DINOv3 has no internal per-image z-score, so
+    # this upstream scaling is load-bearing: the v3 bump invalidates every
+    # v2 cache entry, which used raw min-max crops where a single hot pixel
+    # in the FOV compressed all crops toward black and injected a GT-vs-pred
+    # intensity-range mismatch. v2 in turn had fixed the v1 double-rescale.
+    PREPROCESS_VERSION = "imagenet_normalize_v3"
 
     def __init__(self, pretrained_model_name: str):
         """Load DINOv3 model from HuggingFace Hub.
@@ -154,8 +200,9 @@ class DinoV3FeatureExtractor:
         self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
         # Belt-and-suspenders: HF defaults `do_rescale=True` with
         # `rescale_factor=1/255` (uint8 → [0, 1]) on the processor instance.
-        # Our crops are already float [0, 1] from `_minmax_norm`, so the
-        # rescale must not run. Per-call ``do_rescale=False`` below covers
+        # Our crops are already float [0, 1] from ``build_crops`` (robust
+        # percentile normalization), so the rescale must not run. Per-call
+        # ``do_rescale=False`` below covers
         # the current invocations; pinning the instance attribute here
         # keeps any future helper that calls ``self.processor(...)`` without
         # the kwarg from silently regressing to the double-rescaled path.
@@ -221,8 +268,12 @@ class CellDinoFeatureExtractor:
     # :meth:`viscy_models.foundation.CellDinoModel.preprocess_2d`. Bump on
     # any future change so cached features auto-invalidate. The bump from
     # the previous min/max-to-[0,1] recipe (which had no version tag) is
-    # one such transition — see commit e648c4ce.
-    PREPROCESS_VERSION = "self_normalize_v1"
+    # one such transition — see commit e648c4ce. The v2 bump reflects
+    # ``build_crops`` switching to robust percentile (1-99 clip + min-max)
+    # normalization upstream: the percentile clip is not affine, so it
+    # changes the z-scored input even though the min-max prescale alone
+    # would cancel under the per-image z-score.
+    PREPROCESS_VERSION = "self_normalize_v2"
 
     def __init__(self, weights_path: str, img_size: int = 224, patch_size: int = 16):
         """Load a CELL-DINO checkpoint from a local ``.pth`` state_dict.
@@ -282,9 +333,87 @@ class CellDinoFeatureExtractor:
         return torch.cat(out_chunks, dim=0)
 
 
-def _minmax_norm(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
-    """Min-max normalize array to [0, 1]."""
-    return (x - x.min()) / (x.max() - x.min() + eps)
+class MorphEmFeatureExtractor:
+    """MorphEm (CaicedoLab/MorphEm, DINO ViT-S/16 on microscopy) embedder for cell images.
+
+    Wraps :class:`viscy_models.foundation.MorphEmModel` so the eval pipeline
+    can use it via the same ``extract_features(image_2d)`` contract as the
+    DINOv3 / DynaCLR / CELL-DINO extractors. Unlike :class:`CellDinoModel`,
+    ``MorphEmModel.forward`` does **not** normalize inline, so this extractor
+    calls :meth:`viscy_models.foundation.MorphEmModel.preprocess_2d`
+    explicitly (per-image z-score then resize to 224) before the backbone.
+    """
+
+    # Version tag for the input-side preprocessing recipe. Stored under
+    # ``artifacts.morphem_features.<slug>.preprocess_version`` in the cache
+    # manifest. Current recipe is per-image per-channel spatial z-score
+    # (PerImageNormalize) then bilinear resize to 224, applied in
+    # :meth:`viscy_models.foundation.MorphEmModel.preprocess_2d`. Bump on any
+    # future change so cached features auto-invalidate. The v2 bump reflects
+    # ``build_crops`` switching to robust percentile (1-99 clip + min-max)
+    # normalization upstream: the percentile clip is not affine, so it
+    # changes the z-scored input even though the min-max prescale alone
+    # would cancel under the per-image z-score.
+    PREPROCESS_VERSION = "per_image_norm_v2"
+
+    def __init__(self, pretrained_model_name: str, revision: str | None = None, img_size: int = 224):
+        """Load MorphEm from a HuggingFace hub id (or local snapshot dir).
+
+        Parameters
+        ----------
+        pretrained_model_name :
+            HuggingFace id (``"CaicedoLab/MorphEm"``) or a local snapshot
+            directory; resolved from the shared ``HF_HUB_CACHE``.
+        revision :
+            Hub commit SHA to pin the ``trust_remote_code`` model to. The
+            eval config sets it; ``None`` (hub head) is only for ad-hoc use.
+        img_size :
+            Spatial size the model interpolates inputs to, by default 224.
+        """
+        _require_morphem()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = MorphEmModel(model_name=pretrained_model_name, revision=revision, img_size=img_size, freeze=True)
+        self.model.to(device)
+        self.model.eval()
+        self.device = device
+
+    def extract_features(self, image: np.ndarray) -> torch.Tensor:
+        """Extract the channel-mean CLS token from a 2-D image patch.
+
+        Parameters
+        ----------
+        image :
+            2-D array (H, W); wrapped to ``(1, 1, H, W)`` so MorphEm treats
+            it as a single-channel, single-batch input.
+
+        Returns
+        -------
+        torch.Tensor
+            Batch embedding of shape ``(1, D)`` (one row; ``D`` = 384 for the
+            ViT-S/16 backbone), matching the ``(N, D)`` extractor contract.
+        """
+        x = torch.as_tensor(image, device=self.device, dtype=torch.float32)[None, None, ...]
+        with torch.inference_mode():
+            x = self.model.preprocess_2d(x)
+            features, _ = self.model(x)
+        return features
+
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 32) -> torch.Tensor:
+        """Run MorphEm over a batch of 2-D crops in one or more chunks.
+
+        Stacks the crops to ``(N, 1, H, W)`` and chunks at ``batch_size`` to
+        bound VRAM; each chunk is per-image z-scored + resized before the
+        ViT-S/16 backbone runs.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = np.stack(images[i : i + batch_size], axis=0)
+            batch = torch.as_tensor(chunk, device=self.device, dtype=torch.float32)[:, None, ...]
+            with torch.inference_mode():
+                batch = self.model.preprocess_2d(batch)
+                features, _ = self.model(batch)
+            out_chunks.append(features)
+        return torch.cat(out_chunks, dim=0)
 
 
 def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:
@@ -316,12 +445,16 @@ def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:
 
     metric_cols = [c for c in df.columns if c not in ("FOV", "Timepoint")]
 
-    # FOVs with more than one timepoint
-    multi_tp_fovs = df.groupby("FOV")["Timepoint"].nunique().pipe(lambda s: s[s > 1].index.tolist())
+    # Group / sort once: with ~100 feature-metric columns the per-column
+    # re-groupby and per-(column, FOV) boolean mask dominated this function.
+    by_fov = df.groupby("FOV")
+    all_fov_means = by_fov[metric_cols].mean()
+    multi_tp_fovs = by_fov["Timepoint"].nunique().pipe(lambda s: s[s > 1].index.tolist())
+    tp_frames = {fov: by_fov.get_group(fov).sort_values("Timepoint") for fov in multi_tp_fovs}
 
     for col in metric_cols:
         # --- Plot 1: mean per FOV ---
-        fov_means = df.groupby("FOV")[col].mean()
+        fov_means = all_fov_means[col]
         n_fovs = len(fov_means)
 
         fig, ax = plt.subplots(figsize=(max(6, n_fovs * 0.7), 5))
@@ -338,8 +471,7 @@ def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:
         # --- Plot 2: metric over Timepoint for multi-timepoint FOVs ---
         if multi_tp_fovs:
             fig, ax = plt.subplots(figsize=(8, 5))
-            for fov in multi_tp_fovs:
-                fov_df = df[df["FOV"] == fov].sort_values("Timepoint")
+            for fov, fov_df in tp_frames.items():
                 ax.plot(fov_df["Timepoint"], fov_df[col], marker="o", label=fov)
             ax.set_xlabel("Timepoint")
             ax.set_ylabel(col)

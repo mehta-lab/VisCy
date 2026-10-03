@@ -1,4 +1,4 @@
-"""Eval runtime: thread budgeting + (in later commits) process-pool primitives.
+"""Eval runtime: thread budgeting, FOV-level process pool, region timers.
 
 Three layers of thread-cap discipline, in order of when they bite:
 
@@ -8,7 +8,7 @@ Three layers of thread-cap discipline, in order of when they bite:
 2. ``apply_thread_budget(threads)`` is the in-process safety net: sets env
    (respecting caller-set values), calls ``torch.set_num_threads``, and
    activates a module-level ``threadpoolctl.threadpool_limits`` cap.
-3. (C3) per-worker initializer re-applies the cap in each spawned child.
+3. ``_worker_initializer`` re-applies the cap in each spawned child.
 
 Module-level imports are stdlib + ``threadpoolctl`` only. ``torch`` is imported
 lazily inside function bodies so spawn-context workers can set
@@ -307,7 +307,7 @@ def resolve_runtime(
 # ---------------------------------------------------------------------------
 
 # Per-process timing collector. Each entry is (pos_name, t_or_None, region,
-# seconds). Under executor=process (C3+), workers return their slice in
+# seconds). Under executor=process, workers return their slice in
 # FovResult.timings; the parent's aggregator concatenates.
 _TIMINGS: list[tuple[str, int | None, str, float]] = []
 
@@ -393,7 +393,7 @@ def maybe_gc_collect(fov_idx: int, every_n: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Process-pool primitives for FOV-level parallelism (C4).
+# Process-pool primitives for FOV-level parallelism.
 # Spawn context so each worker gets its own CUDA context and BLAS load.
 # ---------------------------------------------------------------------------
 

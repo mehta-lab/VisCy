@@ -1,0 +1,108 @@
+# Sample-matched UNeXt2-2D ablation — nucleus (Nuclei), iPSC-trained.
+#
+# IDENTICAL to nucleus/fcmae_vscyto2d_scratch/ipsc_confocal/train.yml except the
+# optimizer budget, which is copied from fcmae_vscyto3d_scratch (the 3D UNeXt2 it
+# is compared against):
+#   - 4-GPU DDP x batch_size 32 per rank = 128 samples/step (was 1 GPU x 16)
+#   - warmup_steps 8500 (was 4000)
+#   - cosine horizon 62400 steps = the 3D fit's 200 epochs x 312 steps/epoch
+#     (WarmupCosine t_total = trainer.estimated_stepping_batches, capped here by
+#     max_steps; max_epochs is raised only so it never binds first)
+#   - validation + checkpoint cadence every 5 epochs x ~63 steps ~= 315 steps,
+#     close to the 3D fit's once per 312-step epoch, so best-val selection sees a
+#     similar number of candidates
+# The 2D baseline trained 100000 steps x 16 samples = 1.6M samples; the 3D fit
+# 43479 steps x 128 = 5.6M (it stopped at epoch 139/200; the paper predicts from
+# its epoch=80-step=25272 checkpoint). This arm sees 62400 x 128 = 8.0M.
+#
+# Question it answers: after matching samples/step, steps and lr schedule, is
+# the remaining 3D-vs-2D gap z-context, or was the 2D baseline under-trained?
+# Target PLANES are NOT matched: each 3D sample supervises 15 planes, so the 3D
+# fit still sees 15x the target planes per step. A plane-matched arm (batch 1920)
+# is ~15x the compute and is deferred until this one reports.
+#
+# Precision stays bf16-mixed, deliberately NOT the 3D fit's 16-mixed: at depth 1,
+# fp16's GradScaler silently skips NaN-gradient steps, which is how 24 FCMAE-2D
+# fits reached epoch 199 with weights still at init (model_overlays/
+# fcmae_vscyto2d_fit.yml). Precision is a numerical format, not budget.
+#
+# DDP needs find_unused_parameters (FCMAE pretraining=False has decoder/head
+# params unused on some paths) and the 3 h process-group timeout, both copied
+# from model_overlays/fcmae_vscyto3d_fit.yml.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../../../recipes/topology/ddp_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal
+  model_name: fcmae_vscyto2d_scratch_samplematched
+  experiment_id: nucleus__ipsc_confocal__fcmae_vscyto2d_scratch_samplematched
+  # Disable the manifest resolver: the 2D track reads the offline focus
+  # store, not the manifest-registered cell.zarr. dataset_ref: null makes
+  # the compose hook a no-op so data fields can be declared inline.
+  dataset_ref: null
+
+data:
+  init_args:
+    # Per rank; x 4 ranks = 128 samples/step, the 3D fit's global batch. The
+    # overlay's 16 was sized for 48 GB cards (32 OOMs at ~47 GB there);
+    # hardware_4gpu.yml is H100/H200 only.
+    batch_size: 32
+    # iPSC in-focus slab store + channels — resolver disabled above.
+    source_channel: Phase3D
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell_focus.zarr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [1, 600, 600]
+          num_samples: 4
+
+model:
+  init_args:
+    warmup_steps: 8500
+
+trainer:
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      find_unused_parameters: true
+      timeout: "3:00:00"
+  max_steps: 62400
+  max_epochs: 2000
+  check_val_every_n_epoch: 5
+  logger:
+    init_args:
+      name: FCMAE_VSCyto2D_Scratch_SampleMatch_iPSC_Nucleus
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fcmae_vscyto2d_scratch_samplematched
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 5
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fcmae_vscyto2d_scratch_samplematched/checkpoints
+
+launcher:
+  job_name: FCMAE_VSCyto2D_Scratch_SampleMatch_Nucleus
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fcmae_vscyto2d_scratch_samplematched
+  # Same 128G as the 2D baseline: the focus store's mmap buffer is ~5-11 GiB,
+  # so hardware_4gpu.yml's 512G (sized for full-Z cell.zarr) only queues slower.
+  sbatch:
+    mem: "128G"

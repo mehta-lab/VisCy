@@ -31,6 +31,23 @@ _RESOLVED_FIELDS: Final = (
 )
 
 
+def _pred_is_source(config: DictConfig) -> bool:
+    """Whether to evaluate the raw input (source channel) as the prediction."""
+    return bool(OmegaConf.select(config, "io.pred_is_source", default=False))
+
+
+def _pred_channel_name(config: DictConfig, resolved: ResolvedDataset) -> str:
+    """Prediction channel to read from ``io.pred_path``.
+
+    Normally the model output ``{target_channel}_prediction``. When
+    ``io.pred_is_source`` is set, evaluate the raw input (the manifest's declared
+    ``source_channel``, e.g. ``Phase3D``) as the prediction — a no-model floor.
+    """
+    if _pred_is_source(config):
+        return resolved.source_channel
+    return f"{resolved.target_channel}_prediction"
+
+
 def apply_dataset_ref(config: DictConfig) -> None:
     """Splice manifest-derived ``io.*`` and ``pixel_metrics.spacing`` into *config*.
 
@@ -94,7 +111,7 @@ def _check_collisions(config: DictConfig, resolved: ResolvedDataset) -> None:
             continue
         if str(current) != str(resolved_val):
             conflicts.append((cfg_path, str(current), str(resolved_val)))
-    pred_channel = f"{resolved.target_channel}_prediction"
+    pred_channel = _pred_channel_name(config, resolved)
     current_pred = OmegaConf.select(config, "io.pred_channel_name", default=None)
     if current_pred is not None and str(current_pred) != pred_channel:
         conflicts.append(("io.pred_channel_name", str(current_pred), pred_channel))
@@ -134,7 +151,13 @@ def _splice(config: DictConfig, resolved: ResolvedDataset) -> None:
             if val is None:
                 continue
             OmegaConf.update(config, cfg_path, str(val), merge=False)
-        OmegaConf.update(config, "io.pred_channel_name", f"{resolved.target_channel}_prediction", merge=False)
+        OmegaConf.update(config, "io.pred_channel_name", _pred_channel_name(config, resolved), merge=False)
+        # pred_is_source: evaluate the model INPUT (the manifest's source channel) as
+        # the "prediction" against the fluorescence GT — a no-model floor. Source and
+        # target live in one store, so default pred_path to the GT store; positions then
+        # match by construction (the leaf may still set pred_path explicitly).
+        if _pred_is_source(config) and OmegaConf.select(config, "io.pred_path", default=None) is None:
+            OmegaConf.update(config, "io.pred_path", str(resolved.data_path_test), merge=False)
         OmegaConf.update(config, "pixel_metrics.spacing", resolved.spacing.as_list(), merge=False)
     finally:
         OmegaConf.set_struct(config, prev_struct)

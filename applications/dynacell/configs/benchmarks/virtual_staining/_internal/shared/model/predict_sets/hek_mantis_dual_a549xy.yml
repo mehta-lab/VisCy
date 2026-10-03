@@ -1,0 +1,26 @@
+# Predict set: HEK293T mantis dual Nuclei+Membrane prediction, a549xy geometry.
+#
+# Purpose: the HEK release ships no nucleus channel (its nucleus target failed
+# QC), so the carved whole-cell membrane eval had no seeds to carve. This set
+# predicts a nucleus channel from Phase3D with the public VSCyto3D (cytoland)
+# checkpoint; the eval then cpdino-segments it into instance seeds and subtracts
+# that footprint from the cpdino whole-cell membrane labels. See
+# leaf/grouped/membrane_hek_a549xy/eval_grouped.yaml.
+#
+# No `dataset_ref`: same reason as predict_sets/a549_mantis_dual_mock.yml — the
+# manifest schema carries one target_channel per entry and no row declares both
+# Nuclei and Membrane, so data_path / source_channel / target_channel are inlined.
+#
+# `Nuclei` does not exist in the input store, and that is fine: predict never
+# reads target channels (HCSDataModule._setup_predict sets only channels.source),
+# and HCSPredictionWriter uses target_channel solely to name the output channels
+# (`Nuclei_prediction`, `Membrane_prediction`) — it resolves the un-suffixed names
+# against the input store only under `write_input`, which stays off.
+benchmark:
+  predict_set: hek_mantis_dual_a549xy
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/hek/mantis/test/KRAS_a549xy.zarr
+    source_channel: [Phase3D]
+    target_channel: [Nuclei, Membrane]

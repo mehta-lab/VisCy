@@ -1,0 +1,50 @@
+# FNet2D voxel-matched predict: nucleus (NUCL) trained on ipsc_confocal, tested on A549 mantis denv.
+# Voxel-matched FNet-2D ablation arm (batch 48 -> 1536 = fnet3d_paper's planes/step);
+# otherwise identical to the fnet2d leaf of the same name, including the fnet2d_predict
+# overlay (full-Z store, z_window_size=1) and Phase3D fov_statistics normalization.
+# ckpt_path is a PROVISIONAL pin: the fit is still running and save_top_k rotates
+# files out. Submit with --ckpt best (uses only the parent dir), or re-bake after the
+# fit completes (tools/bake_best_ckpt.py).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_denv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fnet2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_h2b_denv
+  model_name: fnet2d_voxelmatched
+  experiment_id: nucleus__ipsc_confocal__fnet2d_voxelmatched__a549_mantis_h2b_denv
+  # Override the iPSC-side `nucleus` target with a549's gene-keyed `h2b`.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fnet2d_voxelmatched/checkpoints/epoch=1114-step=11150-loss=1.274.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_voxelmatched/ipsc/a549__denv/prediction.zarr
+
+launcher:
+  job_name: FNet2DVoxMatch_PRED_NUCL_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_voxelmatched/ipsc/a549__denv

@@ -1,0 +1,66 @@
+# Smoke sibling of nucleus/fnet3d_vscyto3daug/ipsc_confocal/train.yml.
+# Verifies the VSCyto3D augmentation pipeline (600->384 weighted crop +
+# affine + intensity stack) runs on the real iPSC cell.zarr at FNet3D's
+# Z=32, that a bf16-mixed batch of 8 fits a single H200, and that train +
+# val forward/backward produce finite MSE — before the real batch launches.
+# Scratch run_root, no logger, no checkpoints, lazy read (mmap_preload
+# false) for a fast start, 30 steps, bounded 30-min wall.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_vscyto3daug_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal
+  model_name: fnet3d_vscyto3daug
+  experiment_id: nucleus__ipsc_confocal__fnet3d_vscyto3daug__smoke
+
+trainer:
+  precision: bf16-mixed
+  max_steps: 30
+  limit_val_batches: 2
+  logger: false
+  callbacks: []
+
+data:
+  init_args:
+    mmap_preload: false
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 600, 600]
+          num_samples: 4
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          roi_size: [32, 384, 384]
+
+launcher:
+  job_name: FNet3DVSAug_SMOKE
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/_smoke/fnet3d_vscyto3daug_ipsc_nucleus
+  sbatch:
+    constraint: h200
+    mem: "128G"
+    time: "00:30:00"

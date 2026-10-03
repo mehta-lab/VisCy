@@ -1,5 +1,5 @@
 # VSCyto3D: supervised training with Spotlight foreground-aware loss.
-# Requires: viscy preprocess --compute_otsu --compute_fg_masks
+# Requires: viscy preprocess --compute_otsu true --compute_fg_masks true
 # Usage: python -m cytoland fit --config vscyto3d/train_spotlight.yml
 base:
   - ../recipes/trainer/fit.yml

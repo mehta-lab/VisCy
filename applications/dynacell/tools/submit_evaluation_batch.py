@@ -34,22 +34,22 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     DEFAULT_EVAL_RUN_ROOT as _DEFAULT_RUN_ROOT,
 )
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     ORGANELLE_EVAL_TARGET as _ORGANELLE_EVAL_TARGET,
 )
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
+    eval_leaf,
+)
+from dynacell.evaluation.paths import (
     eval_predict_set_group as _eval_predict_set_group,
 )
-from dynacell.evaluation.save_paths import (
-    eval_save_dir,
-)
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     extract_predict_output_store as _extract_output_store,
 )
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     paper_key as _paper_key,
 )
 
@@ -74,7 +74,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="directory under which `resolved/` and `slurm/` land. "
-        "Default: first leaf's save_dir grandparent if it exists, else "
+        "Default: first leaf's save_dir parent if it exists, else "
         f"{_DEFAULT_RUN_ROOT}.",
     )
     ap.add_argument(
@@ -115,7 +115,7 @@ def _resolve_one_leaf(
         Config-side organelle key.
     code_model : str
         Config-side model name.
-    trained_on : str
+    train_set : str
         Config-side train-set key (e.g. ``ipsc_confocal``).
     save_dir : Path
         Canonical eval save_dir.
@@ -131,12 +131,14 @@ def _resolve_one_leaf(
     benchmark = composed.get("benchmark") or {}
     organelle = benchmark.get("organelle")
     code_model = benchmark.get("model_name")
-    trained_on = benchmark.get("trained_on")
+    # Transitional: predict leaves still carry `trained_on`; accept either key until
+    # the predict-leaf codemod renames it to `train_set`.
+    train_set = benchmark.get("train_set") or benchmark.get("trained_on")
     dataset_ref = benchmark.get("dataset_ref") or {}
     dataset_name = dataset_ref.get("dataset")
     dataset_target = dataset_ref.get("target")
-    if not organelle or not code_model or not trained_on:
-        raise SystemExit(f"{leaf_path}: missing benchmark.{{organelle, model_name, trained_on}}")
+    if not organelle or not code_model or not train_set:
+        raise SystemExit(f"{leaf_path}: missing benchmark.{{organelle, model_name, train_set}}")
     if not dataset_name:
         raise SystemExit(f"{leaf_path}: missing benchmark.dataset_ref.dataset (needed to pick predict_set group)")
     output_store = _extract_output_store(composed, leaf_path)
@@ -158,8 +160,7 @@ def _resolve_one_leaf(
 
     leaf_stem = leaf_path.stem
     # CellDiff iPSC variants (`predict__ipsc_confocal__<variant>.yml`) all map
-    # to test_plate="ipsc" — save_paths collapses celldiff variants to one
-    # paper key, so the eval save_dir is shared across variants.
+    # to test_plate="ipsc".
     if leaf_stem == "predict__ipsc_confocal" or leaf_stem.startswith("predict__ipsc_confocal__"):
         test_plate = "ipsc"
     elif leaf_stem.endswith("_mock"):
@@ -171,11 +172,15 @@ def _resolve_one_leaf(
     else:
         raise SystemExit(f"cannot infer test plate from leaf filename: {leaf_path.name}")
 
-    save_dir = eval_save_dir(
+    # Map the predict-leaf test plate to the canonical (test_set, condition) pair.
+    test_set = "ipsc" if test_plate == "ipsc" else "a549"
+    condition = None if test_plate == "ipsc" else test_plate
+    save_dir = eval_leaf(
         organelle=organelle,
-        code_model=code_model,
-        train_set=trained_on,
-        test_plate=test_plate,
+        model=code_model,
+        train_set=train_set,
+        test_set=test_set,
+        condition=condition,
     )
     overrides: dict[str, object] = {
         "predict_set": predict_set_group,
@@ -190,15 +195,15 @@ def _resolve_one_leaf(
     # and must be the organelle slug from the eval target group.
     if dataset_target:
         overrides["benchmark.dataset_ref.target"] = dataset_target
-    return overrides, organelle, code_model, trained_on, save_dir, test_plate
+    return overrides, organelle, code_model, train_set, save_dir, test_plate
 
 
-def _composite_job_name(organelle: str, code_model: str, trained_on: str, test_plates: list[str]) -> str:
+def _composite_job_name(organelle: str, code_model: str, train_set: str, test_plates: list[str]) -> str:
     train_key_short = {
         "ipsc_confocal": "IPSC",
         "a549_mantis": "A549",
         "joint_ipsc_confocal_a549_mantis": "JOINT",
-    }[trained_on]
+    }[train_set]
     # Test scope: all-iPSC, all-A549, or mixed (the local runner enforces single test_set,
     # but support graceful naming if a user batches arbitrary leaves).
     if test_plates == ["ipsc"]:
@@ -307,11 +312,11 @@ def submit(argv: list[str] | None = None) -> int:
     overrides_list: list[dict[str, object]] = []
     organelles: list[str] = []
     code_models: list[str] = []
-    trained_ons: list[str] = []
+    train_sets: list[str] = []
     save_dirs: list[Path] = []
     test_plates: list[str] = []
     for leaf in args.leaves:
-        overrides, organelle, code_model, trained_on, save_dir, test_plate = _resolve_one_leaf(leaf)
+        overrides, organelle, code_model, train_set, save_dir, test_plate = _resolve_one_leaf(leaf)
         if args.overwrite:
             overrides["force_recompute.all"] = True
         elif args.regen_metrics:
@@ -319,7 +324,7 @@ def submit(argv: list[str] | None = None) -> int:
         overrides_list.append(overrides)
         organelles.append(organelle)
         code_models.append(code_model)
-        trained_ons.append(trained_on)
+        train_sets.append(train_set)
         save_dirs.append(save_dir)
         test_plates.append(test_plate)
 
@@ -327,19 +332,19 @@ def submit(argv: list[str] | None = None) -> int:
         raise SystemExit(f"all leaves must share benchmark.organelle (got {sorted(set(organelles))})")
     if len(set(code_models)) != 1:
         raise SystemExit(f"all leaves must share benchmark.model_name (got {sorted(set(code_models))})")
-    if len(set(trained_ons)) != 1:
-        raise SystemExit(f"all leaves must share benchmark.trained_on (got {sorted(set(trained_ons))})")
+    if len(set(train_sets)) != 1:
+        raise SystemExit(f"all leaves must share benchmark.train_set (got {sorted(set(train_sets))})")
     organelle = organelles[0]
     code_model = code_models[0]
-    trained_on = trained_ons[0]
+    train_set = train_sets[0]
 
-    job_name = args.job_name or _composite_job_name(organelle, code_model, trained_on, test_plates)
+    job_name = args.job_name or _composite_job_name(organelle, code_model, train_set, test_plates)
 
     if args.run_root is not None:
         run_root = args.run_root
     else:
-        gp = save_dirs[0].parent.parent
-        run_root = gp if gp.exists() else _DEFAULT_RUN_ROOT
+        parent = save_dirs[0].parent
+        run_root = parent if parent.exists() else _DEFAULT_RUN_ROOT
 
     # Build per-leaf command lines.
     cmds: list[list[str]] = []

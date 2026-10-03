@@ -1,0 +1,103 @@
+# FNet3D "same-augmentations" ablation on nucleus (Nuclei channel of
+# cell.zarr) — AICS iPSC confocal, BRIGHTFIELD input.
+#
+# This leaf exists to BREAK A CONFOUND. Every brightfield arm shipped so far
+# composes data_overlays/fnet3d_paper_fit.yml, i.e. the 64x64-patch,
+# flip-only recipe that sec:fnet_patch_aug_ablation shows is itself the
+# cause of FNet3D's iPSC->A549 collapse. So the one case where brightfield
+# appeared to beat phase (FNet3D iPSC->A549, 7-2-1) is exactly the case
+# where the phase arm is degenerate for reasons that have nothing to do
+# with the input channel — and CELL-Diff3D, which carries a healthy recipe,
+# gained nothing from brightfield at all.
+#
+# Pairing with the three leaves that already exist completes a 2x3 grid and
+# makes "does brightfield help?" separable from "is the recipe broken?":
+#
+#              | fnet3d_paper | fnet3d_bigpatch | fnet3d_vscyto3daug
+#   Phase3D    |   shipped    |    shipped      |     shipped
+#   Brightfield|   shipped    |    THIS leaf's  |     THIS leaf
+#              |              |     sibling     |
+#
+# Everything except the input channel is verbatim from
+# nucleus/fnet3d_vscyto3daug/ipsc_confocal/train.yml, so a bf-vs-phase
+# delta at this rung attributes to the input and nothing else.
+#
+# The data overlay keys norm/aug/val on Phase3D + Structure; this arm's
+# source is Brightfield and the nucleus target_channel is Nuclei, so all
+# three lists are re-keyed here (deep_merge replaces lists wholesale).
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal_brightfield.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_vscyto3daug_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal_brightfield
+  model_name: fnet3d_vscyto3daug
+  experiment_id: nucleus__ipsc_confocal_brightfield__fnet3d_vscyto3daug
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Brightfield]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 600, 600]
+          num_samples: 4
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          roi_size: [32, 384, 384]
+
+trainer:
+  # bf16-mixed halves the 384x384x32 activation footprint; MSE loss is immune
+  # to the bf16-SSIM cancellation issue. Must match the phase sibling.
+  precision: bf16-mixed
+  logger:
+    init_args:
+      name: FNet3D_VSAug_iPSCbf_NUCL
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_vscyto3daug
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_vscyto3daug/checkpoints
+
+launcher:
+  job_name: FNet3DVSAugBF_iPSC_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_vscyto3daug
+  # Same envelope as the phase sibling: 384x384x32 at bf16-mixed measured
+  # ~41GB on the bigpatch arm, so an 80GB card fits with room. cell.zarr-backed
+  # preload pushes MaxVMSize past the shared 256G cap; mem 512G matches the
+  # fnet3d iPSC headroom.
+  sbatch:
+    constraint: "h100|h200"
+    mem: "512G"

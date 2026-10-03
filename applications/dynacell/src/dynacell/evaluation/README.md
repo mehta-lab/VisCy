@@ -16,7 +16,7 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 | `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, `CellDinoFeatureExtractor`, plot helpers. |
 | `_configs/*.yaml` | Hydra schemas: `eval.yaml`, `precompute.yaml`, `eval_grouped.yaml`. |
 
-Other files (`io.py`, `formatting.py`, `spectral_pcc/`) house readers and bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are now backed by `cubic.metrics`.
+`paths.py` is the canonical artifact-path grammar (checkpoints, prediction stores, eval leaves); `spectral_pcc/` holds bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are backed by `cubic.metrics`.
 
 ## Inputs
 
@@ -24,6 +24,9 @@ Other files (`io.py`, `formatting.py`, `spectral_pcc/`) house readers and bead/P
 - `io.gt_path` — fluorescence ground truth (channel: `io.gt_channel_name`)
 - `io.cell_segmentation_path` — *optional* precomputed cell segmentation HCS OME-Zarr. Required when `compute_feature_metrics=true` or when building CP/DINOv3/DynaCLR/CELL-DINO cache entries. Position layout must match GT/pred 1:1.
 - `io.gt_cache_dir`, `io.pred_cache_dir` — *optional* artifact cache directories; must be distinct. See [Caches](#caches).
+- `feature_metrics.cp.reference_path` — the target's CP (GLCM+) reference, required when `compute_feature_metrics=true`. `null` (default) resolves to `DATA_ROOT/cp_reference/<target_name>.json` for full and lite evals alike. The reference holds one feature mask chosen on GT cells only, pooled over iPSC + A549 mock/denv/zikv, and one GT mean/std per test set (keyed by `benchmark.dataset_ref.dataset`; HEK gets its own, lite reuses its parent's). Every eval applies the mask and its dataset's scaler to pred AND GT. The eval refuses a partial position walk, and refuses to score unless its staged GT CP cells match the reference's fit for that dataset: the same GT-finite cell count exactly, and every CP feature's raw GT mean/std within a relative tolerance of 1e-6 (`GT_MOMENT_RTOL`). A re-cache that reproduces the cells passes, including a GPU recompute (reproducible only to ~1e-15) and a CPU-vs-GPU recompute (up to ~4e-8, measured). It is a moments gate, not a content hash: a change that moves any feature's GT mean/std by more than the tolerance fails, but permuting values within a column, moving cells between blocks, or a single-cell change below about n × 1e-6 std passes. When the GT CP cache is already complete, the check also runs before the FOV loop. Build the reference from existing GT caches with `tools/build_cp_reference.py --target <target>`; `--verify` re-applies the same check to the current caches. `metrics_provenance.json` stamps the per-dataset `cp_space_sha256`: the mask, feature names, recipe, and that dataset's scaler, recorded GT position set, GT cell count and GT moments. A rebuild therefore invalidates only the eval dirs whose own dataset's CP space changed; adding or refitting another dataset leaves them reusable. The `cp_selected_feature_mask.json` sidecar records the same per-dataset hash. Before KID/FID/cosine, the shared-space z is clipped to ±`z_clip` (`CP_Z_CLIP` = 20) on both sides, at dataset level and per row, so one heavy-tailed predicted feature cannot set the cubic KID kernel's magnitude. The clip may touch at most `CP_GT_CLIP_FRAC_MAX` = 1e-3 of each FULL test set's GT cells (any |z| > 20 in its own scaler); lite test sets record the same fraction but are not held to the bound (see below). Measured on the registry's full test sets, the GT max |z| is 26.55 (er / a549-mantis-sec61b-denv / kurtosis), 2 of 23,970 distinct GT cells exceed 20, and the highest enforced per-dataset fraction is 5.3e-4 (er a549-mantis-sec61b-denv and -mock, one cell each). The unenforced lite record reaches 9.5e-4 (a549-mantis-sec61b-denv-lite, the same denv cell in a smaller set). The builder re-checks the bound on every build and refuses to build a reference that violates it. Lite datasets are exempt (their fraction is recorded with `enforced: false`): their GT cells are a subset of the parent's, scored in the parent's scaler, so the lite fraction is small-sample noise on the parent's, which is enforced. c = 20 comes from an offline sweep over c ∈ {5, 8, 10, 15, 20, 30, 50, none} on the nucleus-lite pilot: the in-domain model order was the same at every c except one near-tie (zikv at c = 8), and the cross-domain model order was identical for all c ≥ 20. Caveat: the cubic KID kernel keeps growing with c, so cross-domain CP KID magnitudes are not comparable to in-domain ones; only orderings are meaningful. What the clip discards is reported: `Dataset_CP_clip_frac` and the per-row `CP_clip_frac` give the fraction of pred cells with any kept feature beyond the clip, and the sidecar's `clip` block gives the same per feature. The linear probe still uses the masked, unscaled features.
+  - GLCM+ (CP) space in two lines: one feature mask selected on GT cells only, pooled over the target's iPSC + A549 mock/denv/zikv test sets; then each test set's own GT mean/std standardizes pred and GT alike, so offsets and scale errors relative to that test set's GT stay visible.
+  - GLCM+ median cosine is invariant to contraction toward the GT mean: for `pred = mean + 0.5·(GT − mean)`, every pred/GT cell pair is parallel after the shared scaler and the median cosine is exactly 1.0000, while KID catches it (reviewer-measured on real cells: KID 0.194 vs a pred==GT floor of −0.041; reproduced on synthetic cells in `cp_reference_test.py`). Cosine measures direction only; over-smoothing toward the mean shows up in KID, not cosine.
 
 ## Quick start
 
@@ -35,7 +38,7 @@ uv run dynacell evaluate \
   save.save_dir=/hpc/.../eval_fnet3d_sec61b
 ```
 
-Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N`.
+Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N compute_feature_metrics=false`: CP feature metrics are scored in a reference fit on the full GT cell set, so a partial position walk with feature metrics on raises.
 
 ## Submission tooling
 
@@ -76,6 +79,10 @@ Select a group: `<group>=<option>` (no `+` — groups are declared `optional` in
 
 Override a checkpoint: `feature_extractor.dynaclr.checkpoint=/hpc/.../other.ckpt`. Disable a backbone: `feature_extractor/dinov3=null`. Enable feature metrics: `compute_feature_metrics=true` (also needs `io.cell_segmentation_path` non-null).
 
+### Foreground-limited pixel metrics
+
+`pixel_metrics.foreground.enabled=true` adds `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR` and `FG_frac` to `pixel_metrics.csv`, after the `SI_*` columns and before `Spectral_PCC`/FSC/`MicroMS3IM`/`PerCell_*`. They are the whole-image `PCC`/`SI_*` scored against a soft `[0, 1]` weight map built from the GT alone (`metrics.foreground_weight`: Gaussian smooth, then Otsu, then Gaussian feather), so every model is scored on the same region. The images are never zeroed or eroded, and SSIM uses normalized convolution. A unit weight reproduces the whole-image columns. Null sigmas take the per-target defaults in `metrics.FOREGROUND_SIGMAS_UM`. The recipe, `metrics.FOREGROUND_METRICS_VERSION` and the pixel spacing are stamped in `metrics_provenance.json`, so enabling it or changing any of them reruns the whole final-metrics pass instead of reusing a cache; disabling it reuses a cache scored with it. A (FOV, t) with no GT foreground scores NaN with `FG_frac` 0.
+
 ### External users (`--config-dir`)
 
 Wheel installs see only in-package groups. To evaluate your own predictions, point Hydra at your group files:
@@ -109,13 +116,13 @@ Canonical leaves at `configs/benchmarks/virtual_staining/<org>/<model>/<train_se
 uv run dynacell evaluate leaf=er/celldiff/ipsc_confocal/eval__ipsc_confocal
 ```
 
-Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides apply on top (e.g. `limit_positions=1` for smoke).
+Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides apply on top (e.g. `limit_positions=1 compute_feature_metrics=false` for smoke).
 
 ## Caches
 
 Set `io.gt_cache_dir` to write/read GT-side artifacts. Set `io.pred_cache_dir` for prediction-side organelle masks + per-cell features. Sharing one root is rejected.
 
-GT caches are reusable across model checkpoints for the same `(gt_path, gt_channel_name, cell_segmentation_path)`. Prediction caches are reusable for repeated evals of the same `(pred_path, pred_channel_name, cell_segmentation_path)`.
+GT caches are reusable across model checkpoints for the same `(gt_path, gt_channel_name, cell_segmentation_path)`. Prediction caches are reusable for repeated evals of the same `(pred_path, pred_channel_name, cell_segmentation_path)` while the prediction in that store is unchanged (see [Force recompute](#force-recompute)).
 
 ### Layout
 
@@ -131,7 +138,7 @@ GT caches are reusable across model checkpoints for the same `(gt_path, gt_chann
 
 `manifest.yaml` is **not source-controlled** — it lives in the shared cache root, is rewritten by the pipeline on every cache-mutating run (timestamps, FOV position lists, absolute HPC paths to the per-model feature zarrs it indexes), and is fully derivable from this code + the raw inputs. A deleted or corrupted manifest is a recompute cost (run `dynacell precompute-gt` or a normal eval), not a loss of source-of-truth state.
 
-Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR `ckpt_sha256_12` is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
+Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR checkpoint hash (`viscy_utils.prediction_metadata.checkpoint_sha256_12`) is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
 
 Per-artifact params (`cp_features.spacing`, `dinov3_features.patch_size`, `dynaclr_features.{checkpoint_sha256_12, encoder_config_sha256_12, patch_size}`, `celldino_features.{weights_sha256_12, patch_size}`, `organelle_masks.target_name`, plus per-extractor `preprocess_version`) are softer: a mismatch emits a warning and sets the matching `force_recompute.<side>_<kind>=True` so the artifact is recomputed and the manifest entry is rewritten with the current values. This self-heal path runs at `init_cache_context` time and covers the common "I bumped spacing / patch_size / preprocess recipe" workflow without forcing operators to wipe each cache by hand.
 
@@ -216,13 +223,15 @@ Each per-artifact flag invalidates that family for its side only:
 
 Without `io.gt_cache_dir` / `io.pred_cache_dir`, only `force_recompute.{final_metrics, all}` matter.
 
+A re-predict into the same `io.pred_path` needs none of these flags. The prediction side records, per cached position, the source it was built from: a hash of the position's writer marker (`viscy_prediction_complete` for `io.pred_channel_name`: checkpoint content hash, settings hash, depth handling, source shape) and the mtime of that channel's first stored chunk, at its earliest stored timepoint. A position whose source no longer matches the store is an ordinary cache miss, recomputed and re-recorded (a `StaleCacheError` under `io.require_complete_cache=true`), so an interrupted rebuild resumes where it stopped and a code-only re-predict (same checkpoint and settings, new chunks) is caught. Writes to other channels or to position metadata do not count. Entries written before sources existed are upgraded on the first run, per position: a position is current iff its first stored chunk is no newer than the entry's `built_at`; a position with no stored chunk (a blank prediction) cannot be dated and is rebuilt once. The upgrade rewrites the manifest, so the cache directory must be writable even under `io.require_complete_cache=true`. `metrics_provenance.json` records a digest of all positions' sources, taken before scoring, and `_final_metrics_cache_valid` rejects saved metrics when it differs (an older sidecar: when any chunk is newer than the sidecar, or a position has no stored chunk). Metrics saved after a re-predict but scored from caches it had left stale are the one legacy case this cannot see. A missing prediction store raises `FileNotFoundError` wherever its sources are read, the final-metrics gate included. The GT side is not tracked.
+
 ### Invalidation
 
 Three paths invalidate cached artifacts:
 
 1. **Soft auto-invalidate (default)** — bumping a tracked per-artifact param (spacing, patch_size, preprocess_version, etc.) on a normal full-walk run. `init_cache_context` warns, sets the matching `force_recompute.<side>_<kind>`, and the next FOV pass recomputes and rewrites the manifest entry. Identity mismatches (plate_path, channel_name, cell_segmentation_path, cache_schema_version) still hard-raise.
 2. **Manual `force_recompute.<side>_<kind>`** — bypass cache for a specific family without touching the manifest's recorded params.
-3. **Cache-dir wipe** — required when running with `limit_positions=N` or `io.require_complete_cache=true` and you need to change a tracked param, OR when zarr contents have been modified in place (no content fingerprinting).
+3. **Cache-dir wipe** — required when running with `limit_positions=N` or `io.require_complete_cache=true` and you need to change a tracked param, OR when zarr contents have been modified in place. Only the prediction store is tracked, per position, by its writer marker and the mtime of one chunk (see [Force recompute](#force-recompute)); voxel contents are never hashed.
 
 Bumping `cache_schema_version` in `cache.py` forces a wipe on every existing cache.
 
@@ -305,3 +314,9 @@ uv pip install -e "applications/dynacell[eval]"
 `dynacell evaluate` and `dynacell precompute-gt` default `HF_HUB_CACHE` to a team-shared directory on project storage when they detect a repo checkout, so gated HF models (DINOv3) download once per team. The default path is set in `dynacell/__main__.py` (`_DEFAULT_SHARED_HF_CACHE`); other sites override it via the `DYNACELL_SHARED_HF_CACHE` env var. Pre-set `HF_HUB_CACHE` and the auto-setter backs off.
 
 We use `HF_HUB_CACHE` (not `HF_HOME`) because `HF_HOME` relocates the auth token file too, breaking per-user gated-repo ACLs. `HF_HUB_CACHE` only relocates weights/datasets; tokens stay per-user. First-time setup: one team member with gated-repo access (see [DINOv3 on HF](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)) runs any eval command to trigger the download; everyone else reuses the shared weights afterward — those reads don't hit HF and don't need a token.
+
+## Navigation
+
+- Up: [dynacell](../README.md)
+- See also: GPU-dispatch (`cubic`) conventions in [CLAUDE.md](CLAUDE.md) · eval-leaf composition in the
+  [benchmarks README](../../../configs/benchmarks/virtual_staining/README.md).

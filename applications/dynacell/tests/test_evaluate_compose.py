@@ -18,6 +18,7 @@ CLI calls by passing ``hydra.searchpath`` overrides to ``compose``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,8 @@ from hydra import compose, initialize_config_module
 from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+
+from ._eval_fixtures import make_hcs_plate
 
 _DYNACELL_ROOT = Path(__file__).resolve().parents[1]
 _INTERNAL = _DYNACELL_ROOT / "configs" / "benchmarks" / "virtual_staining" / "_internal"
@@ -82,6 +85,13 @@ def _compose_eval_cfg(overrides: list[str], config_name: str = "eval") -> DictCo
     with initialize_config_module(config_module="dynacell.evaluation._configs", version_base="1.2"):
         cfg = compose(config_name=config_name, overrides=[*overrides, _searchpath_override()])
     return cfg
+
+
+def test_default_eval_pins_morphem_to_a_hub_commit() -> None:
+    """The morphem group must carry a full commit SHA: the model is trust_remote_code."""
+    cfg = _compose_eval_cfg([])
+    assert cfg.feature_extractor.morphem.pretrained_model_name == "CaicedoLab/MorphEm"
+    assert re.fullmatch(r"[0-9a-f]{40}", cfg.feature_extractor.morphem.revision)
 
 
 # -- Layer 1: compose + hook produces correct resolved values ---------------
@@ -170,7 +180,7 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     """``evaluate_model`` runs ``apply_dataset_ref`` before ``evaluate_predictions``."""
     captured: list[DictConfig] = []
 
-    def _fake_evaluate_predictions(cfg: DictConfig):
+    def _fake_evaluate_predictions(cfg: DictConfig, *, cp_space, prediction_snapshot):
         captured.append(cfg)
         return ([], [], [])
 
@@ -180,12 +190,17 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("dynacell.evaluation.pipeline.evaluate_predictions", _fake_evaluate_predictions)
     monkeypatch.setattr("dynacell.evaluation.pipeline.save_metrics", _fake_save_metrics)
 
+    # Feature metrics off: evaluate_model would otherwise load the CP reference before
+    # evaluate_predictions, and this test is about the dataset_ref splice only. The
+    # prediction store must exist: evaluate_model fingerprints it before scoring.
+    make_hcs_plate(tmp_path / "pred.zarr", "Structure_prediction", seed=0)
     cfg = _compose_eval_cfg(
         [
             "target=er_sec61b",
             "predict_set=ipsc_confocal",
-            "io.pred_path=/tmp/fake",
+            f"io.pred_path={tmp_path / 'pred.zarr'}",
             f"save.save_dir={tmp_path}",
+            "compute_feature_metrics=false",
         ]
     )
 
@@ -285,8 +300,11 @@ def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str, cond_sl
     )
     apply_dataset_ref(cfg)
 
-    gt_suffix = f"{gene_token}_{cond_token}.ozx"
-    seg_suffix = f"{gene_token}_{cond_token}_seg_cleaned.zarr"
+    # Nucleus (h2b) + membrane (caax) GT now live in the merged dual store; ER/mito
+    # keep their per-marker stores. The suffix reflects the on-disk store stem.
+    store_stem = "dual_nucl_memb" if marker in ("caax", "h2b") else gene_token
+    gt_suffix = f"{store_stem}_{cond_token}.zarr"
+    seg_suffix = f"{store_stem}_{cond_token}_seg_cleaned.zarr"
     cache_suffix = f"eval_cache/{marker}_{cond_slug}"
 
     assert str(cfg.io.gt_path).endswith(gt_suffix), (
@@ -306,3 +324,28 @@ def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str, cond_sl
     # store scale metadata for caax/h2b/sec61b/tomm20.
     spacing = list(cfg.pixel_metrics.spacing)
     assert spacing == [0.174, 0.1494, 0.1494]
+
+
+# Every canonical ``eval__a549_mantis_*`` leaf in the benchmark tree, not only the
+# celldiff/unetvit3d matrix above. The matrix never listed pix2pix3d_unetvit, whose
+# leaves also had no ``_internal/leaf`` symlink, so their missing gene-keyed
+# ``dataset_ref.target`` went unnoticed until an eval raised TargetNotFoundError.
+_BENCHMARKS = _INTERNAL.parent
+_ALL_A549_EVAL_LEAVES = sorted(
+    p.relative_to(_BENCHMARKS) for p in _BENCHMARKS.glob("*/*/*/eval__a549_mantis_*.yaml") if "_internal" not in p.parts
+)
+
+
+@pytest.mark.parametrize("leaf", _ALL_A549_EVAL_LEAVES, ids=str)
+def test_every_a549_eval_leaf_composes(leaf: Path) -> None:
+    """Each A549 eval leaf is selectable via ``leaf=`` and resolves against its manifest."""
+    link = _LEAF_ROOT / leaf
+    assert link.is_symlink(), f"missing symlink: {link}"
+    assert link.resolve() == (_BENCHMARKS / leaf).resolve()
+
+    cfg = _compose_eval_cfg([f"leaf={leaf.with_suffix('')}"])
+    apply_dataset_ref(cfg)
+
+    marker = cfg.benchmark.dataset_ref.dataset.split("-")[2]
+    assert cfg.benchmark.dataset_ref.target == marker
+    assert list(cfg.pixel_metrics.spacing) == [0.174, 0.1494, 0.1494]

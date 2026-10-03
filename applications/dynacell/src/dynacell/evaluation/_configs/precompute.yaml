@@ -11,7 +11,16 @@ build:
   dinov3: true
   dynaclr: true
   celldino: true
+  morphem: true
   focus: false  # write focus_slice zattrs (in-focus plane per FOV) to the GT store
+  # Prewarm the GT instance-label cache for the configured segmentation.backend
+  # (instance_masks/<target>__<backend>.zarr). Off by default; set true (with
+  # segmentation.backend=cpdino, build.masks=false, compute_instance_ap kept off) to
+  # warm GT instances once per (test-set, target) before a parallel instance-AP
+  # campaign, so the many model buckets sharing a GT set hit the cache instead of
+  # racing to recompute it. build.masks=false is REQUIRED: the mask path asks
+  # segment() for a binary mask, which the instance backends cannot produce.
+  instances: false
 
 # The focus-estimator params (channel_name / na_det / lambda_ill / pixel_size / device)
 # are inherited from eval.yaml's top-level `focus:` block; override there or on the CLI.

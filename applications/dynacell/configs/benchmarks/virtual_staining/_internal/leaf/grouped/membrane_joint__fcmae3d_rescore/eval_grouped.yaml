@@ -1,0 +1,121 @@
+# @package _global_
+# Narrowed sibling of grouped/membrane_joint: ONLY the eight
+# fcmae_vscyto3d_{scratch,pretrained} joint conditions. Condition blocks are
+# copied byte-identically from that leaf -- only the selection is narrowed.
+#
+# Why: the Phase 18 joint membrane fits were re-run to completion (epoch 199/200)
+# and re-predicted from their best-by-monitor checkpoints on 2026-08-07
+# (epoch=148-step=78970-loss=0.374 pretrained, epoch=172-step=91690-loss=0.381
+# scratch), so only these eight conditions have new predictions. The other twelve
+# in membrane_joint are unchanged and re-scoring them would be pure cost.
+#
+# The ninth new prediction is HEK, which lives in the sibling
+# membrane_hek_joint__fcmae3d_rescore leaf -- its parent's globals (predicted
+# nuclei seeds, probe disabled) are incompatible with this one's.
+#
+# Submit with EVERY pred_* force_recompute flag: a re-predict does not invalidate
+# the eval caches by itself (final_metrics alone would rescore stale masks and
+# embeddings computed from the OLD predictions). GT-side caches stay warm --
+# the ground truth did not change.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei
+conditions:
+- name: vscyto3d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/joint/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/a549__denv
+- name: unext2__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto3d_scratch/joint/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/a549__denv
+- name: vscyto3d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/joint/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/a549__mock
+- name: unext2__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto3d_scratch/joint/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/a549__mock
+- name: vscyto3d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/joint/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/a549__zikv
+- name: unext2__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto3d_scratch/joint/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/a549__zikv
+- name: vscyto3d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/ipsc
+- name: unext2__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/fcmae_vscyto3d_scratch/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/joint/ipsc

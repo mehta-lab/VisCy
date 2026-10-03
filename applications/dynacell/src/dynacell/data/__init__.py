@@ -18,6 +18,11 @@ from dynacell.data.manifests import (
     load_manifest,
     load_splits,
 )
+from dynacell.data.registry import (
+    get_manifest,
+    get_splits,
+    list_datasets,
+)
 from dynacell.data.resolver import (
     ManifestNotFoundError,
     NoManifestRootsError,
@@ -47,7 +52,10 @@ __all__ = [
     "VoxelSpacing",
     "dataset_ref_from_dict",
     "discover_manifest_roots",
+    "get_manifest",
+    "get_splits",
     "get_target",
+    "list_datasets",
     "load_benchmark_spec",
     "load_collection",
     "load_manifest",

@@ -1,0 +1,64 @@
+# @package _global_
+# Grouped leaf: pix2pix3d arm of the HEK293T membrane (KRAS) probe, a549xy geometry.
+#
+# Split out of membrane_hek_a549xy for the same reason as the CELL-Diff pair: the
+# regression rows were already evaluated and must not be gated behind a later
+# arm's predicts. All three leaves read the same manifest gt_cache_dir, so this
+# one finds the GT features warm and pays only for its own prediction side.
+# Every option below matches the siblings exactly — the rows must be comparable.
+#
+# Unlike CELL-Diff there is no pool-dependent path token: pix2pix3d writes under
+# pix2pix3d_unetvit for all three training pools.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+# Carved cpdino whole-cell, seeded by a PREDICTED nucleus channel (the HEK release
+# ships none). Rationale, caveats and the seed provenance live in the sibling
+# membrane_hek_a549xy/eval_grouped.yaml — keep these four settings in lockstep
+# with it or the rows stop being comparable.
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei_prediction
+cross_condition_probe:
+  enabled: false
+io:
+  require_complete_cache: false
+  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: pix2pix3d__ipsc_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/ipsc/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/pix2pix3d_unetvit/ipsc/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/ipsc/hek__a549xy
+- name: pix2pix3d__a549_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/a549/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/pix2pix3d_unetvit/a549/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/a549/hek__a549xy
+- name: pix2pix3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/pix2pix3d_unetvit/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/joint/hek__a549xy

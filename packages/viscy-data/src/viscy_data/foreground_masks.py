@@ -159,11 +159,14 @@ class ForegroundMaskSupport:
         Returns
         -------
         list[Tensor]
-            Per-channel mask tensors with shape ``(1, Z, Y, X)``.
+            Per-channel mask tensors with shape ``(1, Z, Y, X)``, in the
+            stored dtype (not upcast: a float32 mask quadruples the mask's
+            share of every worker buffer and pinned host copy, which
+            OOM-killed the 4-GPU 3D seg-aux fits at their first validation).
         """
-        kwargs = {}
+        kwargs = {"as_float": False}
         if self._preloaded_masks is not None:
-            kwargs = {"arr_idx": arr_idx, "_preloaded": self._preloaded_masks}
+            kwargs.update(arr_idx=arr_idx, _preloaded=self._preloaded_masks)
         mask_images, _ = read_fn(
             self._mask_arrays[arr_idx],
             self._mask_ch_indices[arr_idx],

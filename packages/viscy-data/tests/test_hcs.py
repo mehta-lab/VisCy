@@ -1061,7 +1061,7 @@ def test_mmap_preload_preserves_native_dtype_and_casts_on_read(tmp_path):
 
 
 def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path):
-    """fg_mask.mmap preserves native uint8 dtype; sampled masks cast to float32."""
+    """fg_mask.mmap preserves native uint8 dtype, and so do the sampled masks."""
     importorskip("tensordict")
     from tensordict.memmap import MemoryMappedTensor
 
@@ -1093,7 +1093,50 @@ def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path)
 
     dm.setup(stage="fit")
     batch = next(iter(dm.train_dataloader()))
-    assert batch["fg_mask"].dtype == torch.float32
+    assert batch["fg_mask"].dtype == torch.uint8
+
+
+@mark.parametrize("mmap_preload", [False, True])
+def test_fg_mask_stays_uint8_on_host_and_is_float_after_transfer(hcs_with_fg_mask, tmp_path, mmap_preload):
+    """Host-side fg_mask batches keep the stored uint8; the GPU hook casts to float32.
+
+    Regression: masks were upcast to float32 in every sample, so full-FOV
+    validation batches carried a mask as large as the target through the
+    worker buffers and the power-of-two pinned-memory cache, and the 4-GPU
+    3D seg-aux fits were OOM-killed at their first validation.
+    """
+    if mmap_preload:
+        importorskip("tensordict")
+    from viscy_transforms import BatchedCenterSpatialCropd
+
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        fg_mask_key="fg_mask",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=0.5,
+        mmap_preload=mmap_preload,
+        scratch_dir=tmp_path,
+        val_gpu_augmentations=[BatchedCenterSpatialCropd(keys=["source", "target"], roi_size=[4, 16, 16])],
+    )
+    dm.prepare_data()
+    dm.setup(stage="fit")
+    for loader in (dm.train_dataloader(), dm.val_dataloader()):
+        host = next(iter(loader))
+        assert host["fg_mask"].dtype == torch.uint8
+        assert host["fg_mask"].nbytes * 4 == host["target"].nbytes
+        assert set(host["fg_mask"].unique().tolist()).issubset({0, 1})
+
+    host_mask = host["fg_mask"].clone()
+    dm.trainer = MagicMock(training=False, validating=True, sanity_checking=False)
+    result = dm.on_after_batch_transfer(host, 0)
+    assert result["fg_mask"].dtype == torch.float32
+    assert result["fg_mask"].shape == result["target"].shape == (2, 1, 4, 16, 16)
+    assert torch.equal(result["fg_mask"], host_mask[..., 8:24, 8:24].float())
 
 
 @fixture(scope="function")

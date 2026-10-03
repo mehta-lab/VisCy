@@ -1,0 +1,56 @@
+# FCMAE-2D Scratch (UNeXt2-2D) predict: nucleus trained on ipsc_confocal,
+# tested on iPSC confocal. In-focus 2D track. Runs the 2D model over the
+# full-Z 3D test store (z_window_size=1 -> one window per z-plane;
+# the writer keys each output to its z-index) so the existing
+# focus-aware eval consumes the result unchanged.
+#
+# Source normalization reproduces the fit overlay exactly
+# (Phase3D fov_statistics mean/std); a mismatch here would
+# silently degrade every prediction.
+#
+# Sample-matched UNeXt2-2D ablation arm (fcmae_vscyto2d_scratch with the 3D fit's
+# optimizer budget: 128 samples/step, warmup 8500, 3D cosine horizon); otherwise
+# identical to the fcmae_vscyto2d_scratch leaf of the same name.
+# ckpt_path is a PROVISIONAL pin: the fit is still running and save_top_k rotates
+# files out. Submit with --ckpt best (uses only the parent dir), or re-bake after the
+# fit completes (tools/bake_best_ckpt.py).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto2d_scratch_samplematched
+  experiment_id: nucleus__ipsc_confocal__fcmae_vscyto2d_scratch_samplematched__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fcmae_vscyto2d_scratch_samplematched/checkpoints/epoch=4-step=310-loss=0.671.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch_samplematched/ipsc/ipsc/prediction.zarr
+
+launcher:
+  job_name: FCMAE2D_Scratch_SampleMatch_PRED_NUCL_ON_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch_samplematched/ipsc/ipsc

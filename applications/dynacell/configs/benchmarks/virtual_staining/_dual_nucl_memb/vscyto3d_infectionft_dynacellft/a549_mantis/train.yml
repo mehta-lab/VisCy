@@ -34,7 +34,7 @@ data:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/organelle_phenotyping/models/VSCyto3D-A549-infection-finetune/4gpu_bf16_bs16_to_ep7/checkpoints/epoch=7-step=832.ckpt
+    ckpt_path: /hpc/projects/organelle_phenotyping/models/Cytoland-VSCyto3D_A549-infection-finetune/4gpu_bf16_bs16_to_ep7/checkpoints/epoch=7-step=832.ckpt
 
 trainer:
   logger:
@@ -48,6 +48,8 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 5
         save_last: true

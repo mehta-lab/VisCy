@@ -1,0 +1,87 @@
+# pix2pix2d_unetvit fit-time HCS data hparams for the in-focus 2D benchmark
+# track. Split out from model_overlays/pix2pix2d_unetvit_fit.yml so the
+# model+trainer half there stays composable by joint-dataset
+# (BatchedConcatDataModule) leaves that author their own data: block.
+#
+# Mirrors data_overlays/unetvit3d_fit.yml — which the 12 benchmarked
+# pix2pix3d_unetvit leaves compose, and which is byte-identical to
+# data_overlays/celldiff_fit.yml apart from one comment — flattened onto the
+# offline `_focus.zarr` 5-plane in-focus slab stores, following exactly the
+# convention already used by data_overlays/celldiff_2d_fit.yml and
+# data_overlays/fcmae_vscyto2d_fit.yml:
+#   - z_window_size: 13 -> 1
+#   - BatchedRandAffined rotate_range [3.14,0,0] -> [0,0,0] (rotation about
+#     axis 0 mixes Y and Z, which is degenerate at Z=1)
+#   - BatchedRandAffined scale_range Z [0.7,1.3] -> [1,1] (kornia affine
+#     scale is an absolute factor, so 1.0 is the no-op, not 0)
+#   - safe_crop_size / roi_size [8,512,512] -> [1,512,512]
+#   - BatchedRandGaussianSmoothd sigma_z [0.25,0.75] -> [0,0]
+# XY augmentation policy (shear/scale/contrast/intensity/noise/smooth) is kept
+# identical to the 3D overlay so 2D-vs-3D isolates geometry.
+#
+# batch_size stays 4 and the model overlay keeps the 4-GPU DDP topology, so the
+# global batch is 4 x 4 = 16 samples/step, identical to the 3D arm. Holding it
+# there is not cosmetic: DynacellGAN derives the G-EMA decay per-step from the
+# global batch size, so a smaller batch would silently retune `ema_kimg` on top
+# of changing steps/epoch.
+#
+# Measured on an A40 (44.7 GiB) at [1,512,512], bf16 autocast + two AdamW
+# states, 3 alternating D/G steps: bs=4 -> 13.3 GiB (30%), bs=8 -> 25.0 GiB
+# (56%), bs=16 -> OOM. So bs=4 has 3x headroom per rank on a 48 GB card, and
+# consolidating the global batch onto one rank is not an option there. Raise
+# batch_size only together with a >=80 GB constraint and a matching cut to
+# trainer.devices, so the product stays 16.
+data:
+  init_args:
+    z_window_size: 1
+    batch_size: 4
+    num_workers: 4
+    yx_patch_size: [512, 512]
+    gpu_augmentations:
+      # GPU: affine on oversized patch → center crop to final 1×512×512.
+      # safe_crop_size clamps scale so the sheared/scaled source always
+      # covers the 512px crop, eliminating zero-corner artifacts.
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.8
+          rotate_range: [0, 0, 0]
+          shear_range: [0.0, 0.05, 0.05]
+          scale_range: [[1, 1], [0.5, 1.5], [0.5, 1.5]]
+          safe_crop_size: [1, 512, 512]
+          safe_crop_coverage: 0.9
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [1, 512, 512]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 0.3
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0, 0]
+    val_gpu_augmentations:
+      # The UNetViT generator requires exact input_spatial_size (fixed ViT
+      # positional embeddings). DivisibleCropd is insufficient — must
+      # center-crop to exactly the model input size.
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [1, 512, 512]

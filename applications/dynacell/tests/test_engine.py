@@ -10,7 +10,15 @@ from lightning.pytorch import Trainer, seed_everything
 from monai.data import MetaTensor
 from torch import nn
 
-from dynacell.engine import DynacellFlowMatching, DynacellGAN, DynacellUNet
+from dynacell.engine import (
+    DynacellFlowMatching,
+    DynacellGAN,
+    DynacellUNet,
+    _blend_weight,
+    _phase_shift_average,
+    _sliding_window_inference,
+)
+from dynacell.tiling import window_starts
 
 # Small model configs for tests (not production sizes).
 VIT_TEST_CONFIG = {
@@ -549,6 +557,26 @@ def test_dynacell_gan_predict_step():
     assert prediction.shape == batch["source"].shape
 
 
+def test_dynacell_gan_sliding_window_larger_than_patch():
+    """``sliding_window`` tiles a GAN input larger than the generator's fixed
+    input_spatial_size and returns the full input spatial shape (the 640x960
+    A549 test vs 512x512 ViT generator case, scaled down)."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        predict_method="sliding_window",
+        predict_overlap=(2, 16, 16),
+    )
+    model.eval()
+    model.on_predict_start()
+    # Spatial dims larger than the generator's [8, 64, 64] to force tiling.
+    source = MetaTensor(torch.randn(1, 1, 8, 96, 128))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == (1, 1, 8, 96, 128)
+
+
 def test_dynacell_gan_validate_logs_alias(monkeypatch):
     """``on_validation_epoch_end`` logs the ``loss/validate`` weighted mean."""
     model = DynacellGAN(
@@ -734,17 +762,53 @@ def test_dynacell_gan_modernized_smoke(tmp_path):
 
 
 def test_dynacell_gan_lazy_r1_step_counter():
-    """`_d_step_count` increments per D step, gates R1 correctly."""
-    model = _build_modernized_gan(r1_every=4)
-    # Counter starts at 0.
+    """Real training steps advance ``_d_step_count`` and fire R1 only on the gate.
+
+    The previous version incremented the counter in the test body and asserted
+    ``4 % 4 == 0`` -- engine.py:1458 never executed, so the test held whatever
+    the engine did. This drives four D steps through ``trainer.fit`` with
+    ``r1_every=4`` and checks the observable consequence: ``reg/r1`` is logged
+    exactly once, on the fourth step.
+    """
+    seed_everything(0)
+    model = _build_modernized_gan(r1_every=4, r1_gamma=10.0)
     assert model._d_step_count == 0
-    # Simulate four D steps by directly incrementing (the actual training
-    # path increments inside training_step; here we verify the gating math).
-    for _ in range(4):
-        model._d_step_count += 1
-    assert model._d_step_count == 4
-    # 4 % 4 == 0, so reg fires on this step.
-    assert model._d_step_count % model.r1_every == 0
+
+    r1_logs: list[float] = []
+    real_log = model.log
+
+    def _capture_log(name, value, *args, **kwargs):
+        if name == "reg/r1":
+            r1_logs.append(float(value.detach()) if isinstance(value, torch.Tensor) else float(value))
+        return real_log(name, value, *args, **kwargs)
+
+    model.log = _capture_log  # type: ignore[method-assign]
+    batch = _make_gan_batch()
+
+    class _BatchDataset(torch.utils.data.Dataset):
+        def __init__(self, n: int):
+            self.n = n
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"source": batch["source"][0], "target": batch["target"][0]}
+
+    # 4 samples at batch_size=1 -> exactly four D steps.
+    train_loader = torch.utils.data.DataLoader(_BatchDataset(4), batch_size=1)
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, train_dataloaders=train_loader)
+
+    assert model._d_step_count == 4, "the engine, not the test, must advance the counter"
+    assert len(r1_logs) == 1, f"r1_every=4 over 4 steps should fire once, fired {len(r1_logs)}x"
 
 
 def test_dynacell_gan_lsgan_gamma_zero_skips_r1(tmp_path):
@@ -847,6 +911,94 @@ def test_dynacell_gan_ema_seed_on_legacy_load(tmp_path):
         strict=True,
     ):
         assert torch.equal(p_ema, p_loaded)
+
+
+def test_dynacell_gan_ema_ckpt_builds_shadow_from_checkpoint(tmp_path):
+    """A ckpt's EMA shadow must not be silently dropped by a config without ema_kimg.
+
+    ``generator_ema`` is built in ``__init__`` only when ``ema_kimg`` is set -- a
+    *training* hyperparameter that predict configs have no reason to carry. Before
+    this, loading an EMA checkpoint from such a config discarded all
+    ``generator_ema.*`` tensors under ``strict=False`` and inference fell through
+    to the raw generator with only a warning. That is how the whole pix2pix3d
+    benchmark came to be predicted with non-EMA weights from checkpoints selected
+    on ``loss/validate_ema``.
+
+    The shadow is now built from the checkpoint's own keys, so the weights survive
+    without the config restating a decay constant the checkpoint already records.
+    ``use_ema_at_predict`` stays an explicit config decision and is NOT adopted
+    from the checkpoint -- inferring it would silently flip every existing arm.
+    """
+    trained = _build_modernized_gan()
+    # Make the EMA shadow differ from the raw generator, so "the shadow was
+    # populated from the checkpoint" is distinguishable from "the shadow was
+    # deep-copied from the freshly loaded raw generator".
+    with torch.no_grad():
+        for p in trained.generator_ema.parameters():
+            p.add_(1.0)
+    ckpt = tmp_path / "with_ema.ckpt"
+    torch.save({"state_dict": trained.state_dict()}, ckpt)
+    assert any(k.startswith("generator_ema.") for k in trained.state_dict())
+
+    # No ema_kimg anywhere in this config -- the shadow comes from the ckpt.
+    revived = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config={**GAN_DISC_TEST_CONFIG, "use_spectral_norm": False},
+        ckpt_path=str(ckpt),
+    )
+    assert revived.ema_kimg is None
+    assert revived.generator_ema is not None
+    for p_ema, p_src in zip(
+        revived.generator_ema.parameters(),
+        trained.generator_ema.parameters(),
+        strict=True,
+    ):
+        assert torch.equal(p_ema, p_src)
+        assert not p_ema.requires_grad
+    # use_ema_at_predict defaults True, so inference now selects the EMA weights.
+    assert revived._inference_generator() is revived.generator_ema
+
+    # The explicit opt-out still keeps the raw generator, and still gets a
+    # populated shadow (so the choice is recorded, not implied by a missing key).
+    opted_out = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config={**GAN_DISC_TEST_CONFIG, "use_spectral_norm": False},
+        ckpt_path=str(ckpt),
+        use_ema_at_predict=False,
+    )
+    assert opted_out.generator_ema is not None
+    assert opted_out._inference_generator() is opted_out.generator
+
+    # Declaring ema_kimg explicitly still works and is equivalent.
+    with_ema = _build_modernized_gan(ckpt_path=str(ckpt))
+    assert with_ema._inference_generator() is with_ema.generator_ema
+
+
+def test_dynacell_gan_partial_ema_ckpt_still_raises(tmp_path):
+    """A half-written EMA section must raise, not half-seed the shadow.
+
+    Auto-building the shadow from the checkpoint's keys must not weaken this: a
+    truncated ``generator_ema.*`` section would leave random-init values in the
+    missing layers and silently produce wrong inference output.
+    """
+    trained = _build_modernized_gan()
+    state = trained.state_dict()
+    ema_keys = [k for k in state if k.startswith("generator_ema.")]
+    assert len(ema_keys) > 1
+    for k in ema_keys[:1]:  # drop one tensor -> partial section
+        del state[k]
+    ckpt = tmp_path / "partial_ema.ckpt"
+    torch.save({"state_dict": state}, ckpt)
+
+    with pytest.raises(RuntimeError, match="generator_ema"):
+        DynacellGAN(
+            architecture="UNetViT3D",
+            generator_config=GAN_GEN_TEST_CONFIG,
+            discriminator_config={**GAN_DISC_TEST_CONFIG, "use_spectral_norm": False},
+            ckpt_path=str(ckpt),
+        )
 
 
 def test_dynacell_gan_d_step_count_checkpoint_roundtrip():
@@ -986,39 +1138,69 @@ def test_dynacell_gan_rpgan_smoke(tmp_path):
 
 
 def test_dynacell_gan_ema_update_math():
-    """One EMA update step produces lerp_(p, 1-decay) with the StyleGAN2 decay formula."""
+    """A real training step moves generator_ema by the StyleGAN2 lerp.
+
+    Drives ``trainer.fit`` rather than applying ``lerp_`` in the test body: the
+    previous version reimplemented the update and asserted a ``torch.lerp_``
+    identity, so deleting the engine's EMA block left it green. The closed form
+    below is derived independently of the engine -- ``decay * ema_before +
+    (1 - decay) * gen_after`` -- and the batch size is read off the loader, since
+    the engine derives ``bs`` from ``source.shape[0]``.
+    """
     seed_everything(42)
-    model = _build_modernized_gan(ema_kimg=1.0)  # short half-life -> larger move
-    # Snapshot EMA before any update.
+    # decay = 0.5 ** (bs / (ema_kimg * 1000)); with bs=2 this gives decay=0.5,
+    # so one step moves the shadow halfway. At the realistic ema_kimg=1.0 the
+    # step moves it by 0.0014 of the generator delta, which is under any sane
+    # atol -- the assertion would hold just as well if the engine never updated.
+    model = _build_modernized_gan(ema_kimg=0.002)
     ema_before = {n: p.detach().clone() for n, p in model.generator_ema.named_parameters()}
     gen_before = {n: p.detach().clone() for n, p in model.generator.named_parameters()}
-    # All ema params equal generator params at init.
     for n, p in ema_before.items():
-        assert torch.equal(p, gen_before[n])
+        assert torch.equal(p, gen_before[n]), f"{n} should start tied to the generator"
 
-    # Synthetic generator update: perturb generator params, then apply the
-    # EMA update by hand using the same formula the engine uses.
-    with torch.no_grad():
-        for p in model.generator.parameters():
-            p.add_(0.1)
+    batch = _make_gan_batch()
+
+    class _BatchDataset(torch.utils.data.Dataset):
+        def __init__(self, n: int):
+            self.n = n
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"source": batch["source"][0], "target": batch["target"][0]}
+
+    bs = 2
+    train_loader = torch.utils.data.DataLoader(_BatchDataset(bs), batch_size=bs)
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, train_dataloaders=train_loader)
+
     gen_after = {n: p.detach().clone() for n, p in model.generator.named_parameters()}
+    moved = [n for n, p in gen_after.items() if not torch.equal(p, gen_before[n])]
+    assert moved, "the generator never moved, so the EMA assertion below would be vacuous"
 
-    bs = 4  # mirrors the test config
     decay = 0.5 ** (bs / max(model.ema_kimg * 1000.0, 1e-8))
-    # Apply the EXACT lerp_ from the engine (lerp_(target, 1-decay) means
-    # self = self + (1-decay)*(target - self) = decay*self + (1-decay)*target).
-    with torch.no_grad():
-        for p_ema, p in zip(
-            model.generator_ema.parameters(),
-            model.generator.parameters(),
-            strict=True,
-        ):
-            p_ema.lerp_(p.detach(), 1.0 - decay)
+    assert decay == pytest.approx(0.5), "test relies on a half-way step to stay sensitive"
 
-    # Closed-form expectation: ema = decay * ema_before + (1-decay) * gen_after.
-    for n, p_ema in model.generator_ema.named_parameters():
+    ema_after = dict(model.generator_ema.named_parameters())
+    # Blunt liveness check first: without it the closed form below can be
+    # satisfied by an EMA that never moved, whenever (1-decay) * delta is small.
+    assert any(not torch.equal(ema_after[n].detach(), ema_before[n]) for n in moved), (
+        "generator_ema never moved -- the engine's EMA update did not run"
+    )
+    for n, p_ema in ema_after.items():
         expected = decay * ema_before[n] + (1.0 - decay) * gen_after[n]
         assert torch.allclose(p_ema, expected, atol=1e-6), f"EMA update math mismatch on {n}"
+
+    # The shadow must actually be a shadow: distinct from both endpoints.
+    assert any(not torch.equal(ema_after[n].detach(), gen_after[n]) for n in moved)
 
 
 def test_dynacell_gan_use_ema_at_predict_false():
@@ -1094,3 +1276,378 @@ def test_dynacell_gan_ckpt_unexpected_missing_raises(tmp_path):
             discriminator_config=GAN_DISC_TEST_CONFIG,
             ckpt_path=str(ckpt_path),
         )
+
+
+# ---------------------------------------------------------------------------
+# window_starts: the single tiler behind _sliding_window_inference and all
+# three CELLDiff3DVS tiled paths. Pins the properties the callers rely on.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("size", "patch", "overlap", "expected"),
+    [
+        (8, 4, 0, [0, 4]),  # exact multiple
+        (10, 4, 0, [0, 4, 6]),  # last window snaps back to the edge
+        (4, 4, 0, [0]),  # single window
+        (13, 4, 0, [0, 4, 8, 9]),
+        (10, 4, 2, [0, 2, 4, 6]),
+        (9, 4, 2, [0, 2, 4, 5]),
+        (10, 4, 3, [0, 1, 2, 3, 4, 5, 6]),
+    ],
+)
+def test_window_starts_known_layouts(size, patch, overlap, expected):
+    """Start indices for hand-checked (size, patch, overlap) triples."""
+    assert window_starts((size,), (patch,), (overlap,)) == [expected]
+
+
+def test_window_starts_is_per_dimension():
+    """Each dimension is tiled independently."""
+    assert window_starts((10, 8, 8), (4, 4, 4), (0, 0, 0)) == [[0, 4, 6], [0, 4], [0, 4]]
+
+
+def test_window_starts_broadcasts_scalar_overlap():
+    """A bare int overlap applies to every dimension (``ensure_tuple_rep``)."""
+    assert window_starts((10, 8, 8), (4, 4, 4), 2) == window_starts((10, 8, 8), (4, 4, 4), (2, 2, 2))
+
+
+@pytest.mark.parametrize("patch", [1, 3, 4, 7, 16])
+@pytest.mark.parametrize("size_offset", [0, 1, 5, 13, 40])
+def test_window_starts_covers_extent_in_bounds(patch, size_offset):
+    """Windows tile the full extent without ever running past the edge.
+
+    This is what the callers depend on: ``_sliding_window_inference`` and
+    ``denoise_sliding_window`` divide by an accumulated per-voxel count, so an
+    uncovered voxel is a divide-by-zero, and an out-of-bounds start silently
+    truncates the last patch.
+    """
+    size = patch + size_offset
+    for overlap in range(patch):
+        starts = window_starts((size,), (patch,), (overlap,))[0]
+        assert starts[0] == 0
+        assert all(0 <= s <= size - patch for s in starts)
+        assert starts == sorted(set(starts))
+        covered = set()
+        for s in starts:
+            covered |= set(range(s, s + patch))
+        assert covered == set(range(size))
+
+
+def test_window_starts_rejects_patch_larger_than_extent():
+    """A patch wider than the extent cannot be tiled."""
+    with pytest.raises(ValueError, match="must be >= patch size"):
+        window_starts((3,), (4,), (0,))
+
+
+@pytest.mark.parametrize("overlap", [-1, 4, 5])
+def test_window_starts_rejects_overlap_outside_patch(overlap):
+    """Overlap must satisfy ``0 <= overlap < patch`` (else the stride is <= 0)."""
+    with pytest.raises(ValueError, match="0 <= overlap < patch"):
+        window_starts((16,), (4,), (overlap,))
+
+
+@pytest.mark.parametrize(
+    ("spatial", "patch", "overlap"),
+    [
+        ((16, 16), (4, 4), (0,)),  # overlap rank short of spatial
+        ((16, 16), (4,), (0, 0)),  # patch rank short of spatial
+        ((16, 16), (4, 4, 4), (0, 0)),  # patch rank over spatial
+    ],
+)
+def test_window_starts_rejects_rank_mismatch(spatial, patch, overlap):
+    """Mismatched ranks are a caller bug, not something to zip-truncate."""
+    with pytest.raises(ValueError):
+        window_starts(spatial, patch, overlap)
+
+
+# ---------------------------------------------------------------------------
+# _sliding_window_inference overlap blending. The behavioural claim under test
+# is that the cosine cross-fade removes the step discontinuities that uniform
+# averaging prints at window faces, without changing single-window results.
+# ---------------------------------------------------------------------------
+
+
+def test_blend_weight_is_positive_and_peaks_at_centre():
+    """The taper must never reach zero, or normalization divides by zero."""
+    w = _blend_weight((4, 8, 8), torch.device("cpu"), torch.float32)
+    assert w.shape == (1, 1, 4, 8, 8)
+    assert torch.all(w > 0)
+    # centre voxel is the maximum
+    assert w[0, 0, 2, 4, 4] == pytest.approx(w.max().item())
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_sliding_window_reproduces_constant_field(blend):
+    """Both modes are a partition of unity: a constant-output model must come
+    back as that exact constant, everywhere, including at window faces."""
+    source = torch.zeros(1, 1, 4, 24, 40)
+    out = _sliding_window_inference(
+        lambda x: torch.full((x.shape[0], 1, *x.shape[2:]), 3.5),
+        source,
+        (4, 16, 16),
+        (2, 8, 8),
+        blend=blend,
+    )
+    assert out.shape == (1, 1, 4, 24, 40)
+    assert torch.allclose(out, torch.full_like(out, 3.5), atol=1e-5)
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_sliding_window_single_window_is_exact(blend):
+    """When one window covers the input the weighted mean cancels the weight,
+    so blending cannot alter the result (the 512x512 iPSC test case)."""
+    torch.manual_seed(0)
+    source = torch.randn(1, 1, 4, 16, 16)
+    expected = source * 2.0
+    out = _sliding_window_inference(lambda x: x * 2.0, source, (4, 16, 16), (2, 8, 8), blend=blend)
+    assert torch.allclose(out, expected, atol=1e-6)
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+@pytest.mark.parametrize("spatial", [(16, 64, 64), (16, 96, 96)])
+def test_sliding_window_half_precision_preserves_covered_voxels(blend, spatial):
+    """FP16 corners must stay covered and overlapping sums must not overflow."""
+    source = torch.full((1, 1, *spatial), 40000.0)
+    out = _sliding_window_inference(lambda x: x.to(torch.float16), source, (16, 64, 64), (4, 32, 32), blend=blend)
+    assert out.dtype == torch.float16
+    assert torch.isfinite(out).all()
+    torch.testing.assert_close(out, source.to(torch.float16), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+@pytest.mark.parametrize("spatial", [(4, 16, 16), (4, 24, 40)])
+def test_sliding_window_preserves_double_precision(blend, spatial):
+    """Double predictions must retain values below float32's precision."""
+    source = torch.ones((1, 1, *spatial))
+    expected = source.to(torch.float64) + 2**-30
+    out = _sliding_window_inference(lambda x: x.to(torch.float64) + 2**-30, source, (4, 16, 16), (2, 8, 8), blend=blend)
+    assert out.dtype == torch.float64
+    torch.testing.assert_close(out, expected, rtol=0, atol=2 * torch.finfo(torch.float64).eps)
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_phase_shift_average_half_precision_does_not_overflow(blend):
+    """Summing the shifted FP16 crops must not overflow before the mean is taken."""
+    source = torch.full((1, 1, 16, 96, 96), 40000.0)
+    out = _phase_shift_average(
+        lambda x: x.to(torch.float16), source, (16, 64, 64), (4, 32, 32), offsets=(0, 8), blend=blend
+    )
+    assert out.dtype == torch.float16
+    assert torch.isfinite(out).all()
+    torch.testing.assert_close(out, source.to(torch.float16), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_phase_shift_average_preserves_double_precision(blend):
+    """Double predictions must retain values below float32's precision through the shift mean."""
+    source = torch.ones((1, 1, 4, 24, 40))
+    expected = source.to(torch.float64) + 2**-30
+    out = _phase_shift_average(
+        lambda x: x.to(torch.float64) + 2**-30, source, (4, 16, 16), (2, 8, 8), offsets=(0, 3), blend=blend
+    )
+    assert out.dtype == torch.float64
+    torch.testing.assert_close(out, expected, rtol=0, atol=2 * torch.finfo(torch.float64).eps)
+
+
+def test_cosine_blend_suppresses_window_seams():
+    """A model whose output depends on its window's identity produces a step at
+    every window face under uniform averaging; the cosine cross-fade must
+    reduce it by a wide margin.
+
+    ``forward_fn`` returns a constant that differs per call, which is the
+    worst case of "adjacent windows disagree" and isolates the seam from any
+    image content.
+    """
+    calls = {"n": 0}
+
+    def forward_fn(x):
+        calls["n"] += 1
+        return torch.full((x.shape[0], 1, *x.shape[2:]), float(calls["n"]))
+
+    source = torch.zeros(1, 1, 4, 16, 96)
+    patch, overlap = (4, 16, 32), (2, 8, 16)
+    starts = window_starts(tuple(source.shape[-3:]), patch, overlap)[2]
+    assert len(starts) > 1, "test needs multiple windows along x"
+
+    def max_step(vol):
+        prof = (vol[0, 0, 2, 8, 1:] - vol[0, 0, 2, 8, :-1]).abs()
+        return prof.max().item()
+
+    calls["n"] = 0
+    uni = _sliding_window_inference(forward_fn, source, patch, overlap, blend="uniform")
+    calls["n"] = 0
+    cos = _sliding_window_inference(forward_fn, source, patch, overlap, blend="cosine")
+
+    assert max_step(cos) < max_step(uni) / 4, (
+        f"cosine blend should flatten the seam: uniform={max_step(uni):.3f} cosine={max_step(cos):.3f}"
+    )
+
+
+def test_sliding_window_rejects_unknown_blend():
+    """An unknown blend is a config typo; fail loudly rather than silently
+    falling back to uniform."""
+    with pytest.raises(ValueError, match="Unknown blend"):
+        _sliding_window_inference(lambda x: x, torch.zeros(1, 1, 4, 16, 16), (4, 16, 16), (2, 8, 8), blend="gaussian")
+
+
+def test_gan_predict_blend_default_is_cosine():
+    """The GAN engine must default to the seam-free blend, and pass it through."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        predict_method="sliding_window",
+        predict_overlap=(2, 16, 16),
+    )
+    assert model.predict_blend == "cosine"
+    model.eval()
+    model.on_predict_start()
+    source = MetaTensor(torch.randn(1, 1, 8, 96, 128))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == (1, 1, 8, 96, 128)
+
+
+# ---------------------------------------------------------------------------
+# _phase_shift_average: shift-and-average suppression of the decoder
+# checkerboard and the ViT token lattice.
+# ---------------------------------------------------------------------------
+
+
+def test_phase_shift_average_preserves_shape_and_constant():
+    """Shifting uses reflect padding and must crop back to the input extent,
+    and a constant field must survive it exactly."""
+    source = torch.zeros(1, 1, 4, 24, 40)
+    out = _phase_shift_average(
+        lambda x: torch.full((x.shape[0], 1, *x.shape[2:]), 2.0),
+        source,
+        (4, 16, 16),
+        (2, 8, 8),
+        offsets=(0, 3, 5),
+    )
+    assert out.shape == (1, 1, 4, 24, 40)
+    assert torch.allclose(out, torch.full_like(out, 2.0), atol=1e-5)
+
+
+def test_phase_shift_average_single_zero_offset_is_plain_tiling():
+    """A lone zero offset must short-circuit to the un-shifted path, so
+    enabling the knob with one offset costs nothing and changes nothing."""
+    torch.manual_seed(0)
+    source = torch.randn(1, 1, 4, 16, 32)
+    plain = _sliding_window_inference(lambda x: x * 3.0, source, (4, 16, 16), (2, 8, 8))
+    shifted = _phase_shift_average(lambda x: x * 3.0, source, (4, 16, 16), (2, 8, 8), offsets=(0,))
+    assert torch.allclose(plain, shifted, atol=1e-6)
+
+
+def test_phase_shift_average_cancels_a_grid_locked_artifact():
+    """A model that stamps a fixed 4-px lattice onto its own window (standing
+    in for the ConvTranspose checkerboard) must be suppressed by offsets that
+    span the residues mod 4, and left alone by offsets that do not.
+
+    This is the property the offset choice rests on, so it is tested directly
+    rather than inferred.
+    """
+
+    def forward_fn(x):
+        # lattice locked to the window origin, independent of input content
+        w = x.shape[-1]
+        lattice = ((torch.arange(w) % 4) == 0).float()
+        return x * 0 + lattice.reshape(1, 1, 1, 1, w)
+
+    # YX extent must exceed the largest offset (reflect-padding constraint).
+    source = torch.zeros(1, 1, 4, 64, 64)
+    patch, overlap = (4, 64, 64), (2, 0, 0)
+
+    def lattice_energy(vol):
+        row = vol[0, 0, 2, 32]
+        return (row[::4].mean() - row.mean()).abs().item()
+
+    base = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0,))
+    congruent = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0, 4, 8, 12))
+    spanning = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0, 5, 11, 22))
+
+    assert lattice_energy(congruent) == pytest.approx(lattice_energy(base), rel=1e-3), (
+        "offsets that are all 0 mod 4 cannot cancel a 4-px lattice"
+    )
+    assert lattice_energy(spanning) < lattice_energy(base) / 3, (
+        f"offsets spanning residues mod 4 should cancel it: "
+        f"base={lattice_energy(base):.4f} spanning={lattice_energy(spanning):.4f}"
+    )
+
+
+def test_phase_shift_average_rejects_offset_larger_than_extent():
+    """Reflect padding needs pad < extent; say so instead of surfacing a
+    RuntimeError from deep inside torch."""
+    with pytest.raises(ValueError, match="smaller than the input YX extent"):
+        _phase_shift_average(lambda x: x, torch.zeros(1, 1, 4, 16, 16), (4, 16, 16), (2, 8, 8), offsets=(0, 27))
+
+
+def test_phase_shift_average_pairs_cancel_a_two_axis_lattice_at_a_quarter_the_cost():
+    """Explicit ``(dy, dx)`` pairs must suppress a lattice on BOTH axes.
+
+    The saving over the outer product is only sound if each axis still sees
+    every residue, so the stand-in lattice here is stamped on y and x at once
+    and the pair set is checked against the full product it replaces.
+    """
+    calls = []
+
+    def forward_fn(x):
+        calls.append(1)
+        h, w = x.shape[-2], x.shape[-1]
+        row = ((torch.arange(w) % 4) == 0).float().reshape(1, 1, 1, 1, w)
+        col = ((torch.arange(h) % 4) == 0).float().reshape(1, 1, 1, h, 1)
+        return x * 0 + row + col
+
+    source = torch.zeros(1, 1, 4, 64, 64)
+    patch, overlap = (4, 64, 64), (2, 0, 0)
+
+    def lattice_energy(vol):
+        plane = vol[0, 0, 2]
+        return (plane[::4, ::4].mean() - plane.mean()).abs().item()
+
+    base = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0,))
+    n_base = len(calls)
+    product = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0, 5, 11, 22))
+    n_product = len(calls) - n_base
+    pairs = _phase_shift_average(forward_fn, source, patch, overlap, offsets=((0, 0), (5, 11), (11, 22), (22, 5)))
+    n_pairs = len(calls) - n_base - n_product
+
+    assert n_pairs * 4 == n_product, f"pairs should cost a quarter of the product: {n_pairs} vs {n_product}"
+    assert lattice_energy(pairs) < lattice_energy(base) / 3
+    assert lattice_energy(pairs) == pytest.approx(lattice_energy(product), abs=0.02), (
+        f"pairs={lattice_energy(pairs):.4f} product={lattice_energy(product):.4f}"
+    )
+
+
+def test_phase_shift_average_rejects_mixed_scalar_and_pair_offsets():
+    """A half-converted offset list is a config error, not something to guess at."""
+    with pytest.raises(ValueError, match="all scalars or all"):
+        _phase_shift_average(lambda x: x, torch.zeros(1, 1, 4, 64, 64), (4, 64, 64), (2, 0, 0), offsets=(0, (5, 11)))
+
+
+@pytest.mark.parametrize("offsets", [(), (-1, 2)])
+def test_phase_shift_average_rejects_bad_offsets(offsets):
+    """Empty or negative offsets are caller bugs, not something to clamp."""
+    with pytest.raises(ValueError):
+        _phase_shift_average(lambda x: x, torch.zeros(1, 1, 4, 16, 16), (4, 16, 16), (2, 8, 8), offsets=offsets)
+
+
+def test_gan_phase_shifts_off_by_default_and_routes_when_set():
+    """Default must stay off (it costs len(offsets)**2 passes); when set, the
+    GAN predict path must route through it and keep the output shape."""
+    kwargs = dict(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        predict_method="sliding_window",
+        predict_overlap=(2, 16, 16),
+    )
+    assert DynacellGAN(**kwargs).predict_phase_shifts is None
+
+    model = DynacellGAN(**kwargs, predict_phase_shifts=(0, 3))
+    model.eval()
+    model.on_predict_start()
+    source = MetaTensor(torch.randn(1, 1, 8, 96, 128))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == (1, 1, 8, 96, 128)

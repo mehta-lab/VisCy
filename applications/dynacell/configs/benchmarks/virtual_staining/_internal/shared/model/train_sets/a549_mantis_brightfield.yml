@@ -1,0 +1,32 @@
+# Train set: A549 mantis-lightsheet, condition-pooled, BRIGHTFIELD input (ablation).
+#
+# Identical to a549_mantis.yml except source_channel: the model reads the raw
+# `Brightfield` stack instead of the `Phase3D` volume waveorder reconstructs from
+# it. Same pooled stores, same targets, same split.
+#
+# Unlike the iPSC brightfield fragment, this one sets `source_channel` DIRECTLY
+# rather than via `dataset_ref.source_channel`: the pooled A549 train stores are
+# not in the manifest registry, so leaves on this fragment author
+# `data.init_args.{data_path,target_channel}` inline and the resolver hook is a
+# strict partial-ref no-op (`dataset_ref.dataset` is never set here). There is no
+# manifest to override, so there is nothing for the resolver to splice.
+#
+# Verified present with normalization statistics at both levels the two recipes
+# need (fov mean/std for FNet3D, timepoint p1/p99 for CellDiff):
+#   mantis_v1/train/H2B_all.zarr    [Phase3D, Brightfield, Nuclei]     fov mean 1497.5 std 48.0
+#   mantis/train/SEC61B_all.zarr    [Phase3D, Brightfield, Structure]  fov mean 1848.6 std 79.4
+#
+# Canonical train_set token is `a549__bf` (paths.py `_TRAIN_ALIAS`), a distinct
+# on-disk identity from plain `a549`, so brightfield and phase artifacts never
+# share a checkpoint, prediction or eval directory.
+benchmark:
+  train_set: a549_mantis_brightfield
+  dataset_group: a549-mantis
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    source_channel: Brightfield
+    split_ratio: 0.8
+    mmap_preload: true
+    scratch_dir: /dev/shm
+    persistent_workers: true

@@ -207,6 +207,67 @@ def build_fixture(root: Path):
     return pred_path, gt_path, gt_cache_dir, pred_cache_dir
 
 
+#: Dataset name the synthetic CP reference fits a scaler for (``benchmark.dataset_ref.dataset``).
+CP_TEST_DATASET = "synthetic-set"
+
+
+def make_cp_reference(
+    config,
+    path: Path,
+    seed: int = 0,
+    n_cells: int = 64,
+    datasets: tuple[str, ...] = (CP_TEST_DATASET,),
+    lite: dict[str, str] | None = None,
+) -> str:
+    """Fit a real CP reference matching ``config``'s CP recipe and point ``config`` at it.
+
+    The GT matrices are synthetic, but the reference is built by the production
+    :func:`~dynacell.evaluation.cp_reference.fit_cp_reference` with the identity and
+    column names :func:`~dynacell.evaluation.cp_reference.cp_space` derives from the
+    same config. It fits one scaler per entry of ``datasets`` over the plate's
+    ``A/1/{i}`` positions; dataset ``i`` is drawn with offset ``10 * i`` and scale
+    ``1 + i``, so every scaler differs. ``lite`` maps lite dataset -> parent; a lite
+    set's cells are its parent's first half. Sets ``feature_metrics.cp`` (GLCM off
+    unless already configured), ``feature_metrics.cp.reference_path`` and
+    ``benchmark.dataset_ref.dataset`` (the first dataset), and returns the
+    reference's sha256.
+    """
+    # Imported here like the other helpers in this file: live_pipeline_module() drops
+    # every dynacell.evaluation.* module, so a top-level binding would go stale.
+    from dynacell.evaluation.cp_reference import DatasetFit, cp_space, fit_cp_reference, write_cp_reference
+
+    if OmegaConf.select(config, "feature_metrics.cp", default=None) is None:
+        OmegaConf.update(
+            config,
+            "feature_metrics.cp",
+            {"norm": {"p_lo": 1.0, "p_hi": 99.0}, "glcm": {"enabled": False}, "reference_path": None},
+            merge=True,
+        )
+    OmegaConf.update(config, "benchmark", {"dataset_ref": {"dataset": datasets[0], "target": "sec61b"}}, merge=True)
+    identity, names = cp_space(config)
+    rng = np.random.default_rng(seed)
+    positions = [f"A/1/{p}" for p in range(N_POSITIONS)]
+    cells = {name: rng.standard_normal((n_cells, len(names))) * (1 + i) + 10.0 * i for i, name in enumerate(datasets)}
+    fits = [
+        DatasetFit(dataset=name, cells=c, record={"positions": positions}, in_mask_fit=True)
+        for name, c in cells.items()
+    ]
+    fits += [
+        DatasetFit(
+            dataset=name,
+            cells=cells[parent][: n_cells // 2],
+            record={"positions": positions},
+            in_mask_fit=False,
+            parent=parent,
+        )
+        for name, parent in (lite or {}).items()
+    ]
+    payload = fit_cp_reference(fits, target_name=config.target_name, feature_names=names, cp_identity=identity)
+    write_cp_reference(payload, path, force=True)
+    config.feature_metrics.cp.reference_path = str(path)
+    return payload["sha256"]
+
+
 def read_position_arrays(plate_path: Path) -> dict[str, np.ndarray]:
     """Return ``{pos_name: data}`` for every position in an HCS plate."""
     out: dict[str, np.ndarray] = {}

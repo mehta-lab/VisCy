@@ -1,0 +1,47 @@
+# FNet2D predict: er (SEC61B) trained on ipsc_confocal, tested on A549 mantis denv.
+# In-focus 2D track (Phase F). The 2D checkpoint predicts over the FULL-Z 3D test
+# store with z_window_size=1 (fnet2d_predict overlay), emitting one window per
+# z-plane -> a full-Z prediction store the existing focus-aware eval consumes
+# unchanged. Source normalization (Phase3D fov_statistics mean/std) reproduces the
+# fnet2d fit overlay exactly; a mismatch here would silently degrade predictions.
+# Best val-loss checkpoint: epoch=668-step=187989-loss=0.911.ckpt (loss/validate=0.911).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_sec61b_denv.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fnet2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_sec61b_denv
+  model_name: fnet2d
+  experiment_id: er__ipsc_confocal__fnet2d__a549_mantis_sec61b_denv
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fnet2d/checkpoints/epoch=668-step=187989-loss=0.911.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d/ipsc/a549__denv/prediction.zarr
+
+launcher:
+  job_name: FNet2D_PRED_SEC61B_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d/ipsc/a549__denv
