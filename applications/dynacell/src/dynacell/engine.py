@@ -974,9 +974,11 @@ class DynacellFlowMatching(LightningModule):
         packs a fixed-grid solver's steps toward both ends of the interval,
         where adaptive dopri5 spends most of its evaluations.
     predict_compile : bool
-        ``torch.compile`` the velocity network for prediction. The compiled
-        copy lives for one predict run (built from the weights at its start,
-        dropped at its end); validation sampling stays uncompiled.
+        ``torch.compile`` the velocity network for the ``iterative`` and
+        ``sliding_window`` predict methods (``denoise`` calls the network
+        directly). The compiled copy lives for one predict run (built from the
+        weights at its start, dropped at its end); validation sampling stays
+        uncompiled.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
