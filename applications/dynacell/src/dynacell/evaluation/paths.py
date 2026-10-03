@@ -144,6 +144,7 @@ _CELLDIFF_ARM_MODELS: tuple[str, ...] = (
     "celldiff_2d_ccond",
     "celldiff_2d_seed1",
     "celldiff_2d_bglp",
+    "celldiff_2d_bgflat",
     "celldiff_segaux",
     "celldiff_cjoint",
     "celldiff_ccond",
@@ -305,8 +306,10 @@ PAPER_KEY: dict[str, str] = {
     "fnet3d_vscyto3daug_segaux_seed1": "fnet3d_vscyto3daug_segaux_seed1",
     "fnet3d_vscyto3daug_segaux_sauna": "fnet3d_vscyto3daug_segaux_sauna",
     "fnet3d_vscyto3daug_segaux_cldice": "fnet3d_vscyto3daug_segaux_cldice",
-    # Track H: CellDiff-2D trained on a background-low-passed target (BackgroundLowPass).
+    # Track H: CellDiff-2D trained on a target whose background is replaced by an estimate
+    # from background pixels (BackgroundLowPass): smoothed (`_bglp`) or flat (`_bgflat`).
     "celldiff_2d_bglp": "celldiff_2d_bglp",
+    "celldiff_2d_bgflat": "celldiff_2d_bgflat",
     # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
     # histogram-matched per volume to its segaux arm's (spatial structure kept).
     "fnet3d_paper_histmatch": "fnet3d_histmatch",

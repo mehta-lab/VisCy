@@ -94,6 +94,7 @@ _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "fnet3d_vscyto3daug_segaux_sauna",
     "fnet3d_vscyto3daug_segaux_cldice",
     "celldiff_2d_bglp",
+    "celldiff_2d_bgflat",
 )
 # Spotlight-v2 post-hoc control stores (no training leaf): each 3D nucleus baseline
 # histogram-matched to its segaux arm. Same longest-prefix hazard as the arms.
@@ -508,6 +509,7 @@ def test_spotlight_v2_models_match_the_leaf_generator() -> None:
         ("celldiff_2d", "celldiff_2d_cjoint", "celldiff_2d_cjoint"),
         ("celldiff_2d", "celldiff_2d_ccond", "celldiff_2d_ccond"),
         ("celldiff_2d", "celldiff_2d_bglp", "celldiff_2d_bglp"),
+        ("celldiff_2d", "celldiff_2d_bgflat", "celldiff_2d_bgflat"),
         # Baselines are unchanged.
         ("celldiff", "celldiff_r2", "celldiff_r2"),
         ("celldiff_2d", "celldiff_2d", "celldiff_2d"),
@@ -542,6 +544,7 @@ def test_spotlight_v2_celldiff_store_dir_splits_into_model_and_variant() -> None
     assert _split_model_variant("celldiff_2d_cjoint", "x") == ("celldiff_2d_cjoint", None)
     assert _split_model_variant("celldiff_2d_ccond", "x") == ("celldiff_2d_ccond", None)
     assert _split_model_variant("celldiff_2d_bglp", "x") == ("celldiff_2d_bglp", None)
+    assert _split_model_variant("celldiff_2d_bgflat", "x") == ("celldiff_2d_bgflat", None)
     for model in _SPOTLIGHT_V2_MODELS:
         if not model.startswith("celldiff"):
             assert _split_model_variant(model, "x") == (model, None)
