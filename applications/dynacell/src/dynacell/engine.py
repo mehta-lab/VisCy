@@ -942,10 +942,11 @@ class DynacellFlowMatching(LightningModule):
     log_samples_per_batch : int
         Number of samples per batch to log.
     num_generate_steps : int
-        Number of ODE steps for prediction inference.
+        Number of ODE time points for prediction inference; a fixed-grid
+        ``predict_sampling_method`` takes ``num_generate_steps - 1`` steps.
     num_log_steps : int
-        Number of ODE steps for validation image generation (cheaper than
-        ``num_generate_steps``).
+        Number of ODE time points for validation image generation (cheaper
+        than ``num_generate_steps``).
     compute_validation_loss : bool
         Whether to compute and log flow-matching validation loss on the
         validation loader. Disabled by default to preserve the previous
