@@ -26,9 +26,9 @@ from generate_spotlight_v2_leaves import (
     changed_keys,
 )
 from jsonargparse import ArgumentParser
+from lightning.pytorch import LightningModule
 
 from dynacell._compose_hook import _dynacell_ref_resolver
-from dynacell.engine import DynacellFlowMatching
 from dynacell.evaluation.paths import PAPER_KEY, canonical_model_name
 from viscy_utils.compose import load_composed_config
 from viscy_utils.losses import BackgroundLowPass
@@ -289,9 +289,12 @@ def test_bg_target_arms_compose_and_instantiate_with_only_the_target_op_added(su
     op_key = "model.init_args.target_bg_lowpass"
     assert {op_key if k.startswith(op_key + ".") else k for k in changed} == {"data.init_args.fg_mask_key", op_key}
     assert arm["data"]["init_args"]["fg_mask_key"] == "fg_mask"
+    # LightningModule as the base, as LightningCLI does: test_lazy_init evicts dynacell.* from
+    # sys.modules, so a DynacellFlowMatching bound at import can differ from the one jsonargparse imports.
     parser = ArgumentParser()
-    parser.add_subclass_arguments(DynacellFlowMatching, "model")
+    parser.add_subclass_arguments(LightningModule, "model")
     module = parser.instantiate_classes(parser.parse_object({"model": arm["model"]})).model
+    assert f"{type(module).__module__}.{type(module).__qualname__}" == "dynacell.engine.DynacellFlowMatching"
     op = module.target_bg_lowpass
     assert isinstance(op, BackgroundLowPass)
     assert {k: getattr(op, k) for k in BG_TARGET_ARGS[suffix]} == BG_TARGET_ARGS[suffix]
