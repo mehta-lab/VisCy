@@ -29,24 +29,31 @@ def _reference(op: BackgroundLowPass, target: torch.Tensor, mask: torch.Tensor) 
         (mask.numpy() > 0.5).astype(np.float64), size=(1, 1, 2 * rz + 1, 2 * r + 1, 2 * r + 1), mode="constant"
     )
     w = _gaussian(dilated, op.sigma_feather_z, op.sigma_feather).clip(0.0, 1.0)
-    num = _gaussian(x * (1.0 - dilated), op.sigma_lp_z, op.sigma_lp)
-    den = _gaussian(1.0 - dilated, op.sigma_lp_z, op.sigma_lp)
-    bg = np.where(den > 1e-6, num / np.maximum(den, 1e-6), x)
+    if op.sigma_lp is None:
+        bg = np.empty_like(x)
+        for i, j in np.ndindex(*x.shape[:2]):
+            bg[i, j] = x[i, j][dilated[i, j] == 0].mean()
+    else:
+        num = _gaussian(x * (1.0 - dilated), op.sigma_lp_z, op.sigma_lp)
+        den = _gaussian(1.0 - dilated, op.sigma_lp_z, op.sigma_lp)
+        bg = np.where(den > 1e-6, num / np.maximum(den, 1e-6), x)
     return w, w * x + (1.0 - w) * bg
 
 
 @pytest.mark.parametrize(
-    ("shape", "z_args"),
+    ("shape", "sigma_lp", "z_args"),
     [
-        ((2, 1, 1, 64, 64), {}),
-        ((2, 2, 5, 48, 40), {}),
-        ((1, 1, 6, 40, 40), {"sigma_lp_z": 1.0, "sigma_feather_z": 0.5, "dilate_radius_z": 1}),
+        ((2, 1, 1, 64, 64), 2.0, {}),
+        ((2, 2, 5, 48, 40), 2.0, {}),
+        ((1, 1, 6, 40, 40), 2.0, {"sigma_lp_z": 1.0, "sigma_feather_z": 0.5, "dilate_radius_z": 1}),
+        ((2, 1, 1, 64, 64), None, {}),
+        ((2, 2, 5, 48, 40), None, {"sigma_feather_z": 0.5, "dilate_radius_z": 1}),
     ],
-    ids=["d1", "per_plane", "with_z"],
+    ids=["d1", "per_plane", "with_z", "flat_d1", "flat_with_z"],
 )
-def test_matches_scipy_reference(shape, z_args):
-    """The blend weight and the output equal the scipy.ndimage pipeline, D=1 and D>1."""
-    op = BackgroundLowPass(sigma_lp=2.0, sigma_feather=1.5, dilate_radius=3, **z_args)
+def test_matches_scipy_reference(shape, sigma_lp, z_args):
+    """The blend weight and the output equal the scipy.ndimage pipeline, D=1 and D>1, smooth and flat."""
+    op = BackgroundLowPass(sigma_lp=sigma_lp, sigma_feather=1.5, dilate_radius=3, **z_args)
     target, mask = _square_batch(shape, 12, 28)
     mask[:, :, : shape[2] // 2] = 0.0  # planes differ, so Z handling matters
     w_ref, out_ref = _reference(op, target, mask)
@@ -87,6 +94,25 @@ def test_background_estimate_does_not_leak_the_foreground():
     assert background[dilated == 0].abs().max() < 0.15
 
 
+def test_flat_background_is_the_masked_mean():
+    """sigma_lp=None: wherever w == 0, x' is one constant per sample and channel, the background mean."""
+    op = BackgroundLowPass(sigma_lp=None, sigma_feather=2.0, dilate_radius=4)
+    target, mask = _square_batch((2, 2, 3, 64, 64), 16, 48)
+    mask[0, :, 1] = 0.0  # planes differ: the mean spans them all
+    target = target + torch.linspace(-1.0, 1.0, 64)  # an illumination gradient the flat estimate removes
+    out = op(target, mask)
+    dilated = op.dilated_mask(mask)
+    zero_w = op.blend_weight(dilated) == 0
+    for i, j in np.ndindex(2, 2):
+        expected = target[i, j][dilated[i, j] == 0].double().mean().item()
+        values = out[i, j][zero_w[i, j]]
+        assert values.numel() > 1000
+        torch.testing.assert_close(values, torch.full_like(values, expected), rtol=0.0, atol=1e-5)
+    # An empty mask flattens the whole patch to its mean.
+    flat = op(target, torch.zeros_like(target))
+    torch.testing.assert_close(flat, target.mean(dim=(2, 3, 4), keepdim=True).expand_as(target), rtol=0.0, atol=1e-5)
+
+
 def test_background_keeps_the_local_mean():
     """Background = constant + checkerboard: B removes the checkerboard and keeps the constant."""
     op = BackgroundLowPass(sigma_lp=2.0, sigma_feather=2.0, dilate_radius=4)
@@ -110,9 +136,10 @@ def test_empty_mask_blurs_everything():
         np.testing.assert_allclose(op(target, mask).numpy(), blurred, atol=1e-5)
 
 
-def test_patch_without_background_passes_through_finite():
+@pytest.mark.parametrize("sigma_lp", [2.0, None], ids=["smooth", "flat"])
+def test_patch_without_background_passes_through_finite(sigma_lp):
     """Where the dilated mask covers the patch, B is undefined: x' = x, finite; other patches are unaffected."""
-    op = BackgroundLowPass(sigma_lp=2.0, sigma_feather=2.0, dilate_radius=4)
+    op = BackgroundLowPass(sigma_lp=sigma_lp, sigma_feather=2.0, dilate_radius=4)
     target, mask = _square_batch((2, 1, 1, 32, 32), 8, 20)
     mask[0] = 1.0
     mask[0, ..., 5:7, 9:11] = 0.0  # a hole the dilation fills
@@ -151,9 +178,10 @@ def test_dtype_and_autocast():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
-def test_cuda_matches_cpu():
+@pytest.mark.parametrize("sigma_lp", [2.0, None], ids=["smooth", "flat"])
+def test_cuda_matches_cpu(sigma_lp):
     """The GPU path agrees with the CPU path (no convolution backend, so no TF32)."""
-    op = BackgroundLowPass(sigma_lp=2.0, sigma_feather=2.0, dilate_radius=4)
+    op = BackgroundLowPass(sigma_lp=sigma_lp, sigma_feather=2.0, dilate_radius=4)
     target, mask = _square_batch((2, 1, 1, 64, 64), 16, 48)
     out = op(target.cuda(), mask.cuda())
     assert out.device.type == "cuda"
@@ -161,8 +189,11 @@ def test_cuda_matches_cpu():
 
 
 def test_rejects_bad_arguments_and_shapes():
-    with pytest.raises(ValueError, match="sigma_lp must be > 0"):
+    with pytest.raises(ValueError, match="sigma_lp must be > 0 or None"):
         BackgroundLowPass(sigma_lp=0.0, sigma_feather=2.0, dilate_radius=4)
+    with pytest.raises(ValueError, match="no effect with a flat background"):
+        BackgroundLowPass(sigma_lp=None, sigma_feather=2.0, dilate_radius=4, sigma_lp_z=1.0)
+    assert BackgroundLowPass(sigma_lp=float("inf"), sigma_feather=2.0, dilate_radius=4).sigma_lp is None
     with pytest.raises(ValueError, match="dilate_radius must be >= 0"):
         BackgroundLowPass(sigma_lp=2.0, sigma_feather=2.0, dilate_radius=-1)
     with pytest.raises(ValueError, match="sigma_feather_z must be >= 0"):

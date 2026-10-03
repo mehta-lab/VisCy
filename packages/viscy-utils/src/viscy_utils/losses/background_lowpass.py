@@ -9,7 +9,9 @@ two without a seam.
 
 ``B`` is a normalized convolution: a plain ``G_lp(x)`` would bleed bright
 foreground into the background as a halo, while ``B`` averages background
-pixels only, so a foreground blob never reaches it.
+pixels only, so a foreground blob never reaches it. With ``sigma_lp=None`` (its
+``sigma_lp -> inf`` limit) ``B`` is flat: the mean of the patch's background
+pixels, which also removes autofluorescence and uneven illumination.
 
 It changes the target, never the loss: the background stays supervised toward a
 smooth field. In flow matching, masking the background out of the loss would
@@ -21,6 +23,8 @@ no convolution backend (cuDNN TF32, autocast) can lower their precision. ``B`` i
 weighted mean of background pixels, so it keeps the local background level and
 the op needs no change to the target's normalization.
 """
+
+import math
 
 import torch
 import torch.nn.functional as F
@@ -85,6 +89,10 @@ class BackgroundLowPass(nn.Module):
     within the low-pass kernel's reach, e.g. in a patch the dilated mask covers
     entirely, ``B`` is undefined and is replaced by ``x``, so ``x'`` stays finite.
 
+    ``sigma_lp=None`` makes ``B`` flat: per sample and channel, the mean of ``x``
+    over every background voxel of the patch (all Z planes), the
+    ``sigma_lp -> inf`` limit of the normalized convolution.
+
     By default every operation acts in XY, per Z plane: Z is anisotropic, and
     2D models have ``D = 1``. The ``*_z`` parameters extend each to Z.
 
@@ -92,8 +100,9 @@ class BackgroundLowPass(nn.Module):
 
     Parameters
     ----------
-    sigma_lp : float
-        Gaussian sigma in XY, in voxels, of the background estimate (> 0).
+    sigma_lp : float or None
+        Gaussian sigma in XY, in voxels, of the background estimate (> 0);
+        ``None`` (or ``inf``) for a flat background.
     sigma_feather : float
         Gaussian sigma in XY, in voxels, that feathers the dilated mask into
         ``w`` (>= 0; 0 keeps the hard dilated mask).
@@ -101,6 +110,7 @@ class BackgroundLowPass(nn.Module):
         Dilation radius in XY, in voxels (>= 0): a ``(2r + 1)``-wide square.
     sigma_lp_z : float
         Background-estimate sigma along Z, in voxels (>= 0; 0 = per plane).
+        Must be 0 with a flat background, which already spans Z.
     sigma_feather_z : float
         Feather sigma along Z, in voxels (>= 0; 0 = per plane).
     dilate_radius_z : int
@@ -109,7 +119,7 @@ class BackgroundLowPass(nn.Module):
 
     def __init__(
         self,
-        sigma_lp: float,
+        sigma_lp: float | None,
         sigma_feather: float,
         dilate_radius: int,
         sigma_lp_z: float = 0.0,
@@ -117,8 +127,13 @@ class BackgroundLowPass(nn.Module):
         dilate_radius_z: int = 0,
     ) -> None:
         super().__init__()
-        if sigma_lp <= 0:
-            raise ValueError(f"sigma_lp must be > 0, got {sigma_lp}")
+        if sigma_lp is not None and math.isinf(sigma_lp):
+            sigma_lp = None
+        if sigma_lp is None:
+            if sigma_lp_z != 0:
+                raise ValueError(f"sigma_lp_z={sigma_lp_z} has no effect with a flat background (sigma_lp=None)")
+        elif sigma_lp <= 0:
+            raise ValueError(f"sigma_lp must be > 0 or None, got {sigma_lp}")
         for name, value in (
             ("sigma_feather", sigma_feather),
             ("sigma_lp_z", sigma_lp_z),
@@ -128,7 +143,7 @@ class BackgroundLowPass(nn.Module):
         ):
             if value < 0:
                 raise ValueError(f"{name} must be >= 0, got {value}")
-        self.sigma_lp = float(sigma_lp)
+        self.sigma_lp = None if sigma_lp is None else float(sigma_lp)
         self.sigma_feather = float(sigma_feather)
         self.dilate_radius = int(dilate_radius)
         self.sigma_lp_z = float(sigma_lp_z)
@@ -195,6 +210,11 @@ class BackgroundLowPass(nn.Module):
         with torch.autocast(device_type=target.device.type, enabled=False):
             x = target.float()
             bg = 1.0 - dilated.float()
+            if self.sigma_lp is None:
+                den = bg.flatten(2).sum(-1)
+                mean = (x * bg).flatten(2).sum(-1) / den.clamp(min=1.0)
+                per_patch = (b, c, *([1] * len(spatial)))
+                return torch.where(den.reshape(per_patch) > 0, mean.reshape(per_patch), x)
             sigmas = (self.sigma_lp_z, self.sigma_lp, self.sigma_lp)
             num = _gaussian_blur((x * bg).reshape(b * c, *spatial), sigmas).reshape(x.shape)
             den = _gaussian_blur(bg.reshape(b * c, *spatial), sigmas).reshape(x.shape)
