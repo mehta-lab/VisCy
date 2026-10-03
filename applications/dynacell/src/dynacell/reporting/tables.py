@@ -39,12 +39,17 @@ FEATURE_METRICS = [
     "MorphEm_FID",
 ]
 
+# The foreground-limited ``FG_*`` columns (``pixel_metrics.foreground``, off by default)
+# are ranked here but stay out of PIXEL_METRICS: callers ask for them by name.
 HIGHER_IS_BETTER = {
     "PCC",
     "SSIM",
     "SI_SSIM",
     "PSNR",
     "SI_PSNR",
+    "FG_PCC",
+    "FG_SI_SSIM",
+    "FG_SI_PSNR",
     "Spectral_PCC",
     "MicroMS3IM",
     "Dice",
@@ -58,6 +63,10 @@ HIGHER_IS_BETTER = {
     "CellDINO_Median_Cosine_Similarity",
     "MorphEm_Median_Cosine_Similarity",
 }
+
+# Columns that describe the evaluation data rather than a model's quality, so no row
+# is best: ``FG_frac`` is the GT foreground fraction, identical across models.
+UNRANKED = {"FG_frac"}
 
 
 def load_eval_results(
@@ -213,7 +222,7 @@ def to_latex(
     df
         DataFrame from :func:`comparison_table`.
     bold_best
-        Whether to bold the best value in each column.
+        Whether to bold the best value in each column (except :data:`UNRANKED` ones).
     caption, label
         Optional LaTeX caption and label.
 
@@ -225,6 +234,8 @@ def to_latex(
     if bold_best and len(df) > 1:
         formatted = df.copy()
         for col in formatted.columns:
+            if col in UNRANKED:
+                continue
             vals: list[float | None] = []
             for cell in formatted[col]:
                 try:

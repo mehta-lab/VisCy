@@ -29,6 +29,10 @@ def _import_pipeline_with_stubs(monkeypatch):
 
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")
     metrics_module.ascupy = None
+    metrics_module.FOREGROUND_COLUMNS = ()
+    metrics_module.FOREGROUND_SIGMAS_UM = {}
+    metrics_module.FOREGROUND_METRICS_VERSION = 0
+    metrics_module.FOREGROUND_SOURCES = ()
     metrics_module.CP_FEATURE_VERSION = "v2_dist_texture"
     metrics_module.CP_FEATURE_NAMES_BY_VERSION = {"v2_dist_texture": ()}
     metrics_module.fit_microssim = lambda *args, **kwargs: None
@@ -67,6 +71,7 @@ def _import_pipeline_with_stubs(monkeypatch):
 
     segmentation_module = types.ModuleType("dynacell.evaluation.segmentation")
     segmentation_module.segment = lambda *args, **kwargs: None
+    segmentation_module.require_cubic_workflows = lambda *args, **kwargs: None
     segmentation_module.prepare_segmentation_model = lambda *args, **kwargs: None
 
     # Stub hydra if not installed
@@ -97,6 +102,7 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     make_hcs_plate(pred_path, "prediction", seed=0)
     config = OmegaConf.create(
         {
+            "target_name": "nucleus",
             "compute_feature_metrics": False,
             "io": {"pred_path": str(pred_path), "pred_channel_name": "prediction"},
             "force_recompute": {
