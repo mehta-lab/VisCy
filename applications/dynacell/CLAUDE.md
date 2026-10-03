@@ -297,6 +297,25 @@ Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md` §11–§15 and
   MIND are off (`compute_microssim`, `feature_metrics.compute_{fid,prc,mind}`).
 - **A549 has no separate nuclei store**: `nuclei_gt_path` is the GT store itself, so lite membrane
   leaves omit it and the carve reads nuclei from the lite GT store.
+- **CELL-Diff runs a fast recipe on the lite** (`model_overlays/celldiff_predict_lite.yml`), so a lite
+  CELL-Diff prediction is a different sample, not a subset of the production one. It keeps
+  production's tile grid (512^2 tiles, YX overlap 256, iterative anchoring) and changes:
+  - Z overlap 4 -> 2;
+  - adaptive dopri5 (~56-66 velocity evaluations per tile) -> midpoint on a cosine time grid, 16
+    evaluations;
+  - bf16 + `torch.compile` of a channels-last copy of the net.
+
+  One fit's whole lite test set: 1.78 h on an H100, against ~100 GPU-h per A549 condition in
+  production. With an organelle's three fits replaced, 10 of the 7984 pairs against other models
+  that the full benchmark resolves flip on the lite (2000-draw bootstrap), and 5 of 447 among the
+  CELL-Diff fits. One is resolved the other way on the lite:
+  mitochondria, A549 ZIKV, MorphEm median cosine, joint-trained CELL-Diff vs pix2pix3d (full z = 2.02).
+  The fast sampler raises the in-domain fits' A549 MorphEm scores; read CELL-Diff's A549 MorphEm
+  metrics on the lite as slightly optimistic. Two shortcuts break ordering:
+  - 12 or fewer evaluations flip deep-feature orderings of the A549-trained nucleus fit;
+  - full-field slabs instead of 512^2 tiles break the OOD membrane fit.
+
+  Evidence: `experiments/2026-10-01_celldiff-fast-inference/`.
 
 ## `experiments/` — investigations, ablations and checks (gitignored)
 

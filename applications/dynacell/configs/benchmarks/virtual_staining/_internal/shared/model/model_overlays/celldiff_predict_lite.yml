@@ -1,0 +1,34 @@
+# CellDiff fast predict overlay for the DynaCell-lite test set.
+# Same model and the same tile grid as celldiff_predict.yml (512^2 tiles, YX overlap 256,
+# iterative anchoring); only the Z overlap, the sampler and the precision change. Chosen and
+# validated in applications/dynacell/experiments/2026-10-01_celldiff-fast-inference/ (1.78 h per fit
+# for the whole lite test set on one H100; the full benchmark's orderings hold except one marginal
+# mitochondria MorphEm pair -- see "DynaCell-lite" in applications/dynacell/CLAUDE.md):
+# - Z overlap 2 instead of 4 (8 instead of 11 Z tiles per A549 volume);
+# - sampler: midpoint on a cosine time grid, 16 velocity evaluations per tile, instead of
+#   adaptive dopri5 (~56-66); 12 or fewer flip deep-feature orderings for the A549-trained
+#   nucleus fit;
+# - bf16 autocast + torch.compile of a channels-last copy of the net.
+# Larger tiles (full-field slabs, whole volumes) were tested and fail on A549 out of domain.
+base:
+  - ../../../../../../recipes/models/celldiff_fm.yml
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    net_config:
+      input_spatial_size: [8, 512, 512]
+    predict_method: iterative
+    predict_overlap: [2, 256, 256]
+    predict_sampling_method: midpoint
+    predict_time_schedule: cosine
+    num_generate_steps: 9
+    predict_compile: true
+trainer:
+  precision: bf16-mixed
+data:
+  init_args:
+    z_window_size: 40
+    batch_size: 4
+    num_workers: 0
+    yx_patch_size: [512, 512]

@@ -110,3 +110,44 @@ def test_sampler_sample_ode():
     # Result is a trajectory tensor from odeint.
     assert result.shape[0] == 5
     assert result.shape[1:] == x_init.shape
+
+
+def test_ode_solver_cosine_schedule_packs_points_at_both_ends():
+    """The cosine grid keeps the endpoints and spaces points densest next to t0 and t1."""
+    kwargs = dict(drift=lambda x, t, model: x, t0=0.0, t1=1.0, sampler_type="euler", num_steps=9, atol=1e-5, rtol=1e-3)
+    uniform = ODESolver(**kwargs).t
+    cosine = ODESolver(**kwargs, time_schedule="cosine").t
+    torch.testing.assert_close(uniform, torch.linspace(0, 1, 9))
+    assert cosine[0] == 0.0 and cosine[-1] == 1.0
+    gaps = cosine.diff()
+    assert gaps[0] < gaps[4] and gaps[-1] < gaps[4]
+    torch.testing.assert_close(gaps, gaps.flip(0))
+
+
+def test_ode_solver_rejects_unknown_schedule():
+    """A misspelled schedule raises instead of silently falling back to uniform."""
+    with pytest.raises(ValueError, match="time_schedule"):
+        ODESolver(
+            drift=lambda x, t, model: x,
+            t0=0.0,
+            t1=1.0,
+            sampler_type="euler",
+            num_steps=5,
+            atol=1e-5,
+            rtol=1e-3,
+            time_schedule="cos",
+        )
+
+
+def test_sampler_euler_with_cosine_schedule_steps_on_the_grid():
+    """A fixed-grid sampler evaluates the drift once per step, at the cosine grid's left points."""
+    sampler = Sampler(create_transport())
+    seen = []
+
+    def model(x, t):
+        seen.append(float(t[0]))
+        return torch.zeros_like(x)
+
+    sampler.sample_ode(sampling_method="euler", num_steps=5, time_schedule="cosine")(torch.randn(1, 1, 2, 2, 2), model)
+    expected = (1 - torch.cos(torch.pi * torch.linspace(0, 1, 5, dtype=torch.float64))) / 2
+    assert seen == pytest.approx(expected[:-1].tolist(), abs=1e-6)

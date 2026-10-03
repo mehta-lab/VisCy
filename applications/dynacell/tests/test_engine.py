@@ -6,10 +6,11 @@ import warnings
 import numpy as np
 import pytest
 import torch
-from lightning.pytorch import Trainer, seed_everything
+from lightning.pytorch import Callback, Trainer, seed_everything
 from monai.data import MetaTensor
 from torch import nn
 
+from dynacell.celldiff_wrapper import _channels_last_copy, _ChannelsLastGroupNorm
 from dynacell.engine import (
     DynacellFlowMatching,
     DynacellGAN,
@@ -348,6 +349,162 @@ def test_flow_matching_predict_step_pad_crop(synth_celldiff_batch):
     with torch.no_grad():
         prediction = model.predict_step(batch, batch_idx=0)
     assert prediction.shape == small_source.shape
+
+
+def _count_net_calls(model: DynacellFlowMatching) -> list[int]:
+    """Patch the velocity net's forward to count calls; returns the one-element counter."""
+    calls = [0]
+    forward = model.model.net.forward
+
+    def counted(*args, **kwargs):
+        calls[0] += 1
+        return forward(*args, **kwargs)
+
+    model.model.net.forward = counted
+    return calls
+
+
+@pytest.mark.parametrize(("method", "per_step"), [("euler", 1), ("midpoint", 2)])
+def test_flow_matching_fixed_grid_sampler_nfe(method, per_step):
+    """A fixed-grid sampler takes ``num_generate_steps - 1`` steps of ``per_step`` evaluations per tile."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=4,
+        predict_method="sliding_window",
+        predict_overlap=[0, 0, 0],
+        predict_sampling_method=method,
+    ).eval()
+    calls = _count_net_calls(model)
+    with torch.no_grad():
+        prediction = model.predict_step({"source": torch.randn(1, 1, 16, 32, 32)}, batch_idx=0)
+    assert prediction.shape == (1, 1, 16, 32, 32)
+    assert calls[0] == 2 * 3 * per_step  # two Z tiles
+
+
+def test_flow_matching_compiled_inference_net_stays_out_of_the_state_dict():
+    """``predict_compile`` wraps the velocity net once and adds no submodule (or weights) to the checkpoint."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG, predict_compile=True
+    )
+    keys = set(model.state_dict())
+    model.on_predict_start()
+    compiled = model.model.inference_net()
+    assert compiled is not model.model.net
+    assert model.model.inference_net() is compiled
+    assert set(model.state_dict()) == keys
+
+
+def test_flow_matching_channels_last_copy_matches_the_net():
+    """The compiled-inference copy predicts the net's velocity from channels-last convs and the NDHWC
+    GroupNorm, takes the autocast dtype for its conv weights, and leaves the net itself untouched."""
+    # dims 16: two channels per GroupNorm group, so a wrong channel grouping cannot pass.
+    net_config = {**CELLDIFF_TEST_NET_CONFIG, "dims": [16, 32]}
+    net = DynacellFlowMatching(net_config=net_config, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG).model.net
+    net.eval()
+    for norm in net.modules():
+        if isinstance(norm, nn.GroupNorm):
+            nn.init.normal_(norm.weight)
+            nn.init.normal_(norm.bias)
+    fast = _channels_last_copy(net)
+
+    def convs(m: nn.Module) -> list[nn.Module]:
+        return [c for c in m.modules() if isinstance(c, (nn.Conv3d, nn.ConvTranspose3d))]
+
+    assert all(c.weight.is_contiguous(memory_format=torch.channels_last_3d) for c in convs(fast))
+    assert {type(m) for m in fast.modules() if isinstance(m, nn.GroupNorm)} == {_ChannelsLastGroupNorm}
+    assert {type(m) for m in net.modules() if isinstance(m, nn.GroupNorm)} == {nn.GroupNorm}
+    assert all(c.weight.is_contiguous() and c.weight.dtype == torch.float32 for c in convs(net))
+    x, cond = torch.randn(2, 1, 8, 32, 32), torch.randn(2, 1, 8, 32, 32)
+    t = torch.tensor([0.2, 0.7])
+    with torch.no_grad():
+        torch.testing.assert_close(fast(x, cond, t), net(x, cond, t), rtol=1e-4, atol=1e-5)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        assert {c.weight.dtype for c in convs(_channels_last_copy(net))} == {torch.bfloat16}
+
+
+def test_flow_matching_compiles_inference_for_one_predict_run():
+    """The compiled copy exists only inside a predict run: validation sampling uses the live net, and a
+    later run rebuilds the copy instead of reusing an earlier run's weights, device or autocast dtype."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG, predict_compile=True
+    )
+    assert model.model.inference_net() is model.model.net
+    model.on_predict_start()
+    compiled = model.model.inference_net()
+    assert compiled is not model.model.net
+    model.on_predict_end()
+    assert model.model.inference_net() is model.model.net
+    model.on_predict_start()
+    assert model.model.inference_net() is not compiled
+
+
+def test_flow_matching_compiled_predict_matches_eager_under_bf16():
+    """``Trainer.predict`` with ``predict_compile`` and bf16 autocast samples through the compiled
+    channels-last copy, matches the eager net on the same weights, seed and input up to bf16 fusion
+    error, and leaves no compiled copy behind."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=3,
+        predict_method="sliding_window",
+        predict_overlap=[0, 0, 0],
+        predict_sampling_method="midpoint",
+        predict_time_schedule="cosine",
+    )
+    loader = torch.utils.data.DataLoader([{"source": torch.randn(1, 8, 32, 32)}], batch_size=1)
+    compiled_during_batch: list[bool] = []
+
+    class _RecordCompiled(Callback):
+        def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+            compiled_during_batch.append("net" in pl_module.model._compiled)
+
+    def predict(compile_inference: bool) -> torch.Tensor:
+        model.predict_compile = compile_inference
+        seed_everything(0)
+        trainer = Trainer(
+            accelerator="cpu",
+            precision="bf16-mixed",
+            logger=False,
+            enable_checkpointing=False,
+            enable_progress_bar=False,
+            enable_model_summary=False,
+            callbacks=[_RecordCompiled()],
+        )
+        return trainer.predict(model, dataloaders=loader)[0].float()
+
+    eager = predict(False)
+    compiled = predict(True)
+    assert compiled_during_batch == [False, True]
+    assert not model.model._compiled and model.model.inference_net() is model.model.net
+    assert torch.isfinite(compiled).all()
+    # Measured 0.0026, the same size as eager bf16 vs fp32 (0.0028); a wrong GroupNorm grouping is O(1).
+    assert (compiled - eager).norm() / eager.norm() < 0.02
+
+
+def test_flow_matching_noise_comes_from_the_cpu_generator(monkeypatch):
+    """Initial noise is drawn by the seeded CPU generator and then moved to the conditioning tensor's device,
+    so a seeded prediction does not depend on the GPU model. A ``meta`` conditioning tensor stands in for a
+    GPU: drawing on its device instead would put the draw itself on ``meta``."""
+    model = DynacellFlowMatching(net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG)
+    torch.manual_seed(0)
+    noise = model.model._noise_like_target(torch.zeros(2, 1, 8, 32, 32))
+    torch.manual_seed(0)
+    torch.testing.assert_close(noise, torch.randn(2, 1, 8, 32, 32), rtol=0, atol=0)
+
+    draws: list[torch.device] = []
+    randn = torch.randn
+
+    def recording_randn(*args, **kwargs):
+        out = randn(*args, **kwargs)
+        draws.append(out.device)
+        return out
+
+    monkeypatch.setattr(torch, "randn", recording_randn)
+    noise = model.model._noise_like_target(torch.zeros(2, 1, 8, 32, 32, device="meta"))
+    assert draws == [torch.device("cpu")]
+    assert noise.device == torch.device("meta")
+    assert noise.shape == (2, 1, 8, 32, 32)
 
 
 def test_flow_matching_sliding_window_rejects_nonzero_overlap():

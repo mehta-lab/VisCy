@@ -1196,6 +1196,7 @@ def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
 _PREDICT_PROFILE_TIME: dict[str, str] = {
     "hardware_predict_any_gpu.yml": "2-00:00:00",
     "hardware_predict_celldiff.yml": "7-00:00:00",
+    "hardware_predict_celldiff_lite.yml": "02:00:00",
     "hardware_h200_single.yml": "4-00:00:00",
 }
 
@@ -1230,22 +1231,70 @@ def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
     full-Z test store (one window per plane). Its wall need is unmeasured, so it
     inherits the 7-day CELL-Diff cap rather than getting a speculative profile of
     its own -- tighten it to a dedicated profile once real runs give a number.
+
+    CELL-Diff's ``*_lite`` leaves run the fast recipe (celldiff_predict_lite.yml)
+    on one H100, 5-35 min per lite condition, so they get their own 2 h profile.
     """
     profile = _composed_hardware_profile(leaf)
     assert profile in _PREDICT_PROFILE_TIME, (
         f"{leaf.relative_to(BENCHMARKS)}: unknown hardware profile {profile!r}. Add it to "
         f"_PREDICT_PROFILE_TIME with a measured wall limit."
     )
-    is_celldiff = any(part.startswith("celldiff") for part in leaf.parts)
-    assert is_celldiff == (profile == "hardware_predict_celldiff.yml"), (
+    is_celldiff = any(part.startswith("celldiff") for part in leaf.relative_to(BENCHMARKS).parts)
+    celldiff_profile = (
+        "hardware_predict_celldiff_lite.yml" if leaf.stem.endswith("_lite") else "hardware_predict_celldiff.yml"
+    )
+    assert is_celldiff == (profile == celldiff_profile), (
         f"{leaf.relative_to(BENCHMARKS)}: celldiff={is_celldiff} but profile={profile!r}. "
-        f"CELL-Diff predicts must use hardware_predict_celldiff.yml and nothing else may."
+        f"CELL-Diff predicts must use {celldiff_profile} (the lite fast recipe gets its own, "
+        f"measured profile) and nothing else may."
     )
     time_limit = load_composed_config(leaf)["launcher"]["sbatch"]["time"]
     assert time_limit == _PREDICT_PROFILE_TIME[profile], (
         f"{leaf.relative_to(BENCHMARKS)}: composed time={time_limit!r}, but {profile} is "
         f"expected to contribute {_PREDICT_PROFILE_TIME[profile]!r}."
     )
+
+
+_CELLDIFF_LITE_OVERLAY = BENCHMARKS / "_internal/shared/model/model_overlays/celldiff_predict_lite.yml"
+# 4 organelles x 3 training sets (iPSC, A549, joint) x 4 lite test sets.
+_CELLDIFF_LITE_LEAVES = sorted(BENCHMARKS.glob("*/celldiff/*/predict__*_lite.yml"))
+
+
+def _overridden(expected: dict, composed: dict, prefix: str = "") -> list[str]:
+    """Keys of ``expected`` (recursively) whose composed value differs or is missing."""
+    diffs = []
+    for key, value in expected.items():
+        if isinstance(value, dict) and isinstance(composed.get(key), dict):
+            diffs += _overridden(value, composed[key], f"{prefix}{key}.")
+        elif composed.get(key, "<missing>") != value:
+            diffs.append(f"{prefix}{key}: {composed.get(key, '<missing>')!r} != {value!r}")
+    return diffs
+
+
+def test_every_celldiff_fit_has_lite_leaves() -> None:
+    """The lite generator emits all 48 CELL-Diff lite leaves."""
+    assert len(_CELLDIFF_LITE_LEAVES) == 48
+
+
+@pytest.mark.parametrize("leaf", _CELLDIFF_LITE_LEAVES, ids=lambda p: str(p.relative_to(BENCHMARKS)))
+def test_celldiff_lite_leaf_takes_the_fast_overlay(leaf: Path) -> None:
+    """A CELL-Diff lite leaf composes to the fast overlay's recipe: its model and trainer
+    settings and its batch size.
+
+    The 2 h profile and the validated orderings hold only for that recipe; a sampler key
+    left on the leaf (the production leaves set ``predict_method``, ``predict_overlap``
+    and ``num_generate_steps``) would silently override it. ``z_window_size`` is not
+    recipe: it follows each test set's Z extent (A549 leaves set 48).
+    """
+    overlay = yaml.safe_load(_CELLDIFF_LITE_OVERLAY.read_text())
+    recipe = {
+        "model": overlay["model"],
+        "trainer": overlay["trainer"],
+        "data": {"init_args": {"batch_size": overlay["data"]["init_args"]["batch_size"]}},
+    }
+    diffs = _overridden(recipe, load_composed_config(leaf))
+    assert not diffs, f"{leaf.relative_to(BENCHMARKS)} overrides the fast overlay: {diffs}"
 
 
 # The only fits that have ever hit a wall limit: all eight joint FCMAE leaves, at
