@@ -151,7 +151,6 @@ class CELLDiff3DVS(nn.Module):
         # inference_net). Kept in a dict: assigning a Module attribute would register it as a
         # submodule and duplicate the weights in the state dict.
         self._compiled: dict[str, Callable[[Tensor, Tensor, Tensor], Tensor]] = {}
-        self.compile_inference = False
         if joint_mask and net.inconv.in_channels % 2:
             raise ValueError(f"joint_mask needs net in_channels = 2 x target channels, got {net.inconv.in_channels}")
 
@@ -257,31 +256,27 @@ class CELLDiff3DVS(nn.Module):
             "n_gated": gate.sum().float(),
         }
 
-    @property
-    def compile_inference(self) -> bool:
-        """Whether :meth:`inference_net` returns the compiled copy; setting it drops any copy built so far."""
-        return self._compile_inference
-
-    @compile_inference.setter
-    def compile_inference(self, enabled: bool) -> None:
+    def drop_compiled_net(self) -> None:
+        """Drop the cached compiled copy, so the next compiled call rebuilds it from the current weights."""
         self._compiled.clear()
-        self._compile_inference = enabled
 
-    def inference_net(self) -> Callable[[Tensor, Tensor, Tensor], Tensor]:
+    def inference_net(self, compiled: bool) -> Callable[[Tensor, Tensor, Tensor], Tensor]:
         """Velocity network used by the ``generate*`` methods.
 
-        When ``compile_inference`` is set, ``torch.compile`` of a
-        channels-last copy of :attr:`net` (:func:`_channels_last_copy`), built
-        on first use from the current weights, device and autocast state and
-        reused until ``compile_inference`` is set again; otherwise the network
-        itself.
+        Parameters
+        ----------
+        compiled : bool
+            Return ``torch.compile`` of a channels-last copy of :attr:`net`
+            (:func:`_channels_last_copy`), built on first use from the current
+            weights, device and autocast state and reused until
+            :meth:`drop_compiled_net`; otherwise the network itself.
 
         Returns
         -------
         callable
             ``net(xt, cond, t) -> velocity``.
         """
-        if not self.compile_inference:
+        if not compiled:
             return self.net
         if "net" not in self._compiled:
             self._compiled["net"] = torch.compile(_channels_last_copy(self.net), dynamic=False)
@@ -310,7 +305,12 @@ class CELLDiff3DVS(nn.Module):
         return torch.randn(b, in_ch, *spatial, dtype=phase.dtype).to(phase.device)
 
     def generate(
-        self, phase: Tensor, num_steps: int = 100, sampling_method: str = "dopri5", time_schedule: str = "uniform"
+        self,
+        phase: Tensor,
+        num_steps: int = 100,
+        sampling_method: str = "dopri5",
+        time_schedule: str = "uniform",
+        compiled: bool = False,
     ) -> Tensor:
         """Generate virtual staining via ODE sampling.
 
@@ -328,6 +328,9 @@ class CELLDiff3DVS(nn.Module):
         time_schedule : str
             Spacing of the time points, ``"uniform"`` or ``"cosine"`` (dense at
             both ends, where the velocity field changes fastest).
+        compiled : bool
+            Sample through the compiled copy of the network (see
+            :meth:`inference_net`).
 
         Returns
         -------
@@ -338,7 +341,7 @@ class CELLDiff3DVS(nn.Module):
         sample_fn = self.transport_sampler.sample_ode(
             sampling_method=sampling_method, num_steps=num_steps, time_schedule=time_schedule
         )
-        net = self.inference_net()
+        net = self.inference_net(compiled)
 
         def fn(xt: Tensor, t: Tensor) -> Tensor:
             return net(xt, phase, t)
@@ -379,6 +382,7 @@ class CELLDiff3DVS(nn.Module):
         num_steps: int = 100,
         sampling_method: str = "dopri5",
         time_schedule: str = "uniform",
+        compiled: bool = False,
     ) -> Tensor:
         """Generate virtual staining via tiled sliding window (stride == patch size).
 
@@ -399,6 +403,9 @@ class CELLDiff3DVS(nn.Module):
             ``torchdiffeq`` method, as in :meth:`generate`.
         time_schedule : str
             Spacing of the time points, as in :meth:`generate`.
+        compiled : bool
+            Sample through the compiled copy of the network, as in
+            :meth:`generate`.
 
         Returns
         -------
@@ -416,7 +423,7 @@ class CELLDiff3DVS(nn.Module):
         sample_fn = self.transport_sampler.sample_ode(
             sampling_method=sampling_method, num_steps=num_steps, time_schedule=time_schedule
         )
-        net = self.inference_net()
+        net = self.inference_net(compiled)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):
@@ -508,6 +515,7 @@ class CELLDiff3DVS(nn.Module):
         overlap_size: int | tuple[int, ...] = 256,
         sampling_method: str = "dopri5",
         time_schedule: str = "uniform",
+        compiled: bool = False,
     ) -> Tensor:
         """Generate virtual staining via overlapping sliding window with velocity anchoring.
 
@@ -537,6 +545,9 @@ class CELLDiff3DVS(nn.Module):
             ``torchdiffeq`` method, as in :meth:`generate`.
         time_schedule : str
             Spacing of the time points, as in :meth:`generate`.
+        compiled : bool
+            Sample through the compiled copy of the network, as in
+            :meth:`generate`.
 
         Returns
         -------
@@ -566,7 +577,7 @@ class CELLDiff3DVS(nn.Module):
         sample_fn = self.transport_sampler.sample_ode(
             sampling_method=sampling_method, num_steps=num_steps, time_schedule=time_schedule
         )
-        net = self.inference_net()
+        net = self.inference_net(compiled)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):

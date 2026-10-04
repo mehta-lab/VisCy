@@ -974,11 +974,11 @@ class DynacellFlowMatching(LightningModule):
         packs a fixed-grid solver's steps toward both ends of the interval,
         where adaptive dopri5 spends most of its evaluations.
     predict_compile : bool
-        ``torch.compile`` the velocity network for the ``iterative`` and
-        ``sliding_window`` predict methods (``denoise`` calls the network
-        directly). The compiled copy lives for one predict run (built from the
-        weights at its start, dropped at its end); validation sampling stays
-        uncompiled.
+        ``torch.compile`` the velocity network for the ``generate``,
+        ``sliding_window`` and ``iterative`` predict methods (``denoise`` calls
+        the network directly). Only :meth:`predict_step` samples through the
+        compiled copy, which every predict run rebuilds from the current
+        weights; validation sampling always uses the live network.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
@@ -1266,16 +1266,16 @@ class DynacellFlowMatching(LightningModule):
         self._validation_mask_velocity_losses.clear()
 
     def on_predict_start(self) -> None:
-        """Turn on the compiled velocity net for this predict run when ``predict_compile`` is set.
+        """Drop any compiled copy an earlier run left behind.
 
-        Setting the flag drops any earlier copy, so this run's copy is built from the current
-        weights, device and autocast state.
+        A run that raised never reaches :meth:`on_predict_end`; dropping here builds this run's
+        copy from the current weights, device and autocast state.
         """
-        self.model.compile_inference = self.predict_compile
+        self.model.drop_compiled_net()
 
     def on_predict_end(self) -> None:
-        """Drop the compiled copy, so validation sampling and later runs use the live weights."""
-        self.model.compile_inference = False
+        """Free the compiled copy's memory."""
+        self.model.drop_compiled_net()
 
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Generate virtual staining for one batch via ODE sampling.
@@ -1324,6 +1324,7 @@ class DynacellFlowMatching(LightningModule):
                 num_steps=self.num_generate_steps,
                 sampling_method=self.predict_sampling_method,
                 time_schedule=self.predict_time_schedule,
+                compiled=self.predict_compile,
             )
         elif self.predict_method == "sliding_window":
             # generate_sliding_window partitions into non-overlapping tiles
@@ -1344,6 +1345,7 @@ class DynacellFlowMatching(LightningModule):
                 num_steps=self.num_generate_steps,
                 sampling_method=self.predict_sampling_method,
                 time_schedule=self.predict_time_schedule,
+                compiled=self.predict_compile,
             )
         elif self.predict_method == "iterative":
             prediction = self.model.generate_iterative(
@@ -1352,6 +1354,7 @@ class DynacellFlowMatching(LightningModule):
                 overlap_size=self.predict_overlap,
                 sampling_method=self.predict_sampling_method,
                 time_schedule=self.predict_time_schedule,
+                compiled=self.predict_compile,
             )
         else:
             raise ValueError(

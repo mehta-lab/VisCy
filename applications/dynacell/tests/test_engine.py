@@ -388,10 +388,9 @@ def test_flow_matching_compiled_inference_net_stays_out_of_the_state_dict():
         net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG, predict_compile=True
     )
     keys = set(model.state_dict())
-    model.on_predict_start()
-    compiled = model.model.inference_net()
+    compiled = model.model.inference_net(compiled=True)
     assert compiled is not model.model.net
-    assert model.model.inference_net() is compiled
+    assert model.model.inference_net(compiled=True) is compiled
     assert set(model.state_dict()) == keys
 
 
@@ -423,20 +422,63 @@ def test_flow_matching_channels_last_copy_matches_the_net():
         assert {c.weight.dtype for c in convs(_channels_last_copy(net))} == {torch.bfloat16}
 
 
-def test_flow_matching_compiles_inference_for_one_predict_run():
-    """The compiled copy exists only inside a predict run: validation sampling uses the live net, and a
-    later run rebuilds the copy instead of reusing an earlier run's weights, device or autocast dtype."""
+def test_flow_matching_rebuilds_the_compiled_net_for_every_predict_run():
+    """Every predict run rebuilds the compiled copy instead of reusing an earlier run's weights, device or
+    autocast dtype, and the uncompiled path is always the live net."""
     model = DynacellFlowMatching(
         net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG, predict_compile=True
     )
-    assert model.model.inference_net() is model.model.net
     model.on_predict_start()
-    compiled = model.model.inference_net()
-    assert compiled is not model.model.net
+    compiled = model.model.inference_net(compiled=True)
+    assert model.model.inference_net(compiled=False) is model.model.net
     model.on_predict_end()
-    assert model.model.inference_net() is model.model.net
+    assert not model.model._compiled
     model.on_predict_start()
-    assert model.model.inference_net() is not compiled
+    assert model.model.inference_net(compiled=True) is not compiled
+
+
+def test_flow_matching_failed_predict_leaves_validation_on_the_live_net(monkeypatch):
+    """A predict run that raises never reaches ``on_predict_end`` (Lightning only calls ``on_exception``
+    hooks), so its compiled snapshot stays cached; validation sampling after more training must still
+    use the live weights."""
+    monkeypatch.setattr(torch, "compile", lambda module, **kwargs: module)  # the snapshot, uncompiled: fast
+    config = dict(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=3,
+        predict_method="sliding_window",
+        predict_overlap=[0, 0, 0],
+        predict_sampling_method="midpoint",
+        predict_compile=True,
+    )
+    model = DynacellFlowMatching(**config)
+
+    class _Fail(Callback):
+        def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+            raise RuntimeError("injected predict failure")
+
+    trainer = Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        callbacks=[_Fail()],
+    )
+    loader = torch.utils.data.DataLoader([{"source": torch.randn(1, 8, 32, 32)}], batch_size=1)
+    with pytest.raises(RuntimeError, match="injected predict failure"):
+        trainer.predict(model, dataloaders=loader)
+    assert model.model._compiled  # the failed run's snapshot is still cached
+    with torch.no_grad():
+        for param in model.model.net.parameters():
+            param.add_(0.01 * torch.randn_like(param))  # training moves the live weights on
+    live = DynacellFlowMatching(**config)
+    live.load_state_dict(model.state_dict())
+    phase = torch.randn(1, 1, 8, 32, 32)
+    torch.manual_seed(0)
+    sampled = model.model.generate(phase, num_steps=3, sampling_method="midpoint")
+    torch.manual_seed(0)
+    torch.testing.assert_close(sampled, live.model.generate(phase, num_steps=3, sampling_method="midpoint"))
 
 
 def test_flow_matching_compiled_predict_matches_eager_under_bf16():
@@ -476,7 +518,7 @@ def test_flow_matching_compiled_predict_matches_eager_under_bf16():
     eager = predict(False)
     compiled = predict(True)
     assert compiled_during_batch == [False, True]
-    assert not model.model._compiled and model.model.inference_net() is model.model.net
+    assert not model.model._compiled
     assert torch.isfinite(compiled).all()
     # Measured 0.0026, the same size as eager bf16 vs fp32 (0.0028); a wrong GroupNorm grouping is O(1).
     assert (compiled - eager).norm() / eager.norm() < 0.02
