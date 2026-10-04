@@ -1,9 +1,13 @@
 """Segmentation workflows for evaluation."""
 
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
 import torch
+from cubic import segmentation as _cubic_segmentation
+from cubic.cuda import ascupy, asnumpy
+from cubic.skimage import filters as _cubic_filters
 from omegaconf import OmegaConf
 
 try:
@@ -15,16 +19,9 @@ except ImportError:
 try:
     from aicssegmentation.structure_wrapper.seg_lamp1 import Workflow_lamp1
     from aicssegmentation.structure_wrapper.seg_npm1 import Workflow_npm1
-    from aicssegmentation.structure_wrapper.seg_sec61b import Workflow_sec61b
-    from aicssegmentation.structure_wrapper.seg_tomm20 import Workflow_tomm20
 except ImportError:
     Workflow_npm1 = None  # type: ignore[assignment, misc]
     Workflow_lamp1 = None  # type: ignore[assignment, misc]
-    Workflow_sec61b = None  # type: ignore[assignment, misc]
-    Workflow_tomm20 = None  # type: ignore[assignment, misc]
-
-from cubic.cuda import ascupy, asnumpy
-from cubic.skimage import filters as _cubic_filters
 
 from dynacell.evaluation.segmentation_cellpose import load_cellpose_model, segment_nucleus
 
@@ -45,6 +42,19 @@ area; A549 is unaffected (already clean intensity statistics). Membrane
 + ER + mitochondria are not smoothed because their backends either
 saturate (DL CAAX) or have their own internal preprocessing (classical
 aicssegmentation workflows)."""
+
+_CUBIC_WORKFLOWS = {"er": "workflow_sec61b", "mitochondria": "workflow_tomm20"}
+
+
+def require_cubic_workflows(target_name: str) -> None:
+    """Require the cubic workflow used by this target before loading models or data."""
+    name = _CUBIC_WORKFLOWS.get(target_name)
+    if name is not None and not hasattr(_cubic_segmentation, name):
+        raise RuntimeError(
+            f"target {target_name!r} requires cubic.segmentation.{name}, which cubic "
+            f"{version('cubic')} does not provide. Use the evaluation environment "
+            "pinned in pyproject.toml (DYNACELL_EVAL_VENV / UV_PROJECT_ENVIRONMENT)."
+        )
 
 
 def _require_segmenter_model_zoo():
@@ -76,7 +86,7 @@ def _smooth_nucleus_input(img, sigma: float = NUCLEUS_GAUSSIAN_SIGMA):
     return asnumpy(smoothed)
 
 
-def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spacing_zyx=None):
+def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spacing_zyx=None, use_gpu=True):
     """Run the organelle-specific segmentation workflow on a single z-stack.
 
     Parameters
@@ -95,6 +105,10 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
         Ignored for classical (ER/mito/nucleoli/lysosomes) targets.
     spacing_zyx :
         Physical voxel size ``(z, y, x)`` µm; required for ``backend="cellpose"``.
+    use_gpu : bool
+        Transfer ER/mitochondria inputs to cubic's GPU backend when CUDA is
+        available. False, or no visible GPU, keeps these workflows on CPU, whose
+        masks match the GPU path. Outputs are always NumPy boolean masks.
 
     Returns
     -------
@@ -127,7 +141,12 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
             img = _smooth_nucleus_input(img)
         mask = seg_model.apply_on_single_zstack(img[None, ...])
 
-    elif target_name in ("nucleoli", "lysosomes", "er", "mitochondria"):
+    elif target_name in _CUBIC_WORKFLOWS:
+        require_cubic_workflows(target_name)
+        workflow = getattr(_cubic_segmentation, _CUBIC_WORKFLOWS[target_name])
+        img_dev = ascupy(img) if use_gpu and torch.cuda.is_available() else img
+        mask = asnumpy(workflow(img_dev))
+    elif target_name in ("nucleoli", "lysosomes"):
         _require_aicssegmentation()
         # The aicssegmentation workflows normalize their input IN PLACE (intensity_normalization
         # clips to [m - a*s, m + b*s]). Callers pass views of the GT / prediction volumes they go
@@ -136,8 +155,6 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
         workflow = {
             "nucleoli": Workflow_npm1,
             "lysosomes": Workflow_lamp1,
-            "er": Workflow_sec61b,
-            "mitochondria": Workflow_tomm20,
         }[target_name]
         mask = workflow(img, output_type="array")
     else:

@@ -79,6 +79,10 @@ Select a group: `<group>=<option>` (no `+` — groups are declared `optional` in
 
 Override a checkpoint: `feature_extractor.dynaclr.checkpoint=/hpc/.../other.ckpt`. Disable a backbone: `feature_extractor/dinov3=null`. Enable feature metrics: `compute_feature_metrics=true` (also needs `io.cell_segmentation_path` non-null).
 
+### Foreground-limited pixel metrics
+
+`pixel_metrics.foreground.enabled=true` adds `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR` and `FG_frac` to `pixel_metrics.csv`, after the `SI_*` columns and before `Spectral_PCC`/FSC/`MicroMS3IM`/`PerCell_*`. They are the whole-image `PCC`/`SI_*` scored against a soft `[0, 1]` weight map built from the GT alone (`metrics.foreground_weight`: Gaussian smooth, then Otsu, then Gaussian feather), so every model is scored on the same region. The images are never zeroed or eroded, and SSIM uses normalized convolution. A unit weight reproduces the whole-image columns. Null sigmas take the per-target defaults in `metrics.FOREGROUND_SIGMAS_UM`. The recipe, `metrics.FOREGROUND_METRICS_VERSION` and the pixel spacing are stamped in `metrics_provenance.json`, so enabling it or changing any of them reruns the whole final-metrics pass instead of reusing a cache; disabling it reuses a cache scored with it. A (FOV, t) with no GT foreground scores NaN with `FG_frac` 0.
+
 ### External users (`--config-dir`)
 
 Wheel installs see only in-package groups. To evaluate your own predictions, point Hydra at your group files:

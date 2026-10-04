@@ -986,6 +986,7 @@ def _fov_masks(
                         seg_model=seg_model,
                         backend=ctx.backend,
                         spacing_zyx=tuple(ctx.spacing),
+                        use_gpu=ctx.use_gpu,
                     )
                 ).astype(bool)
                 for t in range(t_count)

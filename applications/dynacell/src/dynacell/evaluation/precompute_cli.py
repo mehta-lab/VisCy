@@ -42,6 +42,7 @@ from dynacell.evaluation.pipeline_cache import (
     fov_cpdino_whole_cell_instances,
     fov_masks,
 )
+from dynacell.evaluation.segmentation import require_cubic_workflows
 from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
 from dynacell.evaluation.segmentation_whole_cell import slice_index
 
@@ -159,6 +160,8 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     apply_thread_budget(runtime.threads_per_worker)
 
     build = config.build
+    if build.masks:
+        require_cubic_workflows(config.target_name)
     build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino or build.morphem)
 
     if build_any_features and config.io.cell_segmentation_path is None:
