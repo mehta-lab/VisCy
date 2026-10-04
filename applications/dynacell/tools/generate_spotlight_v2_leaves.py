@@ -29,8 +29,9 @@ Arms (``<baseline>_<suffix>``):
   its selectable checkpoints at ep <= 25 of 40, while its S arm will have all 40).
   Each model's ``_segaux`` arm is generated from the same baseline leaf in the same
   pass, so the arm and its v2 control share one recipe by construction. Also
-  ``fnet3d_vscyto3daug`` (Phase 15 Arm B, nucleus only): vanilla FNet fails out of
-  domain, so the FNet verdict on A549 rests on this recipe, retrained on today's code.
+  ``fnet3d_vscyto3daug`` (Phase 15 Arm B; nucleus, then ER and mito for the topology
+  arms below): vanilla FNet fails out of domain, so the FNet verdict on A549 rests on
+  this recipe, retrained on today's code.
 - UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
@@ -56,10 +57,12 @@ Arms (``<baseline>_<suffix>``):
   from the same-dim FNet ``_segaux`` store of the same test leg via
   ``CondMaskSource`` (``Nuclei_prediction``, thresholded per window at Otsu) and
   set no ``fg_mask_key``.
-- ``segaux_sauna`` / ``segaux_cldice`` -- Stage 2 #5 on ``fnet3d_vscyto3daug`` nucleus: the
-  ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice sums
-  weighted by the patch mask's SAUNA map, or mixed with soft-clDice. Each carries its own
-  calibrated ``seg_aux_weight``, since the change rescales the term's gradient.
+- ``segaux_sauna`` / ``segaux_cldice`` -- Stage 2 #5 on ``fnet3d_vscyto3daug`` nucleus, ER
+  and mito: the ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice
+  sums weighted by the patch mask's SAUNA map, or mixed with soft-clDice. Each carries its
+  own calibrated ``seg_aux_weight``, since the change rescales the term's gradient. The ER
+  and mito arms (and their ``segaux`` arm) train on masks from the eval's classical
+  binarizer, written by ``write_classical_fg_masks.py``.
 
 Leaves are emitted with ``yaml.safe_dump``, so they carry no inline comments: the
 recipe rationale stays in the baseline leaf each header names, and the reasons for
