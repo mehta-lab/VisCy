@@ -72,6 +72,11 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the pix2pix3d nucleus segaux arm (--ckpt last, EMA), 2026-10-03: all four legs.
+  # Gates the membrane pix2pix3d segaux_seed1 fit. Generate with --wave wave2p.
+  wave2p:
+    nucleus:
+      - pix2pix3d_unetvit_segaux_seed1
   # Second draw of the UNeXt2-3D MEMBRANE segaux arm (--ckpt best epoch 164), 2026-10-02: all four legs.
   # Generate with --wave wave2o.
   wave2o:
