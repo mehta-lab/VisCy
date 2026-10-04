@@ -255,7 +255,7 @@ def test_squared_edt_capped_is_exact_below_the_cap(max_distance):
 
 @pytest.mark.parametrize("shape", [(2, 1, 5, 20, 20), (2, 1, 1, 20, 20), (2, 1, 24, 20)], ids=["3d", "3d-z1", "2d"])
 def test_soft_skeleton_matches_official_values_and_gradients(shape):
-    """Shifted-slice morphology + checkpointing reproduce jocpae/clDice soft_skel."""
+    """Max-pool morphology (F.max_pool{1,2,3}d) + checkpointing reproduce jocpae/clDice soft_skel."""
     img = torch.rand(shape, generator=torch.Generator().manual_seed(8))
     weights = torch.rand(img.shape, generator=torch.Generator().manual_seed(9))
     a = img.clone().requires_grad_(True)
