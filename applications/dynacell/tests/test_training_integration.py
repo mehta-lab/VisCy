@@ -498,6 +498,36 @@ def test_unet_seg_aux_fast_dev_run(tmp_path, tiny_hcs_zarr, case):
     assert 0.0 < metrics["loss/dice_train"] <= 1.0
 
 
+SEG_AUX_EXTENSIONS = {
+    "sauna": {"weighting": "sauna", "spacing": (0.29, 0.108, 0.108)},
+    "cldice": {"topology": "cldice", "cldice_alpha": 0.5, "cldice_iters": 3},
+    "sauna+cldice": {"weighting": "sauna", "spacing": (0.29, 0.108, 0.108), "topology": "cldice"},
+}
+
+
+@pytest.mark.parametrize("extension", list(SEG_AUX_EXTENSIONS))
+@pytest.mark.parametrize("case", ["fnet3d", "fnet2d"])
+def test_unet_seg_aux_extensions_fast_dev_run(tmp_path, tiny_hcs_zarr, case, extension):
+    """SAUNA weighting and clDice train through the same seg_aux path, in 3D and Z=1."""
+    architecture, model_config, z_window_size = SEG_AUX_UNET_CASES[case]
+    generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"])
+    seed_everything(42)
+    module = DynacellUNet(
+        architecture=architecture,
+        model_config=model_config,
+        loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.5, ms_dssim_alpha=0.0),
+        seg_aux=SegAuxDice(c=0.1, **SEG_AUX_EXTENSIONS[extension]),
+        seg_aux_weight=0.5,
+        log_batches_per_epoch=1,
+    )
+    trainer = _cpu_trainer(tmp_path, fast_dev_run=True)
+    trainer.fit(module, datamodule=_masked_datamodule(tiny_hcs_zarr, z_window_size))
+    assert trainer.state.status == "finished"
+    metrics = trainer.callback_metrics
+    _assert_finite_metrics(metrics, ["loss/train", "loss/dice_train", "loss/validate", "loss/validate_dice"])
+    assert metrics["loss/dice_n_valid_train"] > 0
+
+
 def test_unet_seg_aux_none_is_bit_identical_to_the_base_path(tiny_hcs_zarr):
     """seg_aux=None leaves both the plain-MSE and the v1 SpotlightLoss paths
     computing exactly what they compute without the new arguments."""
