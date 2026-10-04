@@ -95,6 +95,19 @@ def test_rejects_an_out_of_range_shard(tmp_path: Path, shard: str) -> None:
         assert not any("fg_mask" in pos for _, pos in plate.positions())
 
 
+def test_dry_run_reports_on_a_store_that_already_has_masks(tmp_path: Path) -> None:
+    """A dry run segments and reports without tripping the overwrite guard or writing."""
+    store = tmp_path / "tiny.zarr"
+    _make_store(store)
+    assert main([str(store), "--target-name", "er"]) == 0
+    with open_ome_zarr(store, mode="r") as plate:
+        before = {name: pos["fg_mask"][:] for name, pos in plate.positions()}
+    assert main([str(store), "--target-name", "er", "--dry-run"]) == 0
+    with open_ome_zarr(store, mode="r") as plate:
+        for name, pos in plate.positions():
+            np.testing.assert_array_equal(pos["fg_mask"][:], before[name])
+
+
 def test_refuses_to_overwrite_an_existing_mask(tmp_path: Path) -> None:
     """A second run raises before touching the masks the first run wrote."""
     store = tmp_path / "tiny.zarr"

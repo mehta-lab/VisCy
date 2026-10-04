@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         ch_idx = plate.channel_names.index(args.channel)
         positions = list(plate.positions())[i::n]
         for k, (pos_name, pos) in enumerate(positions):
-            if args.fg_mask_key in pos:
+            if not args.dry_run and args.fg_mask_key in pos:
                 raise FileExistsError(f"'{args.fg_mask_key}' already exists at {pos_name}")
             img = pos["0"]
             t_total, c_total, *zyx = img.shape
