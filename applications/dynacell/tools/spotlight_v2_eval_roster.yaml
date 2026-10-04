@@ -72,6 +72,20 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # 2026-10-04, all four legs, --ckpt best:
+  # - the FNet-3D vscyto3daug nucleus 2x2 (big patch + VSCyto3D augs, the OOD-competent FNet:
+  #   {v2, segaux} x {seed 0, seed 1});
+  # - the second draw of the fresh UNeXt2-3D baselines (the seed floor for their segaux arms).
+  # Generate with --wave wave2q.
+  wave2q:
+    nucleus:
+      - fnet3d_vscyto3daug_v2
+      - fnet3d_vscyto3daug_v2_seed1
+      - fnet3d_vscyto3daug_segaux
+      - fnet3d_vscyto3daug_segaux_seed1
+      - fcmae_vscyto3d_scratch_v2_seed1
+    membrane:
+      - fcmae_vscyto3d_scratch_v2_seed1
   # Second draw of the pix2pix3d nucleus segaux arm (--ckpt last, EMA), 2026-10-03: all four legs.
   # Gates the membrane pix2pix3d segaux_seed1 fit. Generate with --wave wave2p.
   wave2p:
