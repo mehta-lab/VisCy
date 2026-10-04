@@ -62,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="Segment and report; write nothing.")
     args = ap.parse_args(argv)
     i, n = (int(v) for v in args.shard.split("/"))
+    if n <= 0 or not 0 <= i < n:
+        raise ValueError(f"--shard {args.shard!r}: need 0 <= i < n")
     provenance = {
         "writer": WRITER,
         "binarizer": BINARIZER,

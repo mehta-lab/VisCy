@@ -84,6 +84,17 @@ def test_records_provenance_on_every_array(tmp_path: Path) -> None:
     assert provenance == [want] * len(_POSITIONS)
 
 
+@pytest.mark.parametrize("shard", ["2/2", "-1/2", "0/0"])
+def test_rejects_an_out_of_range_shard(tmp_path: Path, shard: str) -> None:
+    """A shard outside ``0 <= i < n`` raises instead of silently writing a partial store."""
+    store = tmp_path / "tiny.zarr"
+    _make_store(store)
+    with pytest.raises(ValueError, match="need 0 <= i < n"):
+        main([str(store), "--target-name", "er", f"--shard={shard}"])
+    with open_ome_zarr(store, mode="r") as plate:
+        assert not any("fg_mask" in pos for _, pos in plate.positions())
+
+
 def test_refuses_to_overwrite_an_existing_mask(tmp_path: Path) -> None:
     """A second run raises before touching the masks the first run wrote."""
     store = tmp_path / "tiny.zarr"
