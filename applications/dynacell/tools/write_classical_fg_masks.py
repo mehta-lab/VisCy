@@ -5,9 +5,10 @@ This wrote the ``fg_mask`` arrays in the iPSC training stores
 (423 positions, 2026-10-01) and ``.../train/TOMM20.zarr`` (500 positions,
 2026-10-01/02), which the ER and mito Spotlight-v2 arms
 (``generate_spotlight_v2_leaves.py``, ``fg_mask_key: fg_mask``) train on. That
-run predates the provenance attributes below, so those arrays carry none, and
-it used ``segment`` as it stood before #519 moved its ER/mito path from
-aicssegmentation to cubic.
+run predates the provenance attributes below, so those arrays carry none. Its
+environment was not recorded either: it finished before #519 moved
+``segment``'s ER/mito path from aicssegmentation to cubic, so it most likely
+used aicssegmentation, but that is inferred from timing, not recorded.
 
 Same array layout as ``viscy_utils.meta_utils.generate_fg_masks`` (uint8,
 ``(T, C, Z, Y, X)``, source chunking capped at 512, non-target channels filled
