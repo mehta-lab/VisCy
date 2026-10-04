@@ -224,6 +224,10 @@ def sauna_weight_map(mask: Tensor, spacing: Sequence[float]) -> Tensor:
 
     Rows with no foreground or no background get weight 1.
 
+    Using ``|y~|`` as a Dice weight is this package's adaptation of the map,
+    not part of SAUNA, which regresses a tanh head toward the signed ``y~``
+    (see :func:`sauna_signed_map`).
+
     Parameters
     ----------
     mask : Tensor
