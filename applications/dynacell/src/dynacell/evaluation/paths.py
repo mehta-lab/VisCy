@@ -605,22 +605,6 @@ def paper_key(code_model: str) -> str:
     return PAPER_KEY[code_model]
 
 
-def eval_predict_set_group(dataset_name: str) -> str:
-    """Return the eval-side Hydra ``predict_set`` group name for one leaf.
-
-    iPSC composes back to itself; A549 leaves carry the per-condition dataset slug
-    ``a549-mantis-<marker>-<cond>`` and the group name uses underscores.
-    """
-    if dataset_name == "aics-hipsc":
-        return "ipsc_confocal"
-    if dataset_name.startswith("a549-mantis-"):
-        return "a549_mantis_" + dataset_name.removeprefix("a549-mantis-").replace("-", "_")
-    raise ValueError(
-        f"cannot map dataset {dataset_name!r} to a predict_set group; "
-        f"expected 'aics-hipsc' or 'a549-mantis-<marker>-<cond>'"
-    )
-
-
 def extract_predict_output_store(composed: dict, leaf_path: Path) -> Path:
     """Pull ``HCSPredictionWriter.init_args.output_store`` from a composed predict config."""
     callbacks = composed.get("trainer", {}).get("callbacks", [])
