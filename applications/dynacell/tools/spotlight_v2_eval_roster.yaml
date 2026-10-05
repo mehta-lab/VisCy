@@ -72,6 +72,19 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Checkpoint-stage control for the FNet-3D vscyto3daug nucleus floor (2026-10-05): v2_seed1
+  # re-predicted from epoch=74-step=195000 (its --ckpt best is epoch=17; v2 used epoch=64 and
+  # the arms 127k-190k steps). Stores and leaves are outside the generated tree
+  # (experiments/2026-09-24_spotlight-v2/e74_control/). Read against the wave2q 2x2.
+  # Generate with --wave ctrl2.
+  ctrl2:
+    nucleus:
+      - model: fnet3d_vscyto3daug_v2_seed1_e74
+        pred_paths:
+          ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/ipsc/prediction.zarr
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/a549__zikv/prediction.zarr
   # FNet-3D vscyto3daug mito v2 baseline, seed 1 (fit 36890546 resumed as 37004479 after a
   # NODE_FAIL requeue, max_steps 200000, --ckpt best epoch 65), 2026-10-05: all four legs. Gives
   # the mito baseline seed floor next to wave2s's seed 0; cubic 0.9.0a4 eval venv. Generate with
