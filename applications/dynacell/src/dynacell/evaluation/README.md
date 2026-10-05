@@ -8,7 +8,9 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 |---|---|
 | `pipeline.py` | Hydra orchestrator. CLIs: `dynacell evaluate` (single-condition) and `dynacell evaluate-grouped` (one model load, N I/O conditions). |
 | `metrics.py` | Pixel, mask, and feature metrics (CP regionprops + DINOv3 + DynaCLR + CELL-DINO), computed symmetrically for GT/predictions and combined pairwise. |
-| `segmentation.py` | `aicssegmentation` workflows + SuperModel for `nucleus`/`membrane`. |
+| `segmentation.py` | Binary-mask workflows: cubic's Allen Segmenter ports for `er`/`mitochondria`, `aicssegmentation` for `nucleoli`/`lysosomes`, SuperModel for `nucleus`/`membrane`. See [Segmentation](#segmentation). |
+| `segmentation_cpdino.py` | Cellpose-DINO instance segmentation for `nucleus` and whole-cell `membrane`, the backend the benchmark leaves use. |
+| `segmentation_cellpose.py`, `segmentation_whole_cell.py` | Alternative instance backends: Cellpose-SAM nuclei, and nuclei seeds + EDT watershed for whole cells. |
 | `cache.py`, `pipeline_cache.py` | Artifact cache: on-disk layout, manifest, identity check, per-FOV load-or-compute wrappers, batched `precompute_deep_features`. |
 | `model_loader.py` | Shared `load_eval_models(config, flags=...)` returning an `EvalModels` bundle. Used by both `evaluate` and `precompute-gt`. |
 | `runtime.py` | BLAS/OMP thread caps, `ProcessPoolExecutor` worker initializer, `gpu_serialization_lock`, region timers. |
@@ -69,9 +71,32 @@ Select a group: `<group>=<option>` (no `+` — groups are declared `optional` in
 
 `io.*` and `pixel_metrics.spacing` resolve from the dataset manifest (`dynacell/data/manifests.py`) via a post-compose hook in `_ref_hook.py`. `pred_channel_name` is derived as `{target_channel}_prediction`.
 
-`target_name` ∈ {`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`} selects the segmentation workflow. The first four map 1:1 with a `target` group; `nucleoli`/`lysosomes` have no ready-made group — set `target_name=…` directly.
+`target_name` ∈ {`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`} selects the segmentation workflow (see [Segmentation](#segmentation)). Four of them have a `target` group (`nucleus`, `membrane`, `er_sec61b`, `mito_tomm20`); `nucleoli`/`lysosomes` have none — set `target_name=…` directly.
 
 **Group sources**: in-package groups ship in the wheel (schema + path-free reference values). Repo-checkout groups under `configs/benchmarks/virtual_staining/_internal/` are discovered via two `hydra.searchpath` roots that `dynacell.__main__` injects on a repo checkout. Hydra only resolves `.yaml` for group lookup, so eval groups + leaves use `.yaml` (Lightning train/predict leaves stay `.yml`).
+
+### Segmentation
+
+GT and prediction go through the same workflow, so the mask metrics compare like with like. `target_name` picks the workflow, and the `segmentation:` block of `_configs/eval.yaml` holds its settings.
+
+| Target | Segmenter | Geometry | Mask metrics |
+|---|---|---|---|
+| `nucleus` | Cellpose-DINO ViT-L (`cpdino`) on the nucleus channel | 2-D: the in-focus plane, max-projected over ±1 plane | instance Dice, AP over IoU 0.50–0.95, mAP, plus semantic Dice/IoU/precision/recall/accuracy from `labels > 0` |
+| `membrane` | `cpdino` whole cells from the membrane channel, with the GT nucleus footprint carved out | the same 2-D slab | the same, scored on the cytoplasmic shell |
+| `er`, `mitochondria` | Allen Cell Structure Segmenter SEC61B / TOMM20 classic workflows, ported to cubic (`cubic.segmentation.workflow_sec61b` / `workflow_tomm20`) | 3-D, the full stack of each timepoint | semantic Dice/IoU/precision/recall/accuracy |
+| `nucleoli`, `lysosomes` | `aicssegmentation` NPM1 / LAMP1 workflows, CPU | 3-D | semantic |
+
+**The defaults are not the benchmark settings.** `eval.yaml` defaults to `segmentation.backend: supermodel` and `compute_instance_ap: false`: 3-D binary nucleus/membrane masks from segmenter-model-zoo. The benchmark nucleus/membrane leaves set `segmentation.backend: cpdino` and `compute_instance_ap: true`. A config that sets neither scores SuperModel masks with no instance metrics, so read the resolved config before comparing numbers across runs.
+
+**Plane selection (nucleus, membrane).** With `segmentation.dimension: 2d` (the default) and `slice_selection: focus`, the anchor `focus_anchor: nucleus_area` picks, per FOV and timepoint, the z-plane where the GT nucleus channel has the largest Otsu foreground area. `focus_slab_halfwidth: 1` then max-projects that plane with one neighbour on each side. GT, prediction and the nucleus carve seeds all use the same plane. `dimension: 3d` runs cpdino's full-volume `do_3D` path instead; no benchmark leaf uses it. Only the masks are 2-D: pixel metrics are always computed on the full 3-D arrays.
+
+**cpdino preprocessing** reproduces how the model was validated: the raw slice goes to cellpose with `normalize: true` (its own 1st/99th-percentile stretch), with no CLAHE and no downscaling, and `min_size: 15`. Inference runs on the GPU through `cubic.segmentation.segment_cellpose` and needs cellpose ≥ 4.2, so run it in the cpdino eval environment rather than the shared `.venv`. Cellpose runs in bf16, so masks can differ slightly between GPU types. Whole-cell `membrane` also needs `segmentation.nuclei_channel_name` for the carve; set `io.nuclei_gt_path` when the GT nuclei live in a separate store (A549: membrane in `CAAX_*.ozx`, nuclei in `H2B_*.ozx`).
+
+**ER and mitochondria workflows are 3-D only.** They take a `(Z, Y, X)` stack and reject 2-D input. As in the original Allen Segmenter, the filament (vesselness) filter runs on each z-plane, while intensity normalization, smoothing and the size filters act on the whole volume. The cubic ports run on NumPy or CuPy; they are GPU-backed when `use_gpu` is set and CUDA is available. Their module docstring (`cubic/segmentation/aics_workflows.py`) records the bitwise comparison against `aicssegmentation`, and its one known exception: on AVX-512 CPUs the reference, and cubic's CPU path, move 1–3 voxels per volume. `require_cubic_workflows` fails an ER/mito eval up front if the installed cubic predates these workflows.
+
+**Other instance backends**, kept for comparison: `cellpose` (Cellpose-SAM nuclei, `nucleus` only) and `cellpose_watershed` (Cellpose-SAM nucleus seeds + EDT watershed whole cells, `membrane` only, settings under `segmentation.watershed`). `_validate_instance_ap_config` rejects any other backend/target pairing.
+
+**Cell masks for feature metrics are a separate input.** `io.cell_segmentation_path` supplies the per-cell regions for CP and deep-feature metrics; they are not derived from the masks above. The A549 stores are built by `tools/build_cpdino_seg_cleaned.py`: cpdino whole cells on the max-Z projection of the VSCyto3D membrane prediction, repeated across Z.
 
 ### Feature metrics
 
