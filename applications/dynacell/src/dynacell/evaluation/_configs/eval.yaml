@@ -48,7 +48,7 @@ segmentation:
   focus_anchor: nucleus_area
   focus_slab_halfwidth: 1
   focus_channel_name: Phase3D
-  nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
+  nuclei_channel_name: null  # GT nucleus channel; required for membrane with cpdino (nucleus carve) or cellpose_watershed (seeds)
   # Cellpose-DINO (cpdino) params — the recommended instance backend for both nucleus
   # (direct) and whole-cell (membrane + nucleus carve). Faithful to the cpv4 validation:
   # the raw in-focus slice is passed to cellpose with normalize=true (its own percentile
@@ -98,7 +98,7 @@ io:
                           # pred_channel_name -> source_channel; pred_path defaults to the
                           # GT store (source + target share one store), so positions match.
   gt_channel_name: ???    # e.g. Structure / Membrane / Nuclei
-  nuclei_gt_path: null  # cellpose_watershed only: store holding the GT nuclei seed channel
+  nuclei_gt_path: null  # membrane with cpdino or cellpose_watershed: store holding the GT nuclei channel
                         # (segmentation.nuclei_channel_name). null = read from gt_path (iPSC
                         # cell.zarr). Set to a separate store when GT nuclei live apart from the
                         # GT membrane (A549: membrane in CAAX_*.ozx, nuclei in H2B_*.ozx);
