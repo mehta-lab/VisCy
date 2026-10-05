@@ -2270,10 +2270,38 @@ def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConf
     """
     base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
     merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
-    for key in ("conditions", "name"):
+    for key in ("conditions", "only_conditions", "name"):
         if key in merged:
             del merged[key]
     return merged  # type: ignore[return-value]
+
+
+def _condition_name(cond, idx: int) -> str:
+    """Label of one ``conditions`` entry: its ``name``, else its index in the leaf."""
+    if isinstance(cond, dict):
+        return str(cond.get("name", idx))
+    return str(OmegaConf.select(cond, "name", default=idx))
+
+
+def _select_conditions(conditions, only) -> list[tuple[str, object]]:
+    """Return ``(name, condition)`` pairs, restricted to ``only`` when it is set.
+
+    ``only`` is the ``only_conditions`` list. Conditions keep their leaf order, and
+    names keep their leaf index, so filtering never relabels a condition. An empty list
+    or a name the leaf does not define raises.
+    """
+    named = [(_condition_name(cond, idx), cond) for idx, cond in enumerate(conditions)]
+    if only is None:
+        return named
+    wanted = {str(name) for name in only}
+    available = [name for name, _ in named]
+    unknown = sorted(wanted - set(available))
+    if not wanted or unknown:
+        raise ValueError(
+            f"only_conditions={sorted(wanted)!r} must name at least one condition of this leaf; "
+            f"unknown: {unknown!r}; available: {available!r}"
+        )
+    return [(name, cond) for name, cond in named if name in wanted]
 
 
 def _check_grouped_field_invariants(
@@ -2344,13 +2372,15 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     ----------
     config : DictConfig
         Eval config with an extra top-level ``conditions: [...]`` list.
-        Each entry is a dict-like overlay applied to the base.
+        Each entry is a dict-like overlay applied to the base. An optional
+        ``only_conditions: [...]`` list of names restricts the run to those
+        conditions.
 
     Returns
     -------
     list[tuple[str, tuple]]
         ``[(condition_name, (pixel_rows, mask_rows, feature_rows)), ...]``
-        in input order. ``condition_name`` is taken from the entry's
+        for the evaluated conditions, in input order. ``condition_name`` is taken from the entry's
         ``name`` field, falling back to its index as a string.
 
     Notes
@@ -2363,10 +2393,11 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     conditions = OmegaConf.select(config, "conditions", default=None)
     if not conditions:
         raise ValueError("evaluate_predictions_grouped requires a non-empty top-level 'conditions' list")
+    selected = _select_conditions(conditions, OmegaConf.select(config, "only_conditions", default=None))
 
     executor = OmegaConf.select(config, "runtime.executor", default="serial")
     require_complete = bool(OmegaConf.select(config, "io.require_complete_cache", default=False))
-    n_conditions = len(conditions)
+    n_conditions = len(selected)
     if executor == "process" and n_conditions > 1:
         if require_complete:
             # Cache-only path: workers still re-init per condition (pool spawn +
@@ -2404,8 +2435,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # to escape Hydra's struct-mode flag — ``del`` on a struct DictConfig
     # raises ``ConfigTypeError``.
     models_base = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
-    if "conditions" in models_base:
-        del models_base["conditions"]
+    for key in ("conditions", "only_conditions"):
+        if key in models_base:
+            del models_base[key]
     base_snapshot = {
         field: _snapshot_field(models_base, field) for field in (*_MODEL_LOADING_FIELDS, *_GROUPED_SHARED_FIELDS)
     }
@@ -2416,23 +2448,20 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     def get_models() -> EvalModels:
         nonlocal models
         if models is None:
-            print(f"[grouped] loading shared models for {len(conditions)} conditions ...")
+            print(f"[grouped] loading shared models for {n_conditions} conditions ...")
             models = load_eval_models(models_base)
         return models
 
     results: list[tuple[str, tuple]] = []
     condition_save_dirs: list[Path] = []
-    for idx, cond in enumerate(conditions):
-        name = (
-            cond.get("name", str(idx)) if isinstance(cond, dict) else OmegaConf.select(cond, "name", default=str(idx))
-        )
+    for idx, (name, cond) in enumerate(selected):
         merged = _merge_condition(config, cond)
         apply_dataset_ref(merged)
         _check_grouped_field_invariants(base_snapshot, base_seg_required, merged, name)
-        print(f"[grouped] ({idx + 1}/{len(conditions)}) evaluating {name!r} → {merged.save.save_dir}")
+        print(f"[grouped] ({idx + 1}/{n_conditions}) evaluating {name!r} → {merged.save.save_dir}")
 
         if _final_metrics_cache_valid(merged):
-            print(f"[grouped] ({idx + 1}/{len(conditions)}) {name!r}: reusing cached final metrics")
+            print(f"[grouped] ({idx + 1}/{n_conditions}) {name!r}: reusing cached final metrics")
             pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
         else:
             cp_space = eval_cp_space(merged) if merged.compute_feature_metrics else None

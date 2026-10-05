@@ -380,3 +380,64 @@ def test_grouped_rejects_empty_conditions(tmp_path: Path):
     pipeline = live_pipeline_module()
     with pytest.raises(ValueError, match="non-empty"):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
+def test_grouped_only_conditions_runs_the_named_subset(tmp_path: Path):
+    """``only_conditions`` scores the named conditions and leaves the others untouched."""
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["only_conditions"] = ["cond_b"]
+    OmegaConf.set_struct(grouped_cfg, True)
+
+    pipeline = live_pipeline_module()
+    results = pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+    assert [name for name, _ in results] == ["cond_b"]
+    ((_, (pixel_b, _, _)),) = results
+    assert len(pixel_b) == N_POSITIONS * T
+    assert (save_root / "cond_b_grouped" / "pixel_metrics.csv").is_file()
+    assert not (save_root / "cond_a_grouped").exists()
+
+
+def test_grouped_only_conditions_keeps_index_names(tmp_path: Path):
+    """An unnamed condition is selected by its leaf index, and keeps that label."""
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    del grouped_cfg["conditions"][1]["name"]
+    grouped_cfg["only_conditions"] = ["1"]
+
+    pipeline = live_pipeline_module()
+    results = pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+    assert [name for name, _ in results] == ["1"]
+    assert (save_root / "cond_b_grouped" / "pixel_metrics.csv").is_file()
+    assert not (save_root / "cond_a_grouped").exists()
+
+
+@pytest.mark.parametrize("only", [["cond_c"], ["cond_a", "cond_c"], []])
+def test_grouped_only_conditions_rejects_unknown_or_empty(tmp_path: Path, only: list[str]):
+    """An unknown name or an empty selection raises before any condition is scored."""
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["only_conditions"] = only
+
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="only_conditions"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+    assert not (save_root / "cond_a_grouped").exists()
+    assert not (save_root / "cond_b_grouped").exists()
