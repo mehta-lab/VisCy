@@ -1,347 +1,352 @@
 # dynacell.evaluation
 
-End-to-end evaluation pipeline for virtual staining predictions against fluorescence ground truth.
+Scores virtual-staining predictions against fluorescence ground truth at three levels: pixel fidelity, segmentation, and single-cell phenotype features.
 
-## Components
+- [Pipeline](#pipeline)
+- [Running evaluations](#running-evaluations)
+- [Configuration](#configuration)
+- [Segmentation](#segmentation)
+- [Metrics](#metrics)
+- [Caches](#caches)
+- [Outputs](#outputs)
+- [Modules](#modules)
 
-| Module | Purpose |
-|---|---|
-| `pipeline.py` | Hydra orchestrator. CLIs: `dynacell evaluate` (single-condition) and `dynacell evaluate-grouped` (one model load, N I/O conditions). |
-| `metrics.py` | Pixel, mask, and feature metrics (CP regionprops + DINOv3 + DynaCLR + CELL-DINO), computed symmetrically for GT/predictions and combined pairwise. |
-| `segmentation.py` | Binary-mask workflows: cubic's Allen Segmenter ports for `er`/`mitochondria`, `aicssegmentation` for `nucleoli`/`lysosomes`, SuperModel for `nucleus`/`membrane`. See [Segmentation](#segmentation). |
-| `segmentation_cpdino.py` | Cellpose-DINO instance segmentation for `nucleus` and whole-cell `membrane`, the backend the benchmark leaves use. |
-| `segmentation_cellpose.py`, `segmentation_whole_cell.py` | Alternative instance backends: Cellpose-SAM nuclei, and nuclei seeds + EDT watershed for whole cells. |
-| `cache.py`, `pipeline_cache.py` | Artifact cache: on-disk layout, manifest, identity check, per-FOV load-or-compute wrappers, batched `precompute_deep_features`. |
-| `model_loader.py` | Shared `load_eval_models(config, flags=...)` returning an `EvalModels` bundle. Used by both `evaluate` and `precompute-gt`. |
-| `runtime.py` | BLAS/OMP thread caps, `ProcessPoolExecutor` worker initializer, `gpu_serialization_lock`, region timers. |
-| `precompute_cli.py` | `dynacell precompute-gt` — fills the GT cache without running the eval loop. |
-| `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, `CellDinoFeatureExtractor`, plot helpers. |
-| `_configs/*.yaml` | Hydra schemas: `eval.yaml`, `precompute.yaml`, `eval_grouped.yaml`. |
+## Pipeline
 
-`paths.py` is the canonical artifact-path grammar (checkpoints, prediction stores, eval leaves); `spectral_pcc/` holds bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are backed by `cubic.metrics`.
+`dynacell evaluate` runs these steps for one prediction store:
 
-## Inputs
+1. **Check saved metrics.** If `save.save_dir` already holds metrics that are still valid (see [Reusing saved metrics](#reusing-saved-metrics)), load them and stop.
+2. **Compose and validate the config.** Fields under `benchmark.dataset_ref` are resolved from the dataset manifest. The installed cubic version and the segmentation backend/target pairing are checked, and so is the CP reference when feature metrics are on.
+3. **Load models**: the segmenter, plus the feature extractors when `compute_feature_metrics=true`.
+4. **Open stores** (prediction, GT, cell segmentation, optional separate nuclei store) and reconcile positions. Every store must hold the same positions with the same number of timepoints.
+5. **Precompute deep features** for both sides in batches, unless the cache already holds them.
+6. **For each FOV and timepoint:**
+   1. compute pixel metrics on the full volume;
+   2. segment GT and prediction, then compute mask metrics;
+   3. extract per-cell features and score each GT/prediction pair.
+7. **Dataset-level feature metrics**: distribution distances (KID, FID, precision/recall, MIND), median cosine, and a real-vs-predicted linear probe, per feature space.
+8. **Save** CSV/NPY tables, plots, single-cell embeddings, the segmentation plate and `metrics_provenance.json`.
 
-- `io.pred_path` — model predictions, HCS OME-Zarr (channel: `io.pred_channel_name`)
-- `io.gt_path` — fluorescence ground truth (channel: `io.gt_channel_name`)
-- `io.cell_segmentation_path` — *optional* precomputed cell segmentation HCS OME-Zarr. Required when `compute_feature_metrics=true` or when building CP/DINOv3/DynaCLR/CELL-DINO cache entries. Position layout must match GT/pred 1:1.
-- `io.gt_cache_dir`, `io.pred_cache_dir` — *optional* artifact cache directories; must be distinct. See [Caches](#caches).
-- `feature_metrics.cp.reference_path` — the target's CP (GLCM+) reference, required when `compute_feature_metrics=true`. `null` (default) resolves to `DATA_ROOT/cp_reference/<target_name>.json` for full and lite evals alike. The reference holds one feature mask chosen on GT cells only, pooled over iPSC + A549 mock/denv/zikv, and one GT mean/std per test set (keyed by `benchmark.dataset_ref.dataset`; HEK gets its own, lite reuses its parent's). Every eval applies the mask and its dataset's scaler to pred AND GT. The eval refuses a partial position walk, and refuses to score unless its staged GT CP cells match the reference's fit for that dataset: the same GT-finite cell count exactly, and every CP feature's raw GT mean/std within a relative tolerance of 1e-6 (`GT_MOMENT_RTOL`). A re-cache that reproduces the cells passes, including a GPU recompute (reproducible only to ~1e-15) and a CPU-vs-GPU recompute (up to ~4e-8, measured). It is a moments gate, not a content hash: a change that moves any feature's GT mean/std by more than the tolerance fails, but permuting values within a column, moving cells between blocks, or a single-cell change below about n × 1e-6 std passes. When the GT CP cache is already complete, the check also runs before the FOV loop. Build the reference from existing GT caches with `tools/build_cp_reference.py --target <target>`; `--verify` re-applies the same check to the current caches. `metrics_provenance.json` stamps the per-dataset `cp_space_sha256`: the mask, feature names, recipe, and that dataset's scaler, recorded GT position set, GT cell count and GT moments. A rebuild therefore invalidates only the eval dirs whose own dataset's CP space changed; adding or refitting another dataset leaves them reusable. The `cp_selected_feature_mask.json` sidecar records the same per-dataset hash. Before KID/FID/cosine, the shared-space z is clipped to ±`z_clip` (`CP_Z_CLIP` = 20) on both sides, at dataset level and per row, so one heavy-tailed predicted feature cannot set the cubic KID kernel's magnitude. The clip may touch at most `CP_GT_CLIP_FRAC_MAX` = 1e-3 of each FULL test set's GT cells (any |z| > 20 in its own scaler); lite test sets record the same fraction but are not held to the bound (see below). Measured on the registry's full test sets, the GT max |z| is 26.55 (er / a549-mantis-sec61b-denv / kurtosis), 2 of 23,970 distinct GT cells exceed 20, and the highest enforced per-dataset fraction is 5.3e-4 (er a549-mantis-sec61b-denv and -mock, one cell each). The unenforced lite record reaches 9.5e-4 (a549-mantis-sec61b-denv-lite, the same denv cell in a smaller set). The builder re-checks the bound on every build and refuses to build a reference that violates it. Lite datasets are exempt (their fraction is recorded with `enforced: false`): their GT cells are a subset of the parent's, scored in the parent's scaler, so the lite fraction is small-sample noise on the parent's, which is enforced. c = 20 comes from an offline sweep over c ∈ {5, 8, 10, 15, 20, 30, 50, none} on the nucleus-lite pilot: the in-domain model order was the same at every c except one near-tie (zikv at c = 8), and the cross-domain model order was identical for all c ≥ 20. Caveat: the cubic KID kernel keeps growing with c, so cross-domain CP KID magnitudes are not comparable to in-domain ones; only orderings are meaningful. What the clip discards is reported: `Dataset_CP_clip_frac` and the per-row `CP_clip_frac` give the fraction of pred cells with any kept feature beyond the clip, and the sidecar's `clip` block gives the same per feature. The linear probe still uses the masked, unscaled features.
-  - GLCM+ (CP) space in two lines: one feature mask selected on GT cells only, pooled over the target's iPSC + A549 mock/denv/zikv test sets; then each test set's own GT mean/std standardizes pred and GT alike, so offsets and scale errors relative to that test set's GT stay visible.
-  - GLCM+ median cosine is invariant to contraction toward the GT mean: for `pred = mean + 0.5·(GT − mean)`, every pred/GT cell pair is parallel after the shared scaler and the median cosine is exactly 1.0000, while KID catches it (reviewer-measured on real cells: KID 0.194 vs a pred==GT floor of −0.041; reproduced on synthetic cells in `cp_reference_test.py`). Cosine measures direction only; over-smoothing toward the mean shows up in KID, not cosine.
+`dynacell evaluate-grouped` loads the models once and runs steps 1, 2 and 4–8 for every entry in `conditions`. It then runs a cross-condition probe for each model group whose save directories include `__mock` plus `__denv` and/or `__zikv`. The probe classifies infected against mock cells and writes `cross_condition_probe.csv` into each infected condition's directory.
 
-## Quick start
+## Running evaluations
+
+### Environment
 
 ```bash
-uv run dynacell evaluate \
-  target=er_sec61b \
-  predict_set=ipsc_confocal \
-  io.pred_path=/hpc/.../fnet3d_sec61b.zarr \
-  save.save_dir=/hpc/.../eval_fnet3d_sec61b
+uv pip install -e "applications/dynacell[eval]"   # add [eval_gpu] for the CUDA cupy/cuCIM stack
 ```
 
-Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N compute_feature_metrics=false`: CP feature metrics are scored in a reference fit on the full GT cell set, so a partial position walk with feature metrics on raises.
+`[eval]` pins `cubic` (currently `v0.9.0a4`) and requires `cellpose>=4.2`. The cubic version is part of the numeric contract: an unsupported version fails the run. The shared `.venv` cannot run the cpdino backend; benchmark evals run in the dedicated environment named by `DYNACELL_EVAL_VENV`.
 
-## Submission tooling
+**Hugging Face cache.** On a repo checkout, every eval command sets `HF_HUB_CACHE` to a team-shared cache unless it is already set. Other sites override the location with `DYNACELL_SHARED_HF_CACHE`. Only `HF_HUB_CACHE` moves, so access tokens stay per user. The gated DINOv3 weights must be downloaded once by someone with access.
 
-| Tool | Use case |
+### Benchmark leaves
+
+The benchmark is scored with **grouped leaves**: one model, many test conditions, one model load.
+
+```bash
+dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
+```
+
+- **Location:** `configs/benchmarks/virtual_staining/_internal/leaf/grouped/<bucket>/eval_grouped.yaml`.
+- **Generated, mostly:** most buckets are written by `tools/generate_grouped_eval_configs.py`, `tools/generate_spotlight_v2_eval_configs.py` or `tools/generate_lite_benchmark_configs.py`; regenerate those rather than hand-editing them. The HEK, `celldiff_r2` and `fcmae3d_rescore` buckets are hand-written.
+- **Suffixes** mark variants of a bucket, e.g. `__2d`, `__lite`, `__temporal`.
+- **`conditions` entries** may override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, `benchmark.dataset_ref` and `name`. Changing any field that affects model loading or segmentation raises an error.
+- **Always re-scored:** grouped leaves set `force_recompute.final_metrics: true`. To add a condition to a finished bucket without re-scoring the others, pass `force_recompute.final_metrics=false`.
+
+The single-condition leaves (`<org>/<model>/<train_set>/eval__<predict_set>.yaml`, run with `dynacell evaluate leaf=…`) are older. They keep the SuperModel segmentation defaults and write to `…/{ipsc,a549}/predictions/eval_*`.
+
+Use `leaf=`, not `-c` (`-c` is Hydra's display-only `--cfg`).
+
+### SLURM
+
+```bash
+# from the repository root
+sbatch applications/dynacell/tools/run_eval_direct.slurm grouped/<bucket>/eval_grouped [overrides...]
+```
+
+- **What it does:** runs `evaluate-grouped` for grouped leaves and `evaluate` otherwise, inside `$DYNACELL_EVAL_VENV`. It requests one GPU with at least 40 GB, 16 CPUs and 256 GB of memory.
+- **Other submitters:** `tools/submit_evaluation_job.py` and `tools/submit_evaluation_batch.py` (wrapper `tools/evaluate_batch.sh`) go through the shared `.venv`, so they cannot run cpdino leaves.
+
+### Common overrides
+
+| Override | Effect |
 |---|---|
-| `dynacell evaluate ...` / `dynacell evaluate-grouped leaf=...` | Run a single eval (or grouped multi-condition eval) inline. Foreground, no sbatch. |
-| `tools/submit_evaluation_job.py <leaf>` | Submit a single eval leaf as one sbatch. Mirror of `submit_benchmark_job.py` for eval. |
-| `tools/submit_evaluation_batch.py <leaves...>` | Submit N eval leaves as one sbatch with `--parallel N` (chunked waves of N concurrent processes on the shared GPU). Used by `tools/evaluate_batch.sh`. |
-| `tools/run_eval_direct.slurm <leaf>` | Direct-launch slurm script for hand-authored eval leaves that bypass the submit helpers. |
+| `limit_positions=N compute_feature_metrics=false` | Smoke test on the first N FOVs. Feature metrics need every GT position. |
+| `force_recompute.final_metrics=true` | Re-score even if the saved metrics are valid. |
+| `io.require_complete_cache=true` | Cache-only run; see [Caches](#caches). |
+| `runtime.executor=process runtime.fov_workers=auto` | Parallel FOVs; see [Parallelism](#parallelism). |
+| `+io.exclude_fov_names=[...]` | Skip named FOVs. Requires `compute_feature_metrics=false`. |
 
-For multi-condition evals over `(model, organelle) × {mock, denv, zikv}`, prefer `evaluate-grouped` over N separate `evaluate` calls — it amortizes the ~30–90 s SuperModel + DINOv3 + DynaCLR + CELL-DINO load across conditions. See [`applications/dynacell/CLAUDE.md`](../../../CLAUDE.md#grouped-multi-condition-eval) "Grouped multi-condition eval" for the executor + cache-mode tradeoffs.
+### DynaCell-lite
 
-For the predict-side submission tooling (`submit_benchmark_batch.py` + `predict_batch.sh`, with serial / `--array` / `--parallel P` modes), see [`applications/dynacell/CLAUDE.md`](../../../CLAUDE.md#predict-submission-modes) "Predict submission modes" and the [benchmarks README](../../../configs/benchmarks/virtual_staining/README.md#multi-leaf-submission-with-submit_benchmark_batchpy).
+A smaller test set for model iteration: A549 keeps 5 of 10 timepoints, and iPSC keeps 50 of 100 FOVs.
+
+- **Paths:** data and outputs live under `paths.LITE_DATA_ROOT`, with the same layout as `paths.DATA_ROOT`.
+- **Datasets and leaves:** the `*-lite` manifests, scored with `grouped/<bucket>__lite/eval_grouped`.
+- **Metrics:** lite leaves turn off MicroSSIM, FID, precision/recall and MIND. CP (GLCM+) KID is still computed but left out of lite reports.
+
+## Command-line interface
+
+| Command | Purpose |
+|---|---|
+| `dynacell evaluate` | Evaluate one prediction store (`_configs/eval.yaml`). |
+| `dynacell evaluate-grouped` | Evaluate N conditions with one model load (`_configs/eval_grouped.yaml`). |
+| `dynacell precompute-gt` | Fill the GT cache without scoring (`_configs/precompute.yaml`). |
+| `dynacell backfill-pixel-scalings` | Recompute `SSIM`/`NRMSE`/`PSNR` and their `SI_*` versions in saved pixel metrics; details below. |
+| `dynacell report` | Build comparison tables and figures from saved metrics (`dynacell.reporting`). |
+
+All commands are Hydra entry points; override any field with `key=value`.
+
+`backfill-pixel-scalings` skips leaves that already have `SI_*` columns unless `+backfill.force=true`. It writes nothing for a leaf whose recomputed `PCC` no longer matches the saved value, and exits non-zero if any leaf fails that check.
 
 ## Configuration
 
-`dynacell evaluate` is a Hydra entrypoint — override any field with `key=value` (CLI overrides win over groups). Settings that travel with a (target, marker, dataset) combination live in named Hydra **config groups**:
+Defaults live in `_configs/eval.yaml`. `eval_grouped.yaml` adds `conditions`, and `precompute.yaml` adds `build.*`.
 
-| Group | Options | What it sets | Source |
+### Inputs
+
+| Key | Required | Description |
+|---|---|---|
+| `target_name` | yes | `nucleus`, `membrane`, `er`, `mitochondria`, `nucleoli` or `lysosomes`. Selects the segmentation workflow. |
+| `io.pred_path`, `io.pred_channel_name` | yes | Prediction HCS OME-Zarr and channel. |
+| `io.gt_path`, `io.gt_channel_name` | yes | Ground-truth HCS OME-Zarr and channel. |
+| `pixel_metrics.spacing` | yes | Voxel size `[z, y, x]` in µm. |
+| `save.save_dir` | yes | Output directory. |
+| `io.cell_segmentation_path` | for feature metrics | Per-cell label plate; positions must match GT 1:1. Not derived from the evaluated masks. The A549 plates are built by `tools/build_cpdino_seg_cleaned.py`. |
+| `feature_extractor.dynaclr.checkpoint` | for feature metrics | Set by the `dynaclr=default` group on a repo checkout. |
+| `io.nuclei_gt_path` | membrane, when nuclei are stored separately | Store holding the GT nucleus channel. |
+| `io.gt_cache_dir`, `io.pred_cache_dir` | no | Artifact caches; must be distinct. |
+| `io.pred_is_source` | no | Score the source (label-free) channel as a no-model baseline. |
+| `feature_metrics.cp.reference_path` | no | CP reference; `null` resolves to `DATA_ROOT/cp_reference/<target_name>.json`. |
+
+- **Values from the dataset manifest:** setting `benchmark.dataset_ref.{dataset,target}` fills in `io.gt_path`, `io.gt_channel_name`, `io.cell_segmentation_path`, `io.gt_cache_dir` and `pixel_metrics.spacing` (`_ref_hook.py`).
+  - `io.pred_channel_name` becomes `<target_channel>_prediction`.
+  - Setting one of these explicitly to a value that disagrees with the manifest raises an error.
+- **Your own datasets:** register their manifests with `DYNACELL_MANIFEST_ROOTS`.
+
+### Config groups
+
+| Group | Options | Sets | Source |
 |---|---|---|---|
-| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `benchmark.dataset_ref.target` | repo-checkout `_internal/shared/eval/target/` |
-| `predict_set` | `ipsc_confocal` | `benchmark.dataset_ref.dataset` | in-package |
-| `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name` | in-package |
-| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` + 8-field encoder dict | repo-checkout `_internal/shared/eval/feature_extractor/dynaclr/` |
-| `leaf` | `<org>/<model>/<train_set>/eval__<predict_set>` | Composes all of the above for one canonical run | repo-checkout `_internal/leaf/` (symlink tree) |
+| `target` | `nucleus`, `membrane`, `er_sec61b`, `mito_tomm20` | `target_name`, `benchmark.dataset_ref.target` | repo checkout |
+| `predict_set` | `ipsc_confocal`, `a549_mantis_<marker>_<condition>` | `benchmark.dataset_ref.dataset` | package |
+| `feature_extractor/dinov3` | `lvd1689m` | DINOv3 model name | package |
+| `feature_extractor/morphem` | `default` | MorphEm model and revision | package |
+| `feature_extractor/dynaclr` | `default` | DynaCLR checkpoint and encoder | repo checkout |
+| `feature_extractor/celldino` | `default` | CELL-DINO weights | repo checkout |
+| `leaf` | see [Benchmark leaves](#benchmark-leaves) | a complete run | repo checkout |
 
-Select a group: `<group>=<option>` (no `+` — groups are declared `optional` in `eval.yaml`).
+- **Repo-checkout groups** live under `configs/benchmarks/virtual_staining/_internal/` and are added to the Hydra search path when running from a checkout.
+- **Wheel installs** see only package groups. Supply the rest with `--config-dir`; each group file must start with `# @package _global_` and use the `.yaml` extension.
+- **Nucleoli and lysosomes** have no `target` group; set `target_name` and `io.*` directly.
 
-`io.*` and `pixel_metrics.spacing` resolve from the dataset manifest (`dynacell/data/manifests.py`) via a post-compose hook in `_ref_hook.py`. `pred_channel_name` is derived as `{target_channel}_prediction`.
+### Main switches
 
-`target_name` ∈ {`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`} selects the segmentation workflow (see [Segmentation](#segmentation)). Four of them have a `target` group (`nucleus`, `membrane`, `er_sec61b`, `mito_tomm20`); `nucleoli`/`lysosomes` have none — set `target_name=…` directly.
+| Key | Default | Effect |
+|---|---|---|
+| `compute_feature_metrics` | `true` | Feature tier. Needs `io.cell_segmentation_path`. |
+| `compute_microssim` | `true` | `MicroMS3IM` pixel metric. |
+| `compute_instance_ap` | `false` | Instance segmentation and AP. On in the grouped nucleus/membrane leaves. |
+| `segmentation.backend` | `supermodel` | Nucleus/membrane segmenter. `cpdino` in the grouped leaves. |
+| `compute_cell_similarity` | `false` | Per-cell `PerCell_*` pixel similarity. |
+| `pixel_metrics.foreground.enabled` | `false` | Foreground-weighted `FG_*` pixel metrics. |
+| `feature_metrics.compute_{fid,prc,mind}` | `true` | FID, precision/recall/F1, MIND. |
+| `feature_metrics.focus_slab.{enabled,halfwidth}` | `true`, `2` | Crop deep features from an in-focus slab of `2·halfwidth+1` planes. |
+| `use_gpu` | `true` | GPU for metrics, segmentation and extractors. |
 
-**Group sources**: in-package groups ship in the wheel (schema + path-free reference values). Repo-checkout groups under `configs/benchmarks/virtual_staining/_internal/` are discovered via two `hydra.searchpath` roots that `dynacell.__main__` injects on a repo checkout. Hydra only resolves `.yaml` for group lookup, so eval groups + leaves use `.yaml` (Lightning train/predict leaves stay `.yml`).
+The cross-condition probe follows `compute_feature_metrics`. Disable it with `+cross_condition_probe.enabled=false`; the key is not in the schema, hence the `+`.
 
-### Segmentation
+## Segmentation
 
-GT and prediction go through the same workflow, so the mask metrics compare like with like. `target_name` picks the workflow, and the `segmentation:` block of `_configs/eval.yaml` holds its settings.
+GT and prediction are segmented by the same workflow. The table shows the grouped-leaf settings.
 
 | Target | Segmenter | Geometry | Mask metrics |
 |---|---|---|---|
-| `nucleus` | Cellpose-DINO ViT-L (`cpdino`) on the nucleus channel | 2-D: the in-focus plane, max-projected over ±1 plane | instance Dice, AP over IoU 0.50–0.95, mAP, plus semantic Dice/IoU/precision/recall/accuracy from `labels > 0` |
-| `membrane` | `cpdino` whole cells from the membrane channel, with the GT nucleus footprint carved out | the same 2-D slab | the same, scored on the cytoplasmic shell |
-| `er`, `mitochondria` | Allen Cell Structure Segmenter SEC61B / TOMM20 classic workflows, ported to cubic (`cubic.segmentation.workflow_sec61b` / `workflow_tomm20`) | 3-D, the full stack of each timepoint | semantic Dice/IoU/precision/recall/accuracy |
-| `nucleoli`, `lysosomes` | `aicssegmentation` NPM1 / LAMP1 workflows, CPU | 3-D | semantic |
+| `nucleus` | Cellpose-DINO ViT-L (`cpdino`) | 2-D in-focus slab | semantic + instance |
+| `membrane` | `cpdino` whole cells, GT nucleus footprint removed | 2-D in-focus slab | semantic + instance, on the cytoplasm |
+| `er`, `mitochondria` | Allen Cell Structure Segmenter SEC61B / TOMM20 workflows, ported to cubic | 3-D | semantic |
+| `nucleoli`, `lysosomes` | `aicssegmentation` NPM1 / LAMP1 workflows | 3-D | semantic |
 
-**The defaults are not the benchmark settings.** `eval.yaml` defaults to `segmentation.backend: supermodel` and `compute_instance_ap: false`: 3-D binary nucleus/membrane masks from segmenter-model-zoo. The benchmark nucleus/membrane leaves set `segmentation.backend: cpdino` and `compute_instance_ap: true`. A config that sets neither scores SuperModel masks with no instance metrics, so read the resolved config before comparing numbers across runs.
+- **Defaults:** `segmentation.backend: supermodel` with `compute_instance_ap: false` produces 3-D binary nucleus/membrane masks from segmenter-model-zoo, with no instance metrics.
+- **In-focus slab:** with `segmentation.dimension: 2d` and `slice_selection: focus`, each FOV and timepoint uses the z-plane with the largest GT nuclear foreground area (`focus_anchor: nucleus_area`). That plane is max-projected over ±`focus_slab_halfwidth` (default 1) planes, and the same plane is used for GT, prediction and nucleus seeds. `dimension: 3d` segments the full volume instead.
+- **cpdino:**
+  - Input is the raw slice; cellpose applies its own percentile normalization (`normalize: true`), with no CLAHE or rescaling.
+  - Instances smaller than `min_size: 15` pixels are dropped.
+  - Runs on the GPU in bf16, so masks can differ slightly between GPU models.
+  - Membrane also needs `segmentation.nuclei_channel_name`.
+- **ER and mitochondria** require a `(Z, Y, X)` stack: the filament filter runs on each z-plane, and normalization, smoothing and size filtering run on the whole volume. The workflows run on NumPy or CuPy.
+- **Other instance backends:**
+  - `cellpose`: Cellpose-SAM, nucleus only.
+  - `cellpose_watershed`: Cellpose-SAM nucleus seeds plus a watershed for whole cells, membrane only. Its settings are under `segmentation.watershed`.
 
-**Plane selection (nucleus, membrane).** With `segmentation.dimension: 2d` (the default) and `slice_selection: focus`, the anchor `focus_anchor: nucleus_area` picks, per FOV and timepoint, the z-plane where the GT nucleus channel has the largest Otsu foreground area. `focus_slab_halfwidth: 1` then max-projects that plane with one neighbour on each side. GT, prediction and the nucleus carve seeds all use the same plane. `dimension: 3d` runs cpdino's full-volume `do_3D` path instead; no benchmark leaf uses it. Only the masks are 2-D: pixel metrics are always computed on the full 3-D arrays.
+## Metrics
 
-**cpdino preprocessing** reproduces how the model was validated: the raw slice goes to cellpose with `normalize: true` (its own 1st/99th-percentile stretch), with no CLAHE and no downscaling, and `min_size: 15`. Inference runs on the GPU through `cubic.segmentation.segment_cellpose` and needs cellpose ≥ 4.2, so run it in the cpdino eval environment rather than the shared `.venv`. Cellpose runs in bf16, so masks can differ slightly between GPU types. Whole-cell `membrane` also needs `segmentation.nuclei_channel_name` for the carve; set `io.nuclei_gt_path` when the GT nuclei live in a separate store (A549: membrane in `CAAX_*.ozx`, nuclei in `H2B_*.ozx`).
+### Pixel (`pixel_metrics.csv`)
 
-**ER and mitochondria workflows are 3-D only.** They take a `(Z, Y, X)` stack and reject 2-D input. As in the original Allen Segmenter, the filament (vesselness) filter runs on each z-plane, while intensity normalization, smoothing and the size filters act on the whole volume. The cubic ports run on NumPy or CuPy; they are GPU-backed when `use_gpu` is set and CUDA is available. Their module docstring (`cubic/segmentation/aics_workflows.py`) records the bitwise comparison against `aicssegmentation`, and its one known exception: on AVX-512 CPUs the reference, and cubic's CPU path, move 1–3 voxels per volume. `require_cubic_workflows` fails an ER/mito eval up front if the installed cubic predates these workflows.
+Computed on each (FOV, timepoint) volume.
 
-**Other instance backends**, kept for comparison: `cellpose` (Cellpose-SAM nuclei, `nucleus` only) and `cellpose_watershed` (Cellpose-SAM nucleus seeds + EDT watershed whole cells, `membrane` only, settings under `segmentation.watershed`). `_validate_instance_ap_config` rejects any other backend/target pairing.
+| Columns | Notes |
+|---|---|
+| `PCC` | Pearson correlation; invariant to affine intensity changes. |
+| `SSIM`, `NRMSE`, `PSNR` | Each image min–max normalized independently. |
+| `SI_SSIM`, `SI_NRMSE`, `SI_PSNR` | Prediction least-squares fitted to the target first (scale-invariant). |
+| `Spectral_PCC` | Frequency-weighted PCC; `pixel_metrics.spectral_pcc`. |
+| `XY_FSC_Resolution`, `Z_FSC_Resolution` (3-D) / `FRC_Resolution` (2-D) | Fourier shell/ring correlation resolution; `pixel_metrics.fsc`. |
+| `MicroMS3IM` | MicroSSIM; `compute_microssim`. |
+| `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR`, `FG_frac` | Weighted by a soft foreground map derived from the GT; `pixel_metrics.foreground.enabled`. |
+| `PerCell_{PCC,SSIM}_{mean,median}` | Per-cell similarity; `compute_cell_similarity`. |
 
-**Cell masks for feature metrics are a separate input.** `io.cell_segmentation_path` supplies the per-cell regions for CP and deep-feature metrics; they are not derived from the masks above. The A549 stores are built by `tools/build_cpdino_seg_cleaned.py`: cpdino whole cells on the max-Z projection of the VSCyto3D membrane prediction, repeated across Z.
+### Mask (`mask_metrics.csv`)
 
-### Feature metrics
+| Columns | When |
+|---|---|
+| `Dice`, `IoU`, `Precision`, `Recall`, `Accuracy`, `TP`, `FP`, `FN`, `TN` | always; from instance labels > 0 in instance mode |
+| `AP_<iou>` (0.50–0.95), `mAP`, `instance_dice`, `instance_{TP,FP,FN}@0.50`, `n_gt`, `n_pred` | `compute_instance_ap=true` |
 
-`feature_extractor/dinov3=lvd1689m` and `feature_extractor/dynaclr=default` auto-select on a repo checkout. CELL-DINO is opt-in: set `feature_extractor.celldino.weights_path=/path/to/celldino.ckpt`, or leave `null` to soft-skip.
+### Feature (`feature_metrics.csv`)
 
-Override a checkpoint: `feature_extractor.dynaclr.checkpoint=/hpc/.../other.ckpt`. Disable a backbone: `feature_extractor/dinov3=null`. Enable feature metrics: `compute_feature_metrics=true` (also needs `io.cell_segmentation_path` non-null).
+| Feature space | Input | When |
+|---|---|---|
+| `CP` (regionprops + GLCM texture) | 3-D cell volume | always |
+| `DINOv3` | 2-D cell crop | always |
+| `DynaCLR` | 2-D cell crop | always |
+| `CellDINO` | 2-D cell crop | `feature_extractor.celldino.weights_path` set |
+| `MorphEm` | 2-D cell crop | `feature_extractor.morphem.pretrained_model_name` set |
 
-### Foreground-limited pixel metrics
+"Always" means whenever `compute_feature_metrics=true`. On a repo checkout the default groups enable all five.
 
-`pixel_metrics.foreground.enabled=true` adds `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR` and `FG_frac` to `pixel_metrics.csv`, after the `SI_*` columns and before `Spectral_PCC`/FSC/`MicroMS3IM`/`PerCell_*`. They are the whole-image `PCC`/`SI_*` scored against a soft `[0, 1]` weight map built from the GT alone (`metrics.foreground_weight`: Gaussian smooth, then Otsu, then Gaussian feather), so every model is scored on the same region. The images are never zeroed or eroded, and SSIM uses normalized convolution. A unit weight reproduces the whole-image columns. Null sigmas take the per-target defaults in `metrics.FOREGROUND_SIGMAS_UM`. The recipe, `metrics.FOREGROUND_METRICS_VERSION` and the pixel spacing are stamped in `metrics_provenance.json`, so enabling it or changing any of them reruns the whole final-metrics pass instead of reusing a cache; disabling it reuses a cache scored with it. A (FOV, t) with no GT foreground scores NaN with `FG_frac` 0.
+Columns per feature space `<F>`:
 
-### External users (`--config-dir`)
+| Columns | Level |
+|---|---|
+| `<F>_KID`, `<F>_KID_std`, `<F>_Median_Cosine_Similarity`, `<F>_FID` | per (FOV, timepoint) |
+| `Dataset_<F>_KID[_std]`, `Dataset_<F>_FID`, `Dataset_<F>_{Precision,Recall,F1}[_std]`, `Dataset_<F>_MIND`, `Dataset_<F>_Median_Cosine_Similarity` | pooled over the test set |
+| `Dataset_<F>_RealVsPred_AUROC[_std]`, `Dataset_<F>_Indistinguishability` | linear probe separating real from predicted cells |
+| `CP_clip_frac`, `Dataset_CP_clip_frac` | fraction of predicted cells with a CP feature clipped |
 
-Wheel installs see only in-package groups. To evaluate your own predictions, point Hydra at your group files:
-
-```yaml
-# my_configs/target/mine.yaml
-# @package _global_         # REQUIRED — writes into root, not under 'target.*'
-target_name: er
-io:
-  gt_path: /data/mine/gt.zarr
-  cell_segmentation_path: /data/mine/seg.zarr
-  gt_channel_name: MyGroundTruthChannel
-  pred_channel_name: MyPredictionChannel
-```
-
-```bash
-dynacell evaluate --config-dir /abs/path/my_configs \
-  target=mine predict_set=ipsc_confocal \
-  io.pred_path=/path/to/preds.zarr save.save_dir=/path/to/out
-```
-
-Or skip groups and set `io.*` directly on the CLI. For manifest-based path resolution from a wheel-only install, author a dynacell manifest and set `DYNACELL_MANIFEST_ROOTS`.
-
-**Footguns**: (1) missing `# @package _global_` makes contents land under `cfg.target.*` instead of root → `MissingMandatoryValue`. (2) Saving group as `.yml` instead of `.yaml` makes it undiscoverable → `MissingConfigException`.
-
-### Benchmark eval leaves
-
-Canonical leaves at `configs/benchmarks/virtual_staining/<org>/<model>/<train_set>/eval__<predict_set>.yaml` pin every group + path + save dir:
-
-```bash
-uv run dynacell evaluate leaf=er/celldiff/ipsc_confocal/eval__ipsc_confocal
-```
-
-Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides apply on top (e.g. `limit_positions=1 compute_feature_metrics=false` for smoke).
+- **2-D crops** are max projections of each cell over the in-focus slab (`feature_metrics.focus_slab`), or over the full stack when the slab is disabled.
+- **CP reference:** CP features are scored in a fixed space defined by a reference file built from GT cells only. The file holds one feature mask and, for each test set, the GT mean and standard deviation, applied to both GT and prediction. Standardized values are clipped to ±20 before KID, FID and cosine.
+  - **When it fails:** the run fails if its GT cells do not match the reference's GT cell count and per-feature mean/std (relative tolerance 1e-6).
+  - **Rebuilding:** `tools/build_cp_reference.py --target <target>`; add `--verify` to check current caches against it.
 
 ## Caches
 
-Set `io.gt_cache_dir` to write/read GT-side artifacts. Set `io.pred_cache_dir` for prediction-side organelle masks + per-cell features. Sharing one root is rejected.
-
-GT caches are reusable across model checkpoints for the same `(gt_path, gt_channel_name, cell_segmentation_path)`. Prediction caches are reusable for repeated evals of the same `(pred_path, pred_channel_name, cell_segmentation_path)` while the prediction in that store is unchanged (see [Force recompute](#force-recompute)).
-
-### Layout
+`io.gt_cache_dir` caches GT masks and features; it is model-independent and reused across checkpoints. `io.pred_cache_dir` caches the same artifacts for one prediction store. There is no `precompute-pred`: the first eval fills the prediction cache.
 
 ```
-{cache_dir}/
-  manifest.yaml                          # built_at, params, positions per artifact
-  organelle_masks/{target_name}.zarr     # HCS plate; channel target_seg or prediction_seg
-  features/cp.zarr                       # arrays at {row}/{col}/{fov}/t{t}
-  features/dinov3/{model_slug}.zarr      # one plate per DINOv3 model name
-  features/dynaclr/{ckpt_sha12}.zarr     # one plate per (checkpoint, encoder_config)
-  features/celldino/{weights_sha12}.zarr # one plate per CELL-DINO weights
+<cache_dir>/
+  manifest.yaml
+  organelle_masks/<target_name>[__<backend>].zarr
+  instance_masks/<target_name>__<backend>.zarr
+  features/cp.zarr
+  features/{dinov3,morphem}/<model_slug>.zarr
+  features/dynaclr/<checkpoint_sha12>.zarr
+  features/celldino/<weights_sha12>.zarr
+  focus_planes/<channel>/<position>.json        # GT cache only
 ```
 
-`manifest.yaml` is **not source-controlled** — it lives in the shared cache root, is rewritten by the pipeline on every cache-mutating run (timestamps, FOV position lists, absolute HPC paths to the per-model feature zarrs it indexes), and is fully derivable from this code + the raw inputs. A deleted or corrupted manifest is a recompute cost (run `dynacell precompute-gt` or a normal eval), not a loss of source-of-truth state.
-
-Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR checkpoint hash (`viscy_utils.prediction_metadata.checkpoint_sha256_12`) is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
-
-Per-artifact params (`cp_features.spacing`, `dinov3_features.patch_size`, `dynaclr_features.{checkpoint_sha256_12, encoder_config_sha256_12, patch_size}`, `celldino_features.{weights_sha256_12, patch_size}`, `organelle_masks.target_name`, plus per-extractor `preprocess_version`) are softer: a mismatch emits a warning and sets the matching `force_recompute.<side>_<kind>=True` so the artifact is recomputed and the manifest entry is rewritten with the current values. This self-heal path runs at `init_cache_context` time and covers the common "I bumped spacing / patch_size / preprocess recipe" workflow without forcing operators to wipe each cache by hand.
-
-**Not auto-invalidated**: the runtime environment (`uv.lock`, `pyproject.toml`, installed `cubic` / `transformers` / `torch` versions). A dep bump that silently alters numerics — e.g., a cubic FSC change — leaves the cache valid by the manifest's lights. The cover for this is per-extractor version tags like `DinoV3FeatureExtractor.PREPROCESS_VERSION`: the author of the bump bumps the tag in the same commit so existing caches soft-invalidate. If the tag isn't bumped, caches keep stale features silently.
-
-Two strict-mode escape hatches keep the soft path from corrupting partially-walked or fast-path runs:
-
-- `io.require_complete_cache=true` (cache-only mode): a known mismatch raises instead of warning. The user opted out of recompute; a stale manifest is fatal.
-- `limit_positions=N` (smoke / iteration): a known mismatch raises instead of warning. Partial walks can't safely self-heal — the manifest entry would be rewritten globally while only the first N FOVs' on-disk chunks get recomputed, leaving the rest stale under a manifest that claims the new params. Clear the cache or drop `limit_positions` to recover.
-
-#### DINOv3 `imagenet_normalize_v2` (May 2026)
-
-`DinoV3FeatureExtractor.PREPROCESS_VERSION` was bumped from `imagenet_normalize_v1` to `imagenet_normalize_v2` to fix a double-rescale bug: the HF `AutoImageProcessor` defaults to `do_rescale=True` with `rescale_factor=1/255`, but `build_crops` already hands the processor float `[0, 1]` crops. The model previously saw inputs in `~[-2.12, -1.79]` after ImageNet normalize (essentially black), producing features cosine-uncorrelated with the intended representation. The v2 path passes `do_rescale=False`.
-
-On the next eval against an existing cache:
-- **Normal (full-walk) runs**: a warning fires, `force_recompute.<side>_dinov3=True`, and DINOv3 features auto-rebuild. Mask / CP / DynaCLR / CELL-DINO entries are unaffected.
-- **`io.require_complete_cache=true` or `limit_positions=N`**: the mismatch hard-raises (see strict-mode escape hatches above). Either clear the cache and re-prime, or run a full walk once to refresh DINOv3.
-- **Caches written before `preprocess_version` tracking existed**: the missing tag is treated as "no constraint" by the auto-invalidate path, so v1-era features survive the bump silently. If you suspect a long-lived cache pre-dates tracking, set `force_recompute.<side>_dinov3=true` once to rebuild.
-
-All DINOv3-based metrics (FID / KID / Precision / Recall / F1) computed against v1 features are invalidated and need re-running.
-
-### Priming with `precompute-gt`
+### Priming the GT cache
 
 ```bash
-uv run dynacell precompute-gt target=er_sec61b predict_set=ipsc_confocal
+dynacell precompute-gt target=er_sec61b predict_set=ipsc_confocal
 ```
 
-Ad-hoc without HPC groups:
-
-```bash
-uv run dynacell precompute-gt \
-  target_name=er \
-  io.gt_path=/hpc/.../SEC61B.zarr \
-  io.cell_segmentation_path=/hpc/.../SEC61B_segmented_cleaned.zarr \
-  io.gt_cache_dir=/hpc/.../cache/SEC61B \
-  pixel_metrics.spacing=[0.29,0.108,0.108] \
-  feature_extractor.dynaclr.checkpoint=/path/to/dynaclr.ckpt
-```
-
-Skip families: `build.cp=false build.dinov3=false build.dynaclr=false build.celldino=false build.masks=false`.
-
-### Prediction cache
-
-No `precompute-pred` CLI. The first `dynacell evaluate` run with `io.pred_cache_dir` set fills prediction masks/features; later runs hit it.
-
-### Cache-only fast path: `io.require_complete_cache=true`
-
-With both caches warm, this flag puts `dynacell evaluate` in cache-only mode:
-
-- No model loads (~30-90 s cold-start skipped). The upfront `precompute_deep_features` pass is also skipped.
-- Cache misses raise `StaleCacheError` immediately — fail-loud instead of opportunistic rebuild.
-- Per-artifact param mismatches (e.g. stale `spacing` or `patch_size`) also raise instead of soft-invalidating; the soft path would silently trigger compute the user opted out of.
-- Pixel + mask metrics still run on the original image volumes; deep features served from disk.
-
-Use case: parallel sweeps, downstream metric iteration, crash recovery.
-
-```bash
-uv run dynacell evaluate ... \
-  io.gt_cache_dir=/hpc/.../cache/SEC61B \
-  io.pred_cache_dir=/hpc/.../pred_cache/sec61b_fcmae_v1 \
-  io.require_complete_cache=true
-```
-
-**Edge case**: when `target_name ∈ {nucleus, membrane}` AND `io.pred_cache_dir=null`, SuperModel still loads — the per-T loop falls back to `segment(predict[t], seg_model=...)` for predictions. The skip-load fast path applies cleanly for organelle targets or when `io.pred_cache_dir` is also configured.
-
-### Force recompute
-
-```yaml
-force_recompute:
-  all: false              # invalidate everything below
-  final_metrics: false    # CSV/NPY under save.save_dir → full re-run of the eval loop
-  gt_masks / gt_cp / gt_dinov3 / gt_dynaclr / gt_celldino: false
-  pred_masks / pred_cp / pred_dinov3 / pred_dynaclr / pred_celldino: false
-```
-
-Each per-artifact flag invalidates that family for its side only:
-- `*_masks` — organelle masks for `target_name`
-- `*_cp` — CP regionprops
-- `*_dinov3` — features keyed on the active DINOv3 model name
-- `*_dynaclr` — features keyed on `(ckpt_sha12, encoder_cfg_sha12)`
-- `*_celldino` — features keyed on the CELL-DINO weights hash
-
-Without `io.gt_cache_dir` / `io.pred_cache_dir`, only `force_recompute.{final_metrics, all}` matter.
-
-A re-predict into the same `io.pred_path` needs none of these flags. The prediction side records, per cached position, the source it was built from: a hash of the position's writer marker (`viscy_prediction_complete` for `io.pred_channel_name`: checkpoint content hash, settings hash, depth handling, source shape) and the mtime of that channel's first stored chunk, at its earliest stored timepoint. A position whose source no longer matches the store is an ordinary cache miss, recomputed and re-recorded (a `StaleCacheError` under `io.require_complete_cache=true`), so an interrupted rebuild resumes where it stopped and a code-only re-predict (same checkpoint and settings, new chunks) is caught. Writes to other channels or to position metadata do not count. Entries written before sources existed are upgraded on the first run, per position: a position is current iff its first stored chunk is no newer than the entry's `built_at`; a position with no stored chunk (a blank prediction) cannot be dated and is rebuilt once. The upgrade rewrites the manifest, so the cache directory must be writable even under `io.require_complete_cache=true`. `metrics_provenance.json` records a digest of all positions' sources, taken before scoring, and `_final_metrics_cache_valid` rejects saved metrics when it differs (an older sidecar: when any chunk is newer than the sidecar, or a position has no stored chunk). Metrics saved after a re-predict but scored from caches it had left stale are the one legacy case this cannot see. A missing prediction store raises `FileNotFoundError` wherever its sources are read, the final-metrics gate included. The GT side is not tracked.
+`build.{masks,cp,dinov3,dynaclr,celldino,morphem}` default to `true`; `build.instances` and `build.focus` default to `false`.
 
 ### Invalidation
 
-Three paths invalidate cached artifacts:
+| Change | Behavior |
+|---|---|
+| Plate path, channel, segmentation path, or `cache_schema_version` | `StaleCacheError`; clear the cache directory. |
+| Tracked parameter (spacing, patch size, extractor `PREPROCESS_VERSION`, CP recipe) | Warning; the affected artifact is recomputed. |
+| Prediction store rewritten (re-predict) | Affected positions are recomputed, detected per position from the writer marker and chunk mtime. |
+| Library versions (torch, transformers; cubic for cached artifacts) | Not detected; bump the extractor's `PREPROCESS_VERSION` in the same change. |
 
-1. **Soft auto-invalidate (default)** — bumping a tracked per-artifact param (spacing, patch_size, preprocess_version, etc.) on a normal full-walk run. `init_cache_context` warns, sets the matching `force_recompute.<side>_<kind>`, and the next FOV pass recomputes and rewrites the manifest entry. Identity mismatches (plate_path, channel_name, cell_segmentation_path, cache_schema_version) still hard-raise.
-2. **Manual `force_recompute.<side>_<kind>`** — bypass cache for a specific family without touching the manifest's recorded params.
-3. **Cache-dir wipe** — required when running with `limit_positions=N` or `io.require_complete_cache=true` and you need to change a tracked param, OR when zarr contents have been modified in place. Only the prediction store is tracked, per position, by its writer marker and the mtime of one chunk (see [Force recompute](#force-recompute)); voxel contents are never hashed.
+- **Cache-only runs:** under `io.require_complete_cache=true` or `limit_positions`, a tracked-parameter change raises instead of recomputing.
+- **`io.require_complete_cache=true`:**
+  - Requires `io.gt_cache_dir`.
+  - Skips the precompute pass, and turns any cache miss into a `StaleCacheError`.
+  - Feature extractors still load.
+  - The segmenter load is skipped for ER, mitochondria, nucleoli and lysosomes. For nucleus/membrane it is skipped only when `io.pred_cache_dir` is set and `compute_instance_ap=false`.
+- **`force_recompute`:**
+  - `force_recompute.<side>_<artifact>` rebuilds a single family. `<side>` is `gt` or `pred`; `<artifact>` is `masks`, `instances`, `cp`, `dinov3`, `dynaclr`, `celldino` or `morphem`.
+  - `force_recompute.final_metrics` re-scores.
+  - `force_recompute.all` does everything.
 
-Bumping `cache_schema_version` in `cache.py` forces a wipe on every existing cache.
+### Reusing saved metrics
 
-## Scaling
+Saved metrics in `save.save_dir` are reused only when all of the following hold:
 
-### FOV-level parallelism: `runtime.*`
+- `metrics_provenance.json` matches the current cubic version, CP space, prediction sources, foreground recipe and FID implementation.
+- The saved tables contain every column the current config produces.
+- The run is not partial: `limit_positions` or `io.exclude_fov_names` with feature metrics on always re-scores.
 
-Default is sequential per FOV. Knobs (and their YAML defaults):
+## Parallelism
 
-```yaml
-runtime:
-  fov_workers: 1                           # int | "auto"
-  threads_per_worker: "auto"               # int | "auto" → cpu_count // fov_workers
-  executor: "serial"                       # "serial" | "process"
-  cuda_empty_cache_every_n_timepoints: 0   # 0 = off
-  gc_collect_every_n_fovs: 0               # 0 = off
-```
+| Key | Default | Description |
+|---|---|---|
+| `runtime.executor` | `serial` | `process` runs FOVs in a spawn-context process pool. Each worker loads its own models and shares the GPU under a file lock. |
+| `runtime.fov_workers` | `1` | Under `process`, `auto` resolves to `min(cpu_count // T, n_positions)`, where `T` is `threads_per_worker` if it is an integer, else 4. A result of 1 falls back to `serial`. |
+| `runtime.threads_per_worker` | `auto` | BLAS/OpenMP threads per worker. `auto` = `cpu_count // fov_workers`. |
+| `runtime.cuda_empty_cache_every_n_timepoints`, `runtime.gc_collect_every_n_fovs` | `0` | Memory hygiene; `0` disables. |
 
-- `executor=serial` is bit-for-bit identical to pre-runtime behavior.
-- `executor=process` uses a spawn-context `ProcessPoolExecutor` over FOVs. Each worker independently lazy-loads models under an `fcntl` GPU lock, so only one worker runs GPU work at a time. Best when (a) the per-FOV CPU phase (cache I/O, regionprops, crop construction) is your bottleneck, or (b) you're under `require_complete_cache=true` so workers do no GPU work.
-- `fov_workers="auto"` resolves to 1 under `serial`; under `process` it clamps to `min(cpu_count // threads_per_worker, n_positions)`. A literal `fov_workers > 1` with `executor=serial` raises; a resolved `fov_workers=1` with `executor=process` auto-demotes to `serial` (skips ~5 s spawn cost).
-
-**Env-var hooks**:
-- `DYNACELL_THREADS_PER_WORKER=N` — set in SLURM script *before* `dynacell evaluate`; the only thread-cap layer that bites at C-extension load time.
-- `DYNACELL_FORCE_PER_T_HYGIENE=1` — operator escape hatch; flips both per-T memory hygiene knobs ≥1 regardless of YAML.
-
-Region timers are always on (~120 ms overhead on a 9 h eval). Output: `<save_dir>/eval_timing.csv` with rows `(pos_name, t, region, seconds)`.
-
-### Grouped multi-condition eval: `dynacell evaluate-grouped`
-
-Score one `(model, organelle)` across multiple I/O variants — typically the three A549 plates (`mock`/`denv`/`zikv`) — paying the model cold-start **once** total.
-
-```yaml
-# eval_grouped_a549_mantis_er.yaml
-defaults: [eval_grouped, _self_]
-target_name: er
-compute_feature_metrics: true
-feature_extractor: { ... }   # shared across all conditions
-conditions:
-  - { name: a549_mock, io: { ... }, save: { save_dir: /out/a549_mock } }
-  - { name: a549_denv, io: { ... }, save: { save_dir: /out/a549_denv } }
-  - { name: a549_zikv, io: { ... }, save: { save_dir: /out/a549_zikv } }
-```
-
-```bash
-uv run dynacell evaluate-grouped -c eval_grouped_a549_mantis_er
-```
-
-Per-condition overlays may override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, and carry a `name` label. They MUST NOT touch `target_name`, `feature_extractor.*`, `compute_feature_metrics`, or `use_gpu` — those gate model loading. Each condition honors `force_recompute.{all, final_metrics}` independently — if CSV/NPY already exist and neither flag is set, the condition is skipped and cached outputs are loaded.
-
-**Process-mode caveat**: under `runtime.executor=process` each condition spawns its own worker pool that re-loads models. Combined with `require_complete_cache=false` this multiplies cold-start across conditions; the driver emits a loud warning. For maximum amortization use `executor=serial`, or precompute caches and run with `require_complete_cache=true`.
+- **Grouped evals:** use `serial`. A process pool reloads every model for each condition.
+- **Parallelizing across buckets:** run independent buckets on separate GPUs.
+- **Environment variables:** `DYNACELL_THREADS_PER_WORKER` sets the thread cap before C extensions load. `DYNACELL_FORCE_PER_T_HYGIENE=1` turns on both hygiene options.
 
 ## Outputs
 
-Under `save.save_dir`:
+Written to `save.save_dir`. Generated grouped leaves set it with `paths.eval_leaf(...)`:
 
 ```
-pixel_metrics.csv / .npy        # per-FOV per-timepoint pixel metrics
-mask_metrics.csv / .npy
-feature_metrics.csv / .npy      # if compute_feature_metrics=true
-segmentation_results.zarr       # HCS plate; channels [prediction_seg, target_seg]
-pixel_metrics/*.png             # bar/violin plots per metric
-mask_metrics/*.png
-feature_metrics/*.png
-eval_timing.csv                 # region timer log (always on)
+DATA_ROOT/<organelle>/<model>/<train_set>/<test_set>[__<condition>]/[<component>/][instance_ap/]
 ```
 
-## Installation
+Files:
 
-Heavy optional deps (`aicssegmentation`, `segmenter-model-zoo`, `cubic`, `transformers`, `dynaclr`):
-
-```bash
-uv pip install -e "applications/dynacell[eval]"
+```
+pixel_metrics.csv, .npy
+mask_metrics.csv, .npy
+feature_metrics.csv, .npy            # compute_feature_metrics
+{pixel,mask,feature}_metrics/*.png   # per-metric plots
+segmentation_results.zarr            # channels prediction_seg, target_seg
+embeddings/{gt,pred}_{cp,dinov3,dynaclr,celldino,morphem}_single_cell_embeddings.npz
+cp_selected_feature_mask.json        # CP reference mask and clip fractions
+metrics_provenance.json              # versions, CP space and prediction-source hashes
+eval_timing.csv                      # per-region timings
+cross_condition_probe.csv            # grouped runs, infected conditions only
 ```
 
-## HPC notes
+## Modules
 
-### Shared Hugging Face hub cache
+| Module | Purpose |
+|---|---|
+| `pipeline.py` | `evaluate` and `evaluate-grouped`: orchestration, per-FOV loop, saving. |
+| `precompute_cli.py` | `precompute-gt`. |
+| `model_loader.py` | Loads the segmenter and feature extractors. |
+| `_ref_hook.py` | Fills `io.*` and `pixel_metrics.spacing` from `benchmark.dataset_ref`. |
+| `segmentation.py` | Binary-mask workflows and segmenter selection. |
+| `segmentation_cpdino.py` | Cellpose-DINO nucleus and whole-cell instances. |
+| `segmentation_cellpose.py`, `segmentation_whole_cell.py` | Cellpose-SAM nuclei; seeded watershed for whole cells. |
+| `focus.py` | In-focus plane and slab selection. |
+| `metrics.py` | Pixel, mask, CP and per-cell metrics. |
+| `instance_metrics.py` | Instance AP and instance Dice. |
+| `feature_metrics.py` | KID, FID, precision/recall, MIND, cosine. |
+| `linear_probe.py`, `cross_condition_probe.py` | Real-vs-predicted and infected-vs-mock probes. |
+| `cp_reference.py`, `feature_select.py` | CP reference space and GT feature selection. |
+| `utils.py` | Deep feature extractors and plotting. |
+| `cache.py`, `pipeline_cache.py` | Cache layout, manifest, identity checks, load-or-compute. |
+| `provenance.py` | cubic version check and `metrics_provenance.json`. |
+| `runtime.py` | Thread caps, process pool, GPU lock, timers. |
+| `paths.py` | Canonical paths for checkpoints, predictions, eval outputs and caches. |
+| `pixel_scaling_backfill.py` | `backfill-pixel-scalings`. |
+| `spectral_pcc/` | Spectral PCC diagnostics. |
+| `_configs/` | Hydra schemas and package config groups. |
 
-`dynacell evaluate` and `dynacell precompute-gt` default `HF_HUB_CACHE` to a team-shared directory on project storage when they detect a repo checkout, so gated HF models (DINOv3) download once per team. The default path is set in `dynacell/__main__.py` (`_DEFAULT_SHARED_HF_CACHE`); other sites override it via the `DYNACELL_SHARED_HF_CACHE` env var. Pre-set `HF_HUB_CACHE` and the auto-setter backs off.
+## See also
 
-We use `HF_HUB_CACHE` (not `HF_HOME`) because `HF_HOME` relocates the auth token file too, breaking per-user gated-repo ACLs. `HF_HUB_CACHE` only relocates weights/datasets; tokens stay per-user. First-time setup: one team member with gated-repo access (see [DINOv3 on HF](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)) runs any eval command to trigger the download; everyone else reuses the shared weights afterward — those reads don't hit HF and don't need a token.
-
-## Navigation
-
-- Up: [dynacell](../README.md)
-- See also: GPU-dispatch (`cubic`) conventions in [CLAUDE.md](CLAUDE.md) · eval-leaf composition in the
-  [benchmarks README](../../../configs/benchmarks/virtual_staining/README.md).
+- [dynacell](../README.md)
+- [Benchmark configs](../../../configs/benchmarks/virtual_staining/README.md)
+- [CLAUDE.md](CLAUDE.md): cubic and GPU conventions for contributors
