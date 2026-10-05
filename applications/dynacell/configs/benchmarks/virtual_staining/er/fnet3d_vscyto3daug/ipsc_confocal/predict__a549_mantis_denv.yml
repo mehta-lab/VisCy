@@ -1,0 +1,42 @@
+# FNet3DVSAug predict template (er, SEC61B): trained on iPSC, predicting a549_mantis_denv.
+# ckpt_path is a placeholder; the Spotlight-v2 arms predict with --ckpt best.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_sec61b_denv.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_sec61b_denv
+  model_name: fnet3d_vscyto3daug
+  experiment_id: er__ipsc_confocal__fnet3d_vscyto3daug__a549_mantis_sec61b_denv
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fnet3d_vscyto3daug/checkpoints/last.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_vscyto3daug/ipsc/a549__denv/prediction.zarr
+
+launcher:
+  job_name: FNet3DVSAug_PRED_SEC61B_ON_A549_sec61b_denv
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_vscyto3daug/ipsc/a549__denv

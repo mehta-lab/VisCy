@@ -11,7 +11,7 @@
 # the same, but the row is a marker shift on top of the cell-type shift.
 #
 # This bucket's mask tier is like-for-like with the A549/iPSC mito rows: mito
-# routes to the classical aicssegmentation Workflow_tomm20 in
+# routes to the cubic port of the classical TOMM20 workflow in
 # evaluation/segmentation.py::segment, which has no training domain at all, so
 # unlike membrane there is no segmenter-domain caveat on Dice.
 #

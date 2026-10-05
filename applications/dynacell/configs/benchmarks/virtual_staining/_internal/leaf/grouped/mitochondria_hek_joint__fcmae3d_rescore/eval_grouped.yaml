@@ -3,7 +3,7 @@
 # condition, whose prediction was rewritten on 2026-09-08. Globals are copied
 # from that parent (cross-condition probe off, TOMM70A marker) -- NOT from the
 # membrane HEK rescore leaf, whose predicted-nuclei seeding does not apply here:
-# mito routes to the classical aicssegmentation Workflow_tomm20.
+# mito routes to the cubic port of the classical TOMM20 workflow.
 #
 # The other five conditions in the parent are unchanged.
 #

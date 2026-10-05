@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from dynacell.evaluation import feature_metrics
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
@@ -268,6 +269,105 @@ def test_disabled_metric_is_omitted_and_others_unchanged(flag: str, dropped: set
     assert list(reduced) == [k for k in full if k not in dropped]
     for key, value in reduced.items():
         assert value == full[key], key
+
+
+@pytest.mark.parametrize("dataset_level", [False, True])
+def test_small_cohort_fid_mean_shift_through_public_callers(dataset_level: bool) -> None:
+    """A translated rank-deficient cohort has FID equal to its squared mean shift."""
+    target = np.random.default_rng(8).integers(-2, 3, size=(4, 32)).astype(np.float32)
+    pred = target.copy()
+    pred[:, 0] += 2.0
+    if dataset_level:
+        result = compute_feature_similarity(pred, target, "CP", compute_prc=False, compute_mind=False)
+    else:
+        result = compute_feature_similarity_pairwise(pred, target, "CP")
+    assert result["CP_FID"] == pytest.approx(4.0, abs=1e-11)
+
+
+def test_small_cohort_fid_unequal_sample_covariance() -> None:
+    """Unequal cohorts use their own sample denominators; a rank-one oracle is exact."""
+    pred = np.zeros((3, 16), dtype=np.float32)
+    target = np.zeros((5, 16), dtype=np.float32)
+    pred[:, 0] = [-1, 0, 1]
+    target[:, 0] = [-2, -1, 0, 1, 2]
+    pred[:, 1] = 3
+    expected = 9.0 + (1.0 - np.sqrt(2.5)) ** 2
+    assert feature_metrics._fid(pred, target) == pytest.approx(expected, abs=1e-12)
+    assert feature_metrics._fid(target, pred) == pytest.approx(expected, abs=1e-12)
+
+
+def test_small_cohort_fid_noncommuting_covariances() -> None:
+    """A rank-two analytic covariance oracle covers differing feature orientations."""
+    pred = np.zeros((3, 16), dtype=np.float32)
+    target = np.zeros((5, 16), dtype=np.float32)
+    pred[:, :2] = [[-2, 1], [0, -2], [3, 2]]
+    target[:, :2] = [[-3, 0], [-1, 2], [0, 0], [2, -1], [4, 3]]
+    cov_pred = np.cov(pred[:, :2].astype(np.float64), rowvar=False)
+    cov_target = np.cov(target[:, :2].astype(np.float64), rowvar=False)
+    assert not np.allclose(cov_pred @ cov_target, cov_target @ cov_pred)
+    # For a 2x2 PSD product, (sqrt(lambda_1) + sqrt(lambda_2))^2
+    # is trace(product) + 2*sqrt(det(product)).
+    trace_sqrt = np.sqrt(
+        np.trace(cov_pred @ cov_target) + 2 * np.sqrt(np.linalg.det(cov_pred) * np.linalg.det(cov_target))
+    )
+    mean_diff = pred.mean(axis=0, dtype=np.float64) - target.mean(axis=0, dtype=np.float64)
+    expected = mean_diff @ mean_diff + np.trace(cov_pred) + np.trace(cov_target) - 2 * trace_sqrt
+    assert feature_metrics._fid(pred, target) == pytest.approx(expected, abs=1e-12)
+
+
+def test_small_cohort_fid_near_zero_rank_deficient() -> None:
+    """The solver resolves a tiny mean shift rather than eigvals' covariance noise."""
+    target = np.zeros((4, 32), dtype=np.float32)
+    target[:, :4] = np.eye(4, dtype=np.float32)
+    pred = target.copy()
+    pred[:, 8] = np.float32(1e-4)
+    expected = float(np.float64(pred[0, 8]) ** 2)
+    assert feature_metrics._fid(pred, target) == pytest.approx(expected, abs=1e-14)
+    assert feature_metrics._fid(target, target) == pytest.approx(0.0, abs=1e-14)
+
+
+@pytest.mark.parametrize(
+    ("n_pred", "n_target", "dimension", "dense"),
+    [(3, 5, 16, False), (4, 16, 8, True), (16, 4, 8, True), (8, 8, 8, True), (16, 16, 8, True)],
+)
+def test_fid_shape_routing_preserves_dense_helper(
+    n_pred: int, n_target: int, dimension: int, dense: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both cohorts must be small; the boundary and asymmetric cases keep the original value."""
+    rng = np.random.default_rng(9)
+    pred = rng.standard_normal((n_pred, dimension)).astype(np.float32)
+    target = rng.standard_normal((n_target, dimension)).astype(np.float32)
+    original = feature_metrics.fid_statistics_to_metric
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(feature_metrics, "fid_statistics_to_metric", counted)
+    actual = feature_metrics._fid(pred, target)
+    assert np.isfinite(actual)
+    assert len(calls) == int(dense)
+    if dense:
+        expected = original(
+            feature_metrics.fid_features_to_statistics(feature_metrics._to_tensor(pred)),
+            feature_metrics.fid_features_to_statistics(feature_metrics._to_tensor(target)),
+            verbose=False,
+        )["frechet_inception_distance"]
+        assert actual == expected
+
+
+@pytest.mark.parametrize(("n_pred", "n_target"), [(0, 4), (1, 4), (4, 0), (4, 1)])
+def test_fid_undersized_cohort_never_calls_covariance(
+    n_pred: int, n_target: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty and single-row cohorts stay NaN without invoking an undefined covariance."""
+
+    def undefined_covariance(*args, **kwargs):
+        pytest.fail("FID must not build covariance for a cohort with fewer than two rows")
+
+    monkeypatch.setattr(feature_metrics, "fid_features_to_statistics", undefined_covariance)
+    assert np.isnan(feature_metrics._fid(np.zeros((n_pred, 16)), np.zeros((n_target, 16))))
 
 
 def test_all_flags_on_preserves_column_order() -> None:

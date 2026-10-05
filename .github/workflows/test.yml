@@ -174,11 +174,15 @@ jobs:
             tests/test_evaluation_pipeline_parallel_cpu.py \
             tests/test_evaluation_grouped.py \
             tests/test_evaluation_microssim_calibration.py \
+            src/dynacell/evaluation/segmentation_test.py \
             tests/test_distribution.py \
             tests/test_croissant.py \
             tests/test_main_cli_routing.py \
             tests/test_engine.py \
             tests/test_pipeline_cache.py \
+            tests/test_evaluation_fid_provenance.py \
+            src/dynacell/evaluation/feature_metrics_test.py \
+            src/dynacell/evaluation/provenance_test.py \
             tools/watch_stalled_jobs_test.py \
             ../../packages/viscy-utils/tests/test_prediction_writer.py \
             ../../packages/viscy-utils/tests/test_prediction_metadata.py \

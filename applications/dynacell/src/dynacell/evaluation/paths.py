@@ -302,6 +302,8 @@ PAPER_KEY: dict[str, str] = {
     "fnet3d_vscyto3daug_v2_seed1": "fnet3d_vscyto3daug_v2_seed1",
     "fnet3d_vscyto3daug_segaux": "fnet3d_vscyto3daug_segaux",
     "fnet3d_vscyto3daug_segaux_seed1": "fnet3d_vscyto3daug_segaux_seed1",
+    "fnet3d_vscyto3daug_segaux_sauna": "fnet3d_vscyto3daug_segaux_sauna",
+    "fnet3d_vscyto3daug_segaux_cldice": "fnet3d_vscyto3daug_segaux_cldice",
     # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
     # histogram-matched per volume to its segaux arm's (spatial structure kept).
     "fnet3d_paper_histmatch": "fnet3d_histmatch",

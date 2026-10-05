@@ -29,8 +29,9 @@ Arms (``<baseline>_<suffix>``):
   its selectable checkpoints at ep <= 25 of 40, while its S arm will have all 40).
   Each model's ``_segaux`` arm is generated from the same baseline leaf in the same
   pass, so the arm and its v2 control share one recipe by construction. Also
-  ``fnet3d_vscyto3daug`` (Phase 15 Arm B, nucleus only): vanilla FNet fails out of
-  domain, so the FNet verdict on A549 rests on this recipe, retrained on today's code.
+  ``fnet3d_vscyto3daug`` (Phase 15 Arm B; nucleus, then ER and mito for the topology
+  arms below): vanilla FNet fails out of domain, so the FNet verdict on A549 rests on
+  this recipe, retrained on today's code.
 - UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
@@ -56,6 +57,12 @@ Arms (``<baseline>_<suffix>``):
   from the same-dim FNet ``_segaux`` store of the same test leg via
   ``CondMaskSource`` (``Nuclei_prediction``, thresholded per window at Otsu) and
   set no ``fg_mask_key``.
+- ``segaux_sauna`` / ``segaux_cldice`` -- Stage 2 #5 on ``fnet3d_vscyto3daug`` nucleus, ER
+  and mito: the ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice
+  sums weighted by the patch mask's SAUNA map, or mixed with soft-clDice. Each carries its
+  own calibrated ``seg_aux_weight``, since the change rescales the term's gradient. The ER
+  and mito arms (and their ``segaux`` arm) train on masks from the eval's classical
+  binarizer, written by ``write_classical_fg_masks.py``.
 
 Leaves are emitted with ``yaml.safe_dump``, so they carry no inline comments: the
 recipe rationale stays in the baseline leaf each header names, and the reasons for
@@ -83,6 +90,7 @@ import yaml
 BENCHMARKS = Path(__file__).resolve().parents[1] / "configs" / "benchmarks" / "virtual_staining"
 MODELS_ROOT = "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
 ORGANELLES: tuple[str, ...] = ("nucleus", "membrane")
+THIN_ORGANELLES: tuple[str, ...] = ("er", "mito")
 POOL = "ipsc_confocal"
 A549_PREDICTS: tuple[str, ...] = (
     "predict__a549_mantis_mock.yml",
@@ -91,6 +99,19 @@ A549_PREDICTS: tuple[str, ...] = (
 )
 SEG_AUX_C = 0.1
 SEG_AUX_T0 = 0.7
+# Stage 2 #5 (2026-10-01): the segaux arm with one topology-aware change to its Dice term.
+# segaux_sauna weights the Dice sums by |SAUNA "h" map| of the patch mask, which needs the
+# physical voxel size (read from the train set's manifest); segaux_cldice mixes in soft-clDice.
+# Each is calibrated on its own, like any other arm (SEG_AUX_WEIGHTS).
+_IPSC_MANIFEST = Path(__file__).resolve().parents[1] / "src/dynacell/_manifests/aics-hipsc/manifest.yaml"
+_IPSC_SPACING = [yaml.safe_load(_IPSC_MANIFEST.read_text())["spacing"][k] for k in "zyx"]
+TOPOLOGY_ARGS: dict[str, dict[str, Any]] = {
+    "segaux_sauna": {"weighting": "sauna", "spacing": _IPSC_SPACING},
+    # 5 skeleton iterations (the official default is 10): ER/mito tubules are ~1-3 voxels in radius,
+    # nucleus bodies (~40 px) never skeletonize at either count, and each iteration costs ~0.13 s
+    # per (8, 1, 32, 384, 384) step on an A40 (10 iterations: 1.37 s vs 0.07 s without clDice).
+    "segaux_cldice": {"topology": "cldice", "cldice_alpha": 0.5, "cldice_iters": 5},
+}
 # seg_aux_weight per (organelle, arm): the median over 20 seeded val batches of
 # ||grad base|| / ||grad Dice|| at each BASELINE checkpoint (contrast knee, c=0.1),
 # rounded to 2 significant figures, so the Dice term starts with the same gradient
@@ -119,6 +140,22 @@ SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
     # Calibrated on the July Phase 15 Arm B best ckpt (epoch=28-step=75400-loss=0.776): 4.5 [2.6-6.7],
     # results/nucleus__fnet3d_vscyto3daug__batches.csv (val replay 0.782 vs recorded 0.776).
     ("nucleus", "fnet3d_vscyto3daug_segaux"): 4.5,
+    # Stage 2 #5 arms on the same ckpt and val batches (calibrate_variant.py, micro-batch 2), whose
+    # plain-Dice row reproduces the 4.5 above (4.51 [2.58-6.72]): SAUNA 5.28 [2.75-8.00],
+    # clDice at 5 iterations 0.878 [0.636-1.70]. results/nucleus__fnet3d_vscyto3daug__variants.csv.
+    ("nucleus", "fnet3d_vscyto3daug_segaux_sauna"): 5.3,
+    ("nucleus", "fnet3d_vscyto3daug_segaux_cldice"): 0.88,
+    # ER/mito arms, same protocol on the v2 baseline's best ckpt while it was still training (ER
+    # epoch=28-step=63713, mito epoch=18-step=49400; batch fg_frac .07-.11 from the classical masks).
+    # results/{er,mito}__fnet3d_vscyto3daug_v2__variants.csv. ER: Dice 0.220 [0.185-0.345], SAUNA 0.211
+    # [0.177-0.333], clDice 0.236 [0.196-0.361]. Mito: Dice 0.774 [0.617-0.936], SAUNA 0.661
+    # [0.517-0.784], clDice 0.712 [0.547-0.824].
+    ("er", "fnet3d_vscyto3daug_segaux"): 0.22,
+    ("er", "fnet3d_vscyto3daug_segaux_sauna"): 0.21,
+    ("er", "fnet3d_vscyto3daug_segaux_cldice"): 0.24,
+    ("mito", "fnet3d_vscyto3daug_segaux"): 0.77,
+    ("mito", "fnet3d_vscyto3daug_segaux_sauna"): 0.66,
+    ("mito", "fnet3d_vscyto3daug_segaux_cldice"): 0.71,
 }
 # C-joint's mask Dice has no baseline to calibrate against (the baseline has no
 # mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
@@ -159,7 +196,12 @@ class Baseline:
     store_dir: str
     ipsc_predict: str
     engine: str  # "unet" | "gan" | "flow"
-    a549_predicts: tuple[str, ...] = A549_PREDICTS
+    # (organelle, leaf names) where an organelle's A549 predict leaves are not A549_PREDICTS.
+    a549_predict_overrides: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def a549_predicts(self, organelle: str) -> tuple[str, ...]:
+        """Return the baseline's A549 predict leaf names for ``organelle``."""
+        return dict(self.a549_predict_overrides).get(organelle, A549_PREDICTS)
 
 
 BASELINES: dict[str, Baseline] = {
@@ -184,14 +226,17 @@ BASELINES: dict[str, Baseline] = {
         "train.yml", "celldiff_r2", "celldiff_r2_iterative", "predict__ipsc_confocal__iterative.yml", "flow"
     ),
     # Phase 15 Arm B: FNet-3D on a 384^2 patch with the VSCyto3D augmentation stack, the FNet
-    # that works out of domain (A549 nucleus PCC 0.68 vs 0.04 for fnet3d_paper). Nucleus only.
+    # that works out of domain (A549 nucleus PCC 0.68 vs 0.04 for fnet3d_paper). The ER and mito
+    # baseline leaves are never-run templates of the same recipe (Stage 2 #5).
     "fnet3d_vscyto3daug": Baseline(
         "train.yml",
         "fnet3d_vscyto3daug",
         "fnet3d_vscyto3daug",
         "predict__ipsc_confocal.yml",
         "unet",
-        a549_predicts=tuple(f"predict__a549_mantis_h2b_{c}.yml" for c in ("mock", "denv", "zikv")),
+        a549_predict_overrides=(
+            ("nucleus", tuple(f"predict__a549_mantis_h2b_{c}.yml" for c in ("mock", "denv", "zikv"))),
+        ),
     ),
 }
 
@@ -270,6 +315,13 @@ ARMS: tuple[Arm, ...] = (
     # design, so its A549 gains are not evidence): the full 2x2 from the start. v2 retrains the
     # July baseline under today's code, selection and predict path, like the other 3D v2s.
     *(Arm("fnet3d_vscyto3daug", s, ("nucleus",), a549=True) for s in ("v2", "v2_seed1", "segaux", "segaux_seed1")),
+    # Stage 2 #5: SAUNA-weighted Dice vs soft-clDice on the same cell, against the 2x2 above.
+    *(Arm("fnet3d_vscyto3daug", s, ("nucleus",), a549=True) for s in TOPOLOGY_ARGS),
+    # ... and on the thin organelles the topology terms are meant for. Their training masks come
+    # from the eval's classical ER/mito segmenter (CLAHE+Otsu fills the ER cytoplasm). The two
+    # baseline draws need no mask, so they train first; the arms are calibrated on their ckpt.
+    *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("v2", "v2_seed1")),
+    *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("segaux", *TOPOLOGY_ARGS)),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
 SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
@@ -294,6 +346,10 @@ _DESCRIPTION: dict[str, str] = {
     "seed1": "seed_everything: 1",
     "segaux_seed1": "the segaux arm's recipe + seed_everything: 1 (a second draw of the arm)",
     "v2_seed1": "seed_everything: 1 (a second draw of the v2 baseline)",
+    "segaux_sauna": "the segaux arm's recipe + SegAuxDice weighting=sauna (Dice sums weighted by |SAUNA h map| "
+    "of the patch mask, iPSC voxel size) at its own calibrated seg_aux_weight",
+    "segaux_cldice": "the segaux arm's recipe + SegAuxDice topology=cldice (0.5 Dice + 0.5 soft-clDice, 5 "
+    "skeleton iterations) at its own calibrated seg_aux_weight",
     "segaux_halfw": "the segaux arm's recipe with seg_aux_weight x0.5 (loss-weight sweep)",
     "segaux_doublew": "the segaux arm's recipe with seg_aux_weight x2 (loss-weight sweep)",
     "v2": "nothing (fresh retrain of the baseline recipe under its own run root)",
@@ -383,7 +439,7 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
         renames, l1_keys = allowed_diff(replace(arm, suffix="l1"), kind)
         return renames, l1_keys | allowed_diff(replace(arm, suffix="segaux"), kind)[1]
     recipe: set[str] = set()
-    if arm.suffix in ("segaux", "segauxself"):
+    if arm.suffix in ("segaux", "segauxself", *TOPOLOGY_ARGS):
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.seg_aux", "model.init_args.seg_aux_weight"}
         if BASELINES[arm.baseline].engine == "flow":
             recipe.add("model.init_args.seg_aux_t0")
@@ -457,14 +513,16 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
         return
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})
-    if arm.suffix in ("segaux", "segauxself"):
+    if arm.suffix in ("segaux", "segauxself", *TOPOLOGY_ARGS):
         data_args["fg_mask_key"] = "fg_mask"
-        seg_args: dict[str, Any] = {"c": SEG_AUX_C}
+        seg_args: dict[str, Any] = {"c": SEG_AUX_C, **TOPOLOGY_ARGS.get(arm.suffix, {})}
         if arm.suffix == "segauxself":
             seg_args["label"] = "target"
         model_args["seg_aux"] = {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": seg_args}
-        # segauxself reuses the segaux arm's calibrated weight so the two differ by the label only.
-        model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, f"{arm.baseline}_segaux")]
+        # segauxself reuses the segaux arm's calibrated weight so the two differ by the label only;
+        # the topology arms change the term's gradient scale, so they carry their own.
+        weight_arm = arm.model if arm.suffix in TOPOLOGY_ARGS else f"{arm.baseline}_segaux"
+        model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, weight_arm)]
         if BASELINES[arm.baseline].engine == "flow":
             model_args["seg_aux_t0"] = SEG_AUX_T0
     elif arm.suffix == "seed1":
@@ -605,7 +663,7 @@ def build_leaves(benchmarks: Path = BENCHMARKS) -> dict[Path, str]:
             src_dir = benchmarks / organelle / arm.baseline / POOL
             dst_dir = benchmarks / organelle / arm.model / POOL
             jobs = [("fit", base.fit_leaf, "train.yml", build_fit)] if arm.fit else []
-            predicts = [base.ipsc_predict, *(base.a549_predicts if arm.a549 else ())]
+            predicts = [base.ipsc_predict, *(base.a549_predicts(organelle) if arm.a549 else ())]
             jobs += [("predict", name, name, build_predict) for name in predicts]
             for kind, src_name, dst_name, build in jobs:
                 src = src_dir / src_name

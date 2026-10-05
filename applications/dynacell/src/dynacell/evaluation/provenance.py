@@ -22,9 +22,9 @@ every ``SI_*``, ``PerCell_*``, every ``AP_*`` / ``mAP`` / ``instance_dice``,
 
 This module makes that boundary detectable and non-repeatable:
 
-* :func:`check_cubic_pin` fails a run whose environment holds neither the
-  version the repo declares nor one measured equivalent to it, instead of
-  silently producing values from a different numeric stack.
+* :func:`check_cubic_pin` rejects unsupported runtime versions. Target-specific
+  workflow capabilities are checked separately at startup, so old environments
+  can still run targets that do not need the new workflows.
 * :func:`write_metrics_provenance` stamps the versions beside the metrics,
   and :func:`metrics_provenance_matches` lets the final-metrics cache gate
   refuse a cache built by a different ``cubic``.
@@ -46,6 +46,10 @@ It also stamps the ``prediction_sources_sha256_12`` of the prediction that was s
 into the same ``io.pred_path``, so the path alone cannot tell the final-metrics cache
 gate that its rows describe an older prediction.
 
+Feature FID records its solver identity independently of cubic. A requested FID
+accepts only the current or a measured-equivalent solver. Missing identities
+denote the original torch-fidelity helper; unknown explicit identities are refused.
+
 When the foreground-limited pixel columns are on, the resolved
 ``pixel_metrics.foreground`` recipe is stamped too (``pixel_foreground``), with the
 ``FOREGROUND_METRICS_VERSION`` of the code and the pixel spacing: the ``FG_*`` values
@@ -64,7 +68,12 @@ from dynacell.evaluation.cache import prediction_sources_sha256_12, source_preda
 #: The ``cubic`` version this repo is built against. Must equal the pin in
 #: ``applications/dynacell/pyproject.toml``; ``provenance_test.py`` asserts
 #: they cannot drift apart.
-REQUIRED_CUBIC_VERSION = "0.9.0a3"
+REQUIRED_CUBIC_VERSION = "0.9.0a4"
+
+# These installed versions may run code paths whose API requirements they meet.
+# ER/mitochondria additionally require the new workflows at eval startup.
+# Cache equivalence is a separate, measured contract below.
+CUBIC_RUNTIME_VERSIONS = frozenset({"0.9.0a3", "0.9.0a2", "0.9.0a1"})
 
 #: For each declared ``cubic`` version, the earlier versions whose metric values it
 #: reproduces within a stated tolerance, so their caches stay reusable. Keyed by the
@@ -95,7 +104,25 @@ REQUIRED_CUBIC_VERSION = "0.9.0a3"
 #: resample_isotropic control moves 1.8-6.1% under the same harness, so the
 #: comparison can see a change. 0.9.0a1 stays listed: it reproduces 0.9.0a2
 #: (entry above), which 0.9.0a3 reproduces exactly.
-CUBIC_VERSIONS_EQUIVALENT_TO = {"0.9.0a3": frozenset({"0.9.0a2", "0.9.0a1"})}
+#: 0.9.0a3 -> 0.9.0a4 ports ER/mitochondria workflows and accelerates metric
+#: reductions. MEASURED 2026-10-02 on A40 / AMD EPYC 7313P (AVX2, no AVX-512):
+#: five full 48x640x960 A549 volumes (ER mock/DENV predictions, ER mock GT,
+#: mitochondria DENV prediction and mock GT) have CPU/GPU mask XOR 0 voxels;
+#: eight private cold VisCy cache cases write/read the same masks. A one-voxel
+#: perturbation is detected, and the AICS baseline mutates its input while the
+#: cubic path does not. On captured A549 mock-ER metric inputs, nine pixel
+#: columns and ten MicroMS3IM timepoints are exact; Spectral_PCC changes by
+#: 7.6400518e-9 absolute / 4.3105157e-7 relative (tolerance: 1e-6 relative).
+#: Calibration parameters are identical; a 0.01 score perturbation is detected.
+#: On thirteen captured cells, four per-cell PCC/SSIM values and seven GLCM
+#: columns are exact; all twenty-two CP columns differ by <=3.4e-15 absolute
+#: (tolerance: 1e-12 absolute). A flipped-image feature control changes by 2.596.
+#: Other cell lines, AVX-512 hosts and genuinely 2D inputs were not measured.
+#: The older entries remain by the measured equivalences above.
+CUBIC_VERSIONS_EQUIVALENT_TO = {
+    "0.9.0a3": frozenset({"0.9.0a2", "0.9.0a1"}),
+    "0.9.0a4": frozenset({"0.9.0a3", "0.9.0a2", "0.9.0a1"}),
+}
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
 PROVENANCE_FILENAME = "metrics_provenance.json"
@@ -106,6 +133,26 @@ PROVENANCE_FILENAME = "metrics_provenance.json"
 #: future discrepancy would otherwise be just as unattributable, but they are not
 #: gated on absent evidence that they move a value.
 _RECORDED_PACKAGES = ("cubic", "numpy", "scikit-image")
+
+#: FID solver identity, independent of the cubic pin. Both feature-metric callers
+#: use float64 sample-space SVD only when max(n_pred, n_target) < d, and otherwise
+#: keep the original torch-fidelity eigvals helper.
+FID_IMPLEMENTATION_VERSION = "sample-space-svd-v1"
+
+#: Legacy sidecars carry no FID identity because the only solver was this helper.
+_LEGACY_FID_IMPLEMENTATION = "torch-fidelity-eigvals-v1"
+
+#: Numerical compatibility policy: |new - old| <= 1e-5 + 2e-6 * |old|. The
+#: absolute allowance is needed near zero, where the legacy non-symmetric
+#: covariance eigvals lose accuracy; this is not bitwise equivalence. Measured
+#: 2026-10-02 on captured A549 mock ER inputs: 120 (FOV, t) cohorts for each of
+#: CP, DINOv3, DynaCLR, CELL-DINO and MorphEm, plus their five pooled datasets.
+#: CP is selected, standardized and clipped with the bound production reference.
+#: Every cohort passed this contract; all five dataset values use the dense path
+#: and are exactly unchanged. An unknown explicit solver identity is refused.
+FID_IMPLEMENTATIONS_EQUIVALENT_TO = {
+    FID_IMPLEMENTATION_VERSION: frozenset({_LEGACY_FID_IMPLEMENTATION}),
+}
 
 
 def installed_versions() -> dict[str, str]:
@@ -125,22 +172,21 @@ def _accepted_cubic_versions() -> frozenset[str]:
 
 
 def check_cubic_pin() -> None:
-    """Raise when the installed ``cubic`` is neither the declared one nor measured-equivalent to it.
+    """Require the declared runtime or a supported older environment.
 
-    An equivalent version is accepted because its values are, by measurement, the
-    declared pin's values: that is what lets eval jobs queued on the previous
-    venv keep running across a measured-equivalent bump.
+    Cache equivalence does not grant runtime API capabilities. Eval entry points
+    additionally call ``require_cubic_workflows`` for their target.
 
     Raises
     ------
     RuntimeError
         If the installed ``cubic`` version is not :data:`REQUIRED_CUBIC_VERSION`
-        or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`. Fails closed
+        or listed in :data:`CUBIC_RUNTIME_VERSIONS`. Fails closed
         on purpose: a mismatched stack writes plausible values under the wrong
         numeric contract, which is exactly the failure this module exists to prevent.
     """
     installed = version("cubic")
-    if installed not in _accepted_cubic_versions():
+    if installed not in CUBIC_RUNTIME_VERSIONS | {REQUIRED_CUBIC_VERSION}:
         raise RuntimeError(
             f"cubic {installed!r} is installed but this repo declares "
             f"{REQUIRED_CUBIC_VERSION!r}. Metric values are not comparable across "
@@ -157,6 +203,7 @@ def write_metrics_provenance(
     cp_space_sha256: str | None,
     prediction_digest: str,
     pixel_foreground: dict[str, Any] | None = None,
+    compute_fid: bool = False,
 ) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
@@ -180,6 +227,9 @@ def write_metrics_provenance(
         Resolved ``pixel_metrics.foreground`` recipe the ``FG_*`` columns were scored
         with, plus the FG code version and pixel spacing, stored under
         ``pixel_foreground``; ``None`` (columns off) writes no key.
+    compute_fid : bool
+        Whether feature FID was requested. When True, record the implementation
+        under ``fid_implementation``; False writes no key.
 
     Raises
     ------
@@ -196,6 +246,8 @@ def write_metrics_provenance(
     }
     if pixel_foreground is not None:
         payload["pixel_foreground"] = pixel_foreground
+    if compute_fid:
+        payload["fid_implementation"] = FID_IMPLEMENTATION_VERSION
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
@@ -205,6 +257,7 @@ def metrics_provenance_matches(
     cp_space_sha256: str | None,
     prediction_sources: dict[str, dict[str, Any]],
     pixel_foreground: dict[str, Any] | None = None,
+    compute_fid: bool = False,
 ) -> bool:
     """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference, from this prediction.
 
@@ -242,6 +295,11 @@ def metrics_provenance_matches(
         turning the columns on, or changing a sigma, the code version or the spacing,
         recomputes. ``None`` accepts any recorded recipe: the cache's extra ``FG_*``
         columns cost a run without them nothing.
+    compute_fid : bool
+        When True, require the current or a measured-equivalent FID solver.
+        A missing identity denotes the legacy torch-fidelity implementation;
+        unknown explicit identities are refused. False reuses no FID value and
+        ignores its solver identity.
 
     Returns
     -------
@@ -250,7 +308,8 @@ def metrics_provenance_matches(
         are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`),
         if ``cp_space_sha256`` is given the recorded binding equals it, if
         ``pixel_foreground`` is given the recorded recipe equals it, and the
-        prediction check above passes.
+        prediction check above passes. When ``compute_fid`` is True the recorded
+        FID solver must also be current or measured-equivalent.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -265,6 +324,13 @@ def metrics_provenance_matches(
         return False
     if pixel_foreground is not None and payload.get("pixel_foreground") != pixel_foreground:
         return False
+    if compute_fid:
+        fid_implementation = payload.get("fid_implementation", _LEGACY_FID_IMPLEMENTATION)
+        accepted_fid = FID_IMPLEMENTATIONS_EQUIVALENT_TO.get(FID_IMPLEMENTATION_VERSION, frozenset()) | {
+            FID_IMPLEMENTATION_VERSION
+        }
+        if not isinstance(fid_implementation, str) or fid_implementation not in accepted_fid:
+            return False
     digest = payload.get("prediction_sources_sha256_12")
     if digest is not None:
         return digest == prediction_sources_sha256_12(prediction_sources)
