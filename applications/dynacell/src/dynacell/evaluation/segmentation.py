@@ -52,8 +52,8 @@ def require_cubic_workflows(target_name: str) -> None:
     if name is not None and not hasattr(_cubic_segmentation, name):
         raise RuntimeError(
             f"target {target_name!r} requires cubic.segmentation.{name}, which cubic "
-            f"{version('cubic')} does not provide. Use the evaluation environment "
-            "pinned in pyproject.toml (DYNACELL_EVAL_VENV / UV_PROJECT_ENVIRONMENT)."
+            f"{version('cubic')} does not provide. Sync the project environment from "
+            "uv.lock (`uv sync --package dynacell --extra eval --extra eval_gpu`)."
         )
 
 
