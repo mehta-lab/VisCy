@@ -72,6 +72,13 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # FNet-3D vscyto3daug mito v2 baseline, seed 1 (fit 36890546 resumed as 37004479 after a
+  # NODE_FAIL requeue, max_steps 200000, --ckpt best epoch 65), 2026-10-05: all four legs. Gives
+  # the mito baseline seed floor next to wave2s's seed 0; cubic 0.9.0a4 eval venv. Generate with
+  # --wave wave2v.
+  wave2v:
+    mito:
+      - fnet3d_vscyto3daug_v2_seed1
   # FNet-3D vscyto3daug nucleus soft-clDice arm (Stage 2 #5; fit 36910358, max_steps 200000,
   # --ckpt best epoch 72), 2026-10-05: all four legs. Nucleus bodies never skeletonize at
   # cldice_iters=5, so this arm is ~segaux at half the Dice weight, not a clDice test. Read
