@@ -2057,6 +2057,12 @@ def save_metrics(
 _SCALED_PIXEL_COLUMNS = frozenset({"SI_PSNR", "SI_SSIM", "SI_NRMSE"})
 
 
+def _forces_final_metrics(config: DictConfig) -> bool:
+    """True when ``force_recompute`` rejects every final-metrics cache of ``config``."""
+    force = config.force_recompute
+    return bool(force.all or force.final_metrics)
+
+
 def _final_metrics_cache_valid(config: DictConfig) -> bool:
     """Return True when the saved CSV/NPY caches can be reused.
 
@@ -2070,8 +2076,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # Resolved before every early return: both entrypoints call this gate before any
     # model load, so an invalid recipe fails here rather than after the load.
     foreground = _foreground_stamp(config)
-    force = config.force_recompute
-    if force.all or force.final_metrics:
+    if _forces_final_metrics(config):
         return False
     save_dir = Path(config.save.save_dir)
     # Metric values are not comparable across cubic versions — FSC/FRC/Spectral_PCC
@@ -2311,6 +2316,34 @@ def _select_conditions(conditions, only) -> list[tuple[str, object]]:
     return [(name, cond) for name, cond in named if name in wanted]
 
 
+def _with_forced_probe_siblings(config: DictConfig, conditions, selected: list) -> list:
+    """Add the unselected probe-group siblings of ``selected`` that ``force_recompute`` forces.
+
+    A forced condition has no cache that counts as current: forcing is how a recipe change
+    the cache check cannot see (``feature_metrics.focus_slab``) is applied, so pairing a
+    rescored condition with a forced sibling's old embeddings could mix recipes. Rescoring
+    the sibling keeps the probe whole. Every grouped leaf forces ``final_metrics``, so there
+    ``only_conditions=[<model>__a549_mock]`` rescores that model's mock, DENV and ZIKV.
+    Leaf order is kept.
+    """
+    selected_names = {name for name, _ in selected}
+    merged = {name: _merge_condition(config, cond) for name, cond in _select_conditions(conditions, None)}
+    membership = {name: probe_group(Path(cfg.save.save_dir)) for name, cfg in merged.items()}
+    keys = {membership[name][0] for name in selected_names if membership[name] is not None}
+    added = [
+        name
+        for name in merged
+        if name not in selected_names
+        and membership[name] is not None
+        and membership[name][0] in keys
+        and _forces_final_metrics(merged[name])
+    ]
+    if not added:
+        return selected
+    print(f"[grouped] force_recompute: also rescoring probe-group siblings {added}")
+    return [(name, cond) for name, cond in _select_conditions(conditions, None) if name in selected_names | set(added)]
+
+
 def _probe_counterparts(
     config: DictConfig, conditions, selected_names: set[str], selected_dirs: list[Path], rescored_dirs: list[Path]
 ) -> tuple[list[Path], list[Path]]:
@@ -2443,7 +2476,19 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     conditions = OmegaConf.select(config, "conditions", default=None)
     if not conditions:
         raise ValueError("evaluate_predictions_grouped requires a non-empty top-level 'conditions' list")
-    selected = _select_conditions(conditions, OmegaConf.select(config, "only_conditions", default=None))
+    only = OmegaConf.select(config, "only_conditions", default=None)
+    selected = _select_conditions(conditions, only)
+    # Gated by ``cross_condition_probe.enabled``; default-on whenever feature metrics
+    # are computed, since the probe consumes the embeddings those produce.
+    probe_enabled = bool(
+        OmegaConf.select(
+            config,
+            "cross_condition_probe.enabled",
+            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
+        )
+    )
+    if probe_enabled and only is not None:
+        selected = _with_forced_probe_siblings(config, conditions, selected)
 
     executor = OmegaConf.select(config, "runtime.executor", default="serial")
     require_complete = bool(OmegaConf.select(config, "io.require_complete_cache", default=False))
@@ -2535,19 +2580,10 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # Cross-condition infection probe: once every condition in the group has
     # its single-cell embeddings on disk, classify each infected condition vs
     # mock (FOV-stratified logistic probe, per feature space, GT and pred).
-    # Default-on whenever feature metrics were computed (the probe consumes the
-    # embeddings those produce) and a mock + >=1 infected condition are present.
-    # Gated by ``cross_condition_probe.enabled``. It runs after every condition's metrics
+    # It needs a mock + >=1 infected condition. It runs after every condition's metrics
     # are saved, so a failure loses nothing already written; it is not swallowed, since a
     # CP reference/sidecar failure there means the probe would score in the wrong space.
     # (Missing embeddings of one side are already a recorded skip inside the probe.)
-    probe_enabled = bool(
-        OmegaConf.select(
-            config,
-            "cross_condition_probe.enabled",
-            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
-        )
-    )
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))

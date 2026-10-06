@@ -58,7 +58,10 @@ dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
 - **`conditions` entries** may override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, `benchmark.dataset_ref` and `name`. Changing any field that affects model loading or segmentation raises an error.
 - **Always re-scored:** grouped leaves set `force_recompute.final_metrics: true`. To add a condition to a finished bucket without re-scoring the others, pass `force_recompute.final_metrics=false`.
 
-To score only some conditions of a bucket, pass their names: `only_conditions=[<name>,...]`. An unknown name raises an error. The cross-condition probe still pairs each rescored condition with the unselected mock or infected conditions of its probe group whose cached metrics are current. Under `force_recompute` no cache counts as current, since the check cannot see recipe changes such as `feature_metrics.focus_slab`. A probe CSV that the run cannot rewrite is removed: one in a rescored infected condition that found no current mock, or one in an infected condition whose mock was rescored.
+To score only some conditions of a bucket, pass their names: `only_conditions=[<name>,...]`. An unknown name, or a bare name without brackets, raises an error. The cross-condition probe pairs mock with each infected condition of the same model and test set (its probe group), so a subset run keeps those pairs consistent:
+
+- **Forced (the leaf default):** no cache counts as current, since the check cannot see recipe changes such as `feature_metrics.focus_slab`. Each selected condition therefore brings the rest of its probe group into the run, and `only_conditions=[<model>__a549_mock]` rescores that model's mock, DENV and ZIKV.
+- **Not forced:** a rescored infected condition is probed against its group's mock when the mock's cache is current. A rescored mock re-probes each infected condition whose cache is current. A probe CSV that the run cannot rewrite is removed: one in a selected infected condition that found no current mock, or one in an infected condition whose mock was rescored.
 
 Use `leaf=`, not `-c` (`-c` is Hydra's display-only `--cfg`).
 
