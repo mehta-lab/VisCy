@@ -25,7 +25,7 @@ from dynacell.evaluation.cp_reference import (
     cp_sidecar_payload,
     eval_cp_space,
 )
-from dynacell.evaluation.cross_condition_probe import GROUP_PROBE_FILENAME
+from dynacell.evaluation.cross_condition_probe import GROUP_PROBE_FILENAME, probe_group
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -2307,27 +2307,36 @@ def _select_conditions(conditions, only) -> list[tuple[str, object]]:
     return [(name, cond) for name, cond in named if name in wanted]
 
 
-def _cached_counterpart_dirs(config: DictConfig, conditions, selected: list[tuple[str, object]]) -> list[Path]:
-    """Save dirs of the unselected conditions whose cached metrics match the current inputs.
+def _probe_counterparts(
+    config: DictConfig, conditions, selected_names: set[str], selected_dirs: list[Path]
+) -> list[Path]:
+    """Save dirs of the unselected conditions that can pair with a selected one in the probe.
 
-    Under ``only_conditions`` the probe still pairs a rescored mock with its infected
-    conditions, and a rescored infected condition with its mock. A counterpart is
-    used only when its cache would be reused if it were selected; ``force_recompute``
-    is ignored here, since it asks to rescore the selected conditions, not to distrust
-    the others.
+    Only conditions sharing a probe group with a selected one are inspected, and only
+    those whose cache would be reused if they were selected qualify; ``force_recompute``
+    is ignored for that check, since it asks to rescore the selected conditions. A
+    counterpart without a prediction store is reported and left out.
     """
-    selected_names = {name for name, _ in selected}
-    dirs = []
+    groups = {m[0] for m in map(probe_group, selected_dirs) if m is not None}
+    usable: list[Path] = []
     for name, cond in _select_conditions(conditions, None):
         if name in selected_names:
             continue
         merged = _merge_condition(config, cond)
+        save_dir = Path(merged.save.save_dir)
+        membership = probe_group(save_dir)
+        if membership is None or membership[0] not in groups:
+            continue
         apply_dataset_ref(merged)
         merged.force_recompute.all = False
         merged.force_recompute.final_metrics = False
-        if _final_metrics_cache_valid(merged):
-            dirs.append(Path(merged.save.save_dir))
-    return dirs
+        if not Path(merged.io.pred_path).exists():
+            print(f"[grouped] probe counterpart {name!r}: no prediction store at {merged.io.pred_path}; not paired")
+        elif _final_metrics_cache_valid(merged):
+            usable.append(save_dir)
+        else:
+            print(f"[grouped] probe counterpart {name!r}: cached metrics not current; not paired")
+    return usable
 
 
 def _check_grouped_field_invariants(
@@ -2525,8 +2534,8 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
-        probe_dirs = condition_save_dirs + _cached_counterpart_dirs(config, conditions, selected)
-        written = _cross_condition_run_for_group(probe_dirs, n_splits=n_splits, rng_seed=rng_seed)
+        usable = _probe_counterparts(config, conditions, {name for name, _ in selected}, condition_save_dirs)
+        written = _cross_condition_run_for_group(condition_save_dirs + usable, n_splits=n_splits, rng_seed=rng_seed)
         # A rescored condition that found no counterpart to pair with must not keep a
         # probe scored on the embeddings it just replaced.
         for save_dir in condition_save_dirs:

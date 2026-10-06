@@ -432,8 +432,11 @@ def test_grouped_only_conditions_rejects_unknown_or_empty(tmp_path: Path, only: 
     assert not (save_root / "cond_b_grouped").exists()
 
 
-def _probe_rerun_config(tmp_path: Path, only: list[str]):
-    """A mock + denv grouped config restricted to ``only``; returns ``(config, save_dirs)``."""
+def _probe_rerun_config(tmp_path: Path, only: list[str], *, force: bool = False, extra: tuple[dict, ...] = ()):
+    """A mock + denv grouped config restricted to ``only``; returns ``(config, save_dirs)``.
+
+    ``extra`` appends conditions as given, after the mock and denv ones.
+    """
     base = build_eval_config(
         tmp_path / "pred.zarr",
         tmp_path / "gt.zarr",
@@ -443,28 +446,41 @@ def _probe_rerun_config(tmp_path: Path, only: list[str]):
         executor="serial",
         fov_workers=1,
     )
+    (tmp_path / "pred.zarr").mkdir()
     save_dirs = {cond: tmp_path / "er" / "model" / "ipsc" / f"a549__{cond}" for cond in ("mock", "denv")}
     for d in save_dirs.values():
         d.mkdir(parents=True)
+    conditions = [{"name": cond, "save": {"save_dir": str(d)}} for cond, d in save_dirs.items()]
     config = OmegaConf.merge(
         base,
         {
-            "conditions": [{"name": cond, "save": {"save_dir": str(d)}} for cond, d in save_dirs.items()],
+            "conditions": [*conditions, *extra],
             "only_conditions": only,
-            "force_recompute": {"final_metrics": True},
+            "force_recompute": {"final_metrics": force},
             "cross_condition_probe": {"enabled": True},
         },
     )
     return config, save_dirs
 
 
-def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> list[list[Path]]:
+def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> tuple[list[list[Path]], list[Path]]:
     """Stub scoring; ``cached`` dirs hold metrics that a non-forced run would reuse.
 
-    The probe stub writes a fresh CSV into every infected dir it can pair with a
-    mock, and the returned list records the dirs each probe call received.
+    The cache check keeps the real one's order: a force flag rejects first, and a
+    missing prediction store raises. The probe stub writes a fresh CSV into every
+    infected dir it can pair with a mock. Returns the dirs each probe call received
+    and the dirs whose cache was checked.
     """
     calls: list[list[Path]] = []
+    checked: list[Path] = []
+
+    def cache_valid(cfg):
+        checked.append(Path(cfg.save.save_dir))
+        if cfg.force_recompute.all or cfg.force_recompute.final_metrics:
+            return False
+        if not Path(cfg.io.pred_path).exists():
+            raise FileNotFoundError(cfg.io.pred_path)
+        return Path(cfg.save.save_dir) in cached
 
     def probe(dirs, n_splits, rng_seed):
         calls.append(list(dirs))
@@ -482,13 +498,9 @@ def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> list[list
         pipeline, "evaluate_predictions", lambda cfg, *, models, cp_space, prediction_snapshot: ([], [], [])
     )
     monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
-    monkeypatch.setattr(
-        pipeline,
-        "_final_metrics_cache_valid",
-        lambda cfg: not cfg.force_recompute.final_metrics and Path(cfg.save.save_dir) in cached,
-    )
+    monkeypatch.setattr(pipeline, "_final_metrics_cache_valid", cache_valid)
     monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", probe)
-    return calls
+    return calls, checked
 
 
 def test_mock_only_rerun_reprobes_cached_infected(tmp_path: Path, monkeypatch):
@@ -496,7 +508,7 @@ def test_mock_only_rerun_reprobes_cached_infected(tmp_path: Path, monkeypatch):
     pipeline = live_pipeline_module()
     config, dirs = _probe_rerun_config(tmp_path, ["mock"])
     (dirs["denv"] / GROUP_PROBE_FILENAME).write_text("stale")
-    calls = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+    calls, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
 
     pipeline.evaluate_predictions_grouped(config)
 
@@ -511,7 +523,7 @@ def test_infected_only_rerun_never_keeps_a_stale_probe(tmp_path: Path, monkeypat
     config, dirs = _probe_rerun_config(tmp_path, ["denv"])
     probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
     probe_csv.write_text("stale")
-    calls = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]} if mock_cached else set())
+    calls, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]} if mock_cached else set())
 
     pipeline.evaluate_predictions_grouped(config)
 
@@ -520,3 +532,22 @@ def test_infected_only_rerun_never_keeps_a_stale_probe(tmp_path: Path, monkeypat
         assert probe_csv.read_text() == "fresh"
     else:
         assert not probe_csv.exists()
+
+
+def test_subset_rerun_skips_conditions_outside_its_probe_groups(tmp_path: Path, monkeypatch):
+    """Only real counterparts are checked; another model's or a missing-store sibling cannot fail the run."""
+    pipeline = live_pipeline_module()
+    missing = str(tmp_path / "missing.zarr")
+    other_model = tmp_path / "er" / "other" / "ipsc" / "a549__denv"
+    zikv = tmp_path / "er" / "model" / "ipsc" / "a549__zikv"
+    extra = (
+        {"name": "other", "io": {"pred_path": missing}, "save": {"save_dir": str(other_model)}},
+        {"name": "zikv", "io": {"pred_path": missing}, "save": {"save_dir": str(zikv)}},
+    )
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"], extra=extra)
+    calls, checked = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert other_model not in checked
+    assert calls == [[dirs["mock"], dirs["denv"]]]
