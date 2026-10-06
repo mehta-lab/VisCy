@@ -353,7 +353,13 @@ class CELLDiff3DVS(nn.Module):
 
         return target
 
-    def generate_trajectory(self, phase: Tensor, num_steps: int = 100) -> Tensor:
+    def generate_trajectory(
+        self,
+        phase: Tensor,
+        num_steps: int = 100,
+        sampling_method: str = "dopri5",
+        time_schedule: str | tuple[float, float] = "uniform",
+    ) -> Tensor:
         """Generate virtual staining and return the full ODE trajectory.
 
         Parameters
@@ -362,6 +368,11 @@ class CELLDiff3DVS(nn.Module):
             Phase contrast input of shape ``(B, 1, D, H, W)``.
         num_steps : int
             Number of ODE output time points (trajectory frames).
+        sampling_method : str
+            ``torchdiffeq`` method, as in :meth:`generate`. With a fixed-grid
+            method the frames are the solver's own steps.
+        time_schedule : str or tuple of float
+            Spacing of the time points, as in :meth:`generate`.
 
         Returns
         -------
@@ -370,7 +381,9 @@ class CELLDiff3DVS(nn.Module):
             Index 0 is pure Gaussian noise; index ``-1`` is the final prediction.
         """
         target = self._noise_like_target(phase)
-        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+        sample_fn = self.transport_sampler.sample_ode(
+            sampling_method=sampling_method, num_steps=num_steps, time_schedule=time_schedule
+        )
 
         def fn(xt: Tensor, t: Tensor) -> Tensor:
             return self.net(xt, phase, t)

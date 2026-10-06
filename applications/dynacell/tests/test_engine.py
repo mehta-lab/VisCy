@@ -1880,3 +1880,25 @@ def test_gan_phase_shifts_off_by_default_and_routes_when_set():
     with torch.no_grad():
         prediction = model.predict_step({"source": source}, batch_idx=0)
     assert prediction.shape == (1, 1, 8, 96, 128)
+
+
+def test_flow_matching_generate_trajectory_fixed_grid(synth_celldiff_batch):
+    """generate_trajectory steps a fixed-grid sampler and ends where generate() does."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+    )
+    model.eval()
+    phase = synth_celldiff_batch["source"]
+    kwargs = dict(num_steps=8, sampling_method="midpoint", time_schedule=(0.4, 0.3))
+    calls = []
+    hook = model.model.net.register_forward_hook(lambda *_: calls.append(1))
+    torch.manual_seed(0)
+    traj = model.model.generate_trajectory(phase, **kwargs)
+    hook.remove()
+    torch.manual_seed(0)
+    final = model.model.generate(phase, **kwargs)
+    assert traj.shape == (8, *phase.shape)
+    # Midpoint takes 2 evaluations per step on the 8-point grid: 7 steps.
+    assert len(calls) == 14
+    torch.testing.assert_close(traj[-1], final)
