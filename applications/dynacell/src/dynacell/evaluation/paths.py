@@ -313,6 +313,10 @@ PAPER_KEY: dict[str, str] = {
     # epoch=74-step=195000 instead of its best-val epoch=17, to separate seed variance from
     # checkpoint stage in the baseline floor.
     "fnet3d_vscyto3daug_v2_seed1_e74": "fnet3d_vscyto3daug_v2_seed1_e74",
+    # Checkpoint-stage control: the mito vscyto3daug segaux arm re-predicted from
+    # latest-epoch=76-step=200000 instead of its best-val epoch=30, closer to the baselines'
+    # epoch 62 / 65.
+    "fnet3d_vscyto3daug_segaux_e76": "fnet3d_vscyto3daug_segaux_e76",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
