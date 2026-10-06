@@ -2590,14 +2590,15 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
         usable, invalidated = _probe_counterparts(
             config, conditions, {name for name, _ in selected}, condition_save_dirs, rescored_dirs
         )
-        written = _cross_condition_run_for_group(condition_save_dirs + usable, n_splits=n_splits, rng_seed=rng_seed)
-        # A probe CSV the run did not rewrite must not outlive the embeddings it was
-        # scored on: a selected condition's own, or its group's rescored mock.
-        for save_dir in condition_save_dirs + invalidated:
+        # A probe CSV must not outlive the embeddings it was scored on: a selected
+        # condition's own, or its group's rescored mock. Drop each one this run rewrites
+        # or invalidates before probing, so a probe that raises leaves none behind.
+        for save_dir in condition_save_dirs + invalidated + usable:
             stale = save_dir / GROUP_PROBE_FILENAME
-            if stale not in written and stale.is_file():
+            if stale.is_file():
                 stale.unlink()
-                print(f"[grouped] removed stale cross-condition probe {stale}")
+                print(f"[grouped] removed cross-condition probe {stale} before re-probing")
+        written = _cross_condition_run_for_group(condition_save_dirs + usable, n_splits=n_splits, rng_seed=rng_seed)
         if written:
             print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
 

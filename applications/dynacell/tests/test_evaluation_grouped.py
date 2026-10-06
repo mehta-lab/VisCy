@@ -570,6 +570,29 @@ def test_forced_subset_rerun_rescores_its_probe_group(tmp_path: Path, monkeypatc
     assert probe_csv.read_text() == "fresh"
 
 
+def test_failed_probe_leaves_no_probe_on_replaced_embeddings(tmp_path: Path, monkeypatch):
+    """A probe that raises after a rescore still drops the CSVs the rescore made stale."""
+    pipeline = live_pipeline_module()
+    zikv = tmp_path / "er" / "model" / "ipsc" / "a549__zikv"
+    zikv.mkdir(parents=True)
+    extra = ({"name": "zikv", "io": {"pred_path": str(tmp_path / "missing.zarr")}, "save": {"save_dir": str(zikv)}},)
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"], extra=extra)
+    stale = [dirs["denv"] / GROUP_PROBE_FILENAME, zikv / GROUP_PROBE_FILENAME]
+    for path in stale:
+        path.write_text("stale")
+    _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    def failing_probe(dirs, n_splits, rng_seed):
+        raise RuntimeError("probe failed")
+
+    monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", failing_probe)
+
+    with pytest.raises(RuntimeError, match="probe failed"):
+        pipeline.evaluate_predictions_grouped(config)
+
+    assert not any(path.exists() for path in stale)
+
+
 def test_reused_mock_keeps_infected_probes(tmp_path: Path, monkeypatch):
     """A selected mock served from its cache changed no embeddings, so infected probes stay."""
     pipeline = live_pipeline_module()
