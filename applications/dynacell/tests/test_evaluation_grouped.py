@@ -413,6 +413,15 @@ def test_grouped_only_conditions_keeps_index_names():
     assert [name for name, _ in pipeline._select_conditions(conditions, ["1"])] == ["1"]
 
 
+@pytest.mark.parametrize("only", ["01", 1])
+def test_grouped_only_conditions_rejects_a_scalar(only):
+    """A bracketless override is a scalar, not a list; it must not select by its characters."""
+    pipeline = live_pipeline_module()
+    conditions = OmegaConf.create([{}, {}])
+    with pytest.raises(ValueError, match="must be a list"):
+        pipeline._select_conditions(conditions, only)
+
+
 @pytest.mark.parametrize("only", [["cond_c"], ["cond_a", "cond_c"], []])
 def test_grouped_only_conditions_rejects_unknown_or_empty(tmp_path: Path, only: list[str]):
     """An unknown name or an empty selection raises before any condition is scored."""

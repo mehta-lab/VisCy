@@ -2292,11 +2292,14 @@ def _select_conditions(conditions, only) -> list[tuple[str, object]]:
 
     ``only`` is the ``only_conditions`` list. Conditions keep their leaf order, and
     names keep their leaf index, so filtering never relabels a condition. An empty list
-    or a name the leaf does not define raises.
+    or a name the leaf does not define raises, as does a scalar: a bracketless override
+    (``only_conditions=x``) would otherwise select by the characters of ``x``.
     """
     named = [(_condition_name(cond, idx), cond) for idx, cond in enumerate(conditions)]
     if only is None:
         return named
+    if not (OmegaConf.is_list(only) or isinstance(only, list)):
+        raise ValueError(f"only_conditions must be a list of condition names, e.g. only_conditions=[{only}]")
     wanted = {str(name) for name in only}
     available = [name for name, _ in named]
     unknown = sorted(wanted - set(available))
