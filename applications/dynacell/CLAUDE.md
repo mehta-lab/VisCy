@@ -303,9 +303,9 @@ Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md` §11–§15 and
   - Z overlap 4 -> 2;
   - adaptive dopri5 (~56-66 velocity evaluations per tile) -> midpoint on a cosine time grid, 16
     evaluations;
-  - bf16 + `torch.compile` of a channels-last copy of the net.
+  - bf16 + `torch.compile` of a channels-last copy of the net, with `cudnn.benchmark`.
 
-  One fit's whole lite test set: 1.78 h on an H100, against ~100 GPU-h per A549 condition in
+  One fit's whole lite test set: 1.66 h on an H100, against ~100 GPU-h per A549 condition in
   production. With an organelle's three fits replaced, 10 of the 7984 pairs against other models
   that the full benchmark resolves flip on the lite (2000-draw bootstrap), and 5 of 447 among the
   CELL-Diff fits. One is resolved the other way on the lite:

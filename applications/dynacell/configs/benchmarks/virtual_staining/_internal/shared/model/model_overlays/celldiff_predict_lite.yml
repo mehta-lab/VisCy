@@ -1,7 +1,7 @@
 # CellDiff fast predict overlay for the DynaCell-lite test set.
 # Same model and the same tile grid as celldiff_predict.yml (512^2 tiles, YX overlap 256,
 # iterative anchoring); only the Z overlap, the sampler and the precision change. Chosen and
-# validated in applications/dynacell/experiments/2026-10-01_celldiff-fast-inference/ (1.78 h per fit
+# validated in applications/dynacell/experiments/2026-10-01_celldiff-fast-inference/ (1.66 h per fit
 # for the whole lite test set on one H100; the full benchmark's orderings hold except one marginal
 # mitochondria MorphEm pair -- see "DynaCell-lite" in applications/dynacell/CLAUDE.md):
 # - Z overlap 2 instead of 4 (8 instead of 11 Z tiles per A549 volume);
@@ -9,6 +9,8 @@
 #   adaptive dopri5 (~56-66); 12 or fewer flip deep-feature orderings for the A549-trained
 #   nucleus fit;
 # - bf16 autocast + torch.compile of a channels-last copy of the net.
+# - cudnn.benchmark (trainer.benchmark): -6.7 % end to end on H100; it moves pixels by relL2 0.0016,
+#   20x below the GPU-model drift the orderings were checked across.
 # Larger tiles (full-field slabs, whole volumes) were tested and fail on A549 out of domain.
 base:
   - ../../../../../../recipes/models/celldiff_fm.yml
@@ -26,6 +28,7 @@ model:
     predict_compile: true
 trainer:
   precision: bf16-mixed
+  benchmark: true
 data:
   init_args:
     z_window_size: 40
