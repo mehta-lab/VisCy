@@ -39,6 +39,12 @@ CHECKPOINTS: list[tuple[str, str]] = [
 def main() -> None:
     import os
 
+    # Check every file first: a missing one found mid-loop would leave the repo
+    # half old, half new.
+    missing = [path for _, path in CHECKPOINTS if not Path(path).is_file()]
+    if missing:
+        raise FileNotFoundError(f"release checkpoints not found: {missing}")
+
     token = os.environ.get("HF_TOKEN")
     api = HfApi(token=token)
 
