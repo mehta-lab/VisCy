@@ -54,9 +54,9 @@ uv run python applications/dynacell/tools/assemble_release_checkpoints.py --exec
 
 `--dest` overrides the release root; `--manifest` overrides the CSV path.
 `--models` selects which architectures to publish — it defaults to the **paper
-set** `fnet3d,unext2,vscyto3d,unetvit3d,celldiff` (the release `models/README.md`
-list). **Pix2Pix3D is excluded by default** (internal baseline, not in the
-paper); add it back with `--models fnet3d,unext2,vscyto3d,unetvit3d,celldiff,pix2pix3d`.
+set** `fnet3d,unext2,vscyto3d,unetvit3d,celldiff,pix2pix3d` (the release
+`models/README.md` list). Pix2Pix3D joined the default on 2026-10-05: it is one of
+the paper's four main-benchmark models.
 
 ### Per-cell status
 
@@ -66,10 +66,10 @@ paper); add it back with `--models fnet3d,unext2,vscyto3d,unetvit3d,celldiff,pix
 | `pending` | model dir exists but the pinned epoch is gone (mid-retrain / awaiting re-pin) | **not** copied, listed |
 | `not_trained` | model dir absent (stale config for a model never trained) | dropped |
 
-As of 2026-09-30, with the default paper set: `56 resolved · 0 pending · 0
-not_trained` (35.3 GB). UNetViT3D covers only the ER/Mito rows for A549 and
+As of 2026-10-05, with the default paper set: `68 resolved · 0 pending · 0
+not_trained` (53.4 GB). UNetViT3D covers only the ER/Mito rows for A549 and
 Joint (plus all four iPSC organelles), which is why it has 8 cells rather than
-12. With `--models …,pix2pix3d` (full zoo): `68 · 0 · 0` (53.4 GB).
+12; every other model has all 12.
 
 ## Provenance: every published target is raw fluorescence
 

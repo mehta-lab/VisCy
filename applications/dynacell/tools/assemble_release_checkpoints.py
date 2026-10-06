@@ -115,10 +115,9 @@ MODEL_ORDER = ("fnet3d", "unext2", "vscyto3d", "unetvit3d", "celldiff", "pix2pix
 TRAIN_ORDER = ("ipsc", "a549", "joint")
 ORG_ORDER = ("nucleus", "membrane", "er", "mito")
 
-# The models named in the paper / release `models/README.md`. Pix2Pix3D is an
-# internal baseline not in that list, so it is excluded by default; add it back
-# with `--models ...,pix2pix3d` once it belongs in the public release.
-PAPER_MODELS = ("fnet3d", "unext2", "vscyto3d", "unetvit3d", "celldiff")
+# The models named in the paper / release `models/README.md`. Pix2Pix3D is one of
+# the paper's four main-benchmark models, so it ships with the rest.
+PAPER_MODELS = ("fnet3d", "unext2", "vscyto3d", "unetvit3d", "celldiff", "pix2pix3d")
 
 CKPT_RE = re.compile(
     r"/models/(?P<root>dynacell|cell_diff_vs_viscy)/"
@@ -397,8 +396,7 @@ def main() -> None:
     ap.add_argument(
         "--models",
         default=",".join(PAPER_MODELS),
-        help=f"comma-separated model slugs to publish (default: paper set {','.join(PAPER_MODELS)}; "
-        "pix2pix3d excluded -- add it to include)",
+        help=f"comma-separated model slugs to publish (default: paper set {','.join(PAPER_MODELS)})",
     )
     args = ap.parse_args()
 
