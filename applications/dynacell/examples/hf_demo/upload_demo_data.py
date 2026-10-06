@@ -11,9 +11,11 @@ import argparse
 import os
 from pathlib import Path
 
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, create_repo
 
 REPO_ID = "biohub/dynacell-demo-data"
+# biohub "Dynacell" resource group (see AGENT.md).
+RESOURCE_GROUP_ID = "6a234bb4507cbbbb04456767"
 MARKERS = ("CAAX", "H2B", "SEC61B", "TOMM20")
 
 
@@ -21,7 +23,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("zip_dir", type=Path)
     args = ap.parse_args()
-    api = HfApi(token=os.environ.get("HF_TOKEN"))
+    token = os.environ.get("HF_TOKEN")
+    api = HfApi(token=token)
+    create_repo(
+        REPO_ID,
+        repo_type="dataset",
+        private=True,
+        resource_group_id=RESOURCE_GROUP_ID,
+        exist_ok=True,
+        token=token,
+    )
     for marker in MARKERS:
         name = f"{marker}_mock.zarr.zip"
         path = args.zip_dir / name
