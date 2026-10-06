@@ -72,6 +72,12 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # FNet-3D vscyto3daug mito segaux arm (fit 36933644, max_steps 200000, --ckpt best
+  # epoch=30-step=80600), 2026-10-06: all four legs. Read against the wave2s + wave2v mito
+  # baselines; cubic 0.9.0a4 eval venv. Generate with --wave wave2w.
+  wave2w:
+    mito:
+      - fnet3d_vscyto3daug_segaux
   # Checkpoint-stage control for the FNet-3D vscyto3daug nucleus floor (2026-10-05): v2_seed1
   # re-predicted from epoch=74-step=195000 (its --ckpt best is epoch=17; v2 used epoch=64 and
   # the arms 127k-190k steps). Stores and leaves are outside the generated tree
