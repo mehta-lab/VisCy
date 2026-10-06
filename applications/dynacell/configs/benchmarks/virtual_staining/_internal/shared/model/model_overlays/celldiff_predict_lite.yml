@@ -2,8 +2,9 @@
 # Same model and the same tile grid as celldiff_predict.yml (512^2 tiles, YX overlap 256,
 # iterative anchoring); only the Z overlap, the sampler, the precision and cudnn.benchmark change. Chosen and
 # validated in applications/dynacell/experiments/2026-10-01_celldiff-fast-inference/ (1.43 h per fit
-# for the whole lite test set on one H100; the full benchmark's orderings hold except two pairs that
-# are marginal on the full benchmark -- see "DynaCell-lite" in applications/dynacell/CLAUDE.md):
+# for the whole lite test set on one H100; with an organelle's three fits replaced, 8 of 7984 resolvable
+# pairs against other models flip and 3 of 447 among the CELL-Diff fits, and the lite resolves 2 of them
+# the other way, both marginal on the full benchmark -- see "DynaCell-lite" in applications/dynacell/CLAUDE.md):
 # - Z overlap 2 instead of 4 (8 instead of 11 Z tiles per A549 volume);
 # - sampler: midpoint on the Beta(0.4, 0.3) quantiles of 8 uniform points, 14 velocity evaluations
 #   per tile, instead of adaptive dopri5 (~56-66). The grid is packed toward the data end (last
