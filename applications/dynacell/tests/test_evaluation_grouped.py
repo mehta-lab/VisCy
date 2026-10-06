@@ -23,6 +23,8 @@ import numpy as np
 import pytest
 from omegaconf import OmegaConf
 
+from dynacell.evaluation.cross_condition_probe import GROUP_PROBE_FILENAME
+
 from ._eval_fixtures import (
     N_POSITIONS,
     T,
@@ -441,3 +443,93 @@ def test_grouped_only_conditions_rejects_unknown_or_empty(tmp_path: Path, only: 
         pipeline.evaluate_predictions_grouped(grouped_cfg)
     assert not (save_root / "cond_a_grouped").exists()
     assert not (save_root / "cond_b_grouped").exists()
+
+
+def _probe_rerun_config(tmp_path: Path, only: list[str]):
+    """A mock + denv grouped config restricted to ``only``; returns ``(config, save_dirs)``."""
+    base = build_eval_config(
+        tmp_path / "pred.zarr",
+        tmp_path / "gt.zarr",
+        tmp_path / "g",
+        tmp_path / "p",
+        tmp_path,
+        executor="serial",
+        fov_workers=1,
+    )
+    save_dirs = {cond: tmp_path / "er" / "model" / "ipsc" / f"a549__{cond}" for cond in ("mock", "denv")}
+    for d in save_dirs.values():
+        d.mkdir(parents=True)
+    config = OmegaConf.merge(
+        base,
+        {
+            "conditions": [{"name": cond, "save": {"save_dir": str(d)}} for cond, d in save_dirs.items()],
+            "only_conditions": only,
+            "force_recompute": {"final_metrics": True},
+            "cross_condition_probe": {"enabled": True},
+        },
+    )
+    return config, save_dirs
+
+
+def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> list[list[Path]]:
+    """Stub scoring; ``cached`` dirs hold metrics that a non-forced run would reuse.
+
+    The probe stub writes a fresh CSV into every infected dir it can pair with a
+    mock, and the returned list records the dirs each probe call received.
+    """
+    calls: list[list[Path]] = []
+
+    def probe(dirs, n_splits, rng_seed):
+        calls.append(list(dirs))
+        if not any(d.name.endswith("__mock") for d in dirs):
+            return []
+        written = [d / GROUP_PROBE_FILENAME for d in dirs if d.name.endswith("__denv")]
+        for path in written:
+            path.write_text("fresh")
+        return written
+
+    monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "load_eval_models", lambda cfg: object())
+    monkeypatch.setattr(pipeline, "prediction_sources", lambda *a: {})
+    monkeypatch.setattr(
+        pipeline, "evaluate_predictions", lambda cfg, *, models, cp_space, prediction_snapshot: ([], [], [])
+    )
+    monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_final_metrics_cache_valid",
+        lambda cfg: not cfg.force_recompute.final_metrics and Path(cfg.save.save_dir) in cached,
+    )
+    monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", probe)
+    return calls
+
+
+def test_mock_only_rerun_reprobes_cached_infected(tmp_path: Path, monkeypatch):
+    """Rescoring mock alone re-probes each infected condition whose cache is current."""
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"])
+    (dirs["denv"] / GROUP_PROBE_FILENAME).write_text("stale")
+    calls = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert calls == [[dirs["mock"], dirs["denv"]]]
+    assert (dirs["denv"] / GROUP_PROBE_FILENAME).read_text() == "fresh"
+
+
+@pytest.mark.parametrize("mock_cached", [True, False])
+def test_infected_only_rerun_never_keeps_a_stale_probe(tmp_path: Path, monkeypatch, mock_cached: bool):
+    """Rescoring an infected condition re-probes it against a current mock, else drops its old CSV."""
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["denv"])
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("stale")
+    calls = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]} if mock_cached else set())
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert calls == [[dirs["denv"], dirs["mock"]] if mock_cached else [dirs["denv"]]]
+    if mock_cached:
+        assert probe_csv.read_text() == "fresh"
+    else:
+        assert not probe_csv.exists()

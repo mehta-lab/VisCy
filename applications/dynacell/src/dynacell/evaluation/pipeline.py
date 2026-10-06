@@ -25,6 +25,7 @@ from dynacell.evaluation.cp_reference import (
     cp_sidecar_payload,
     eval_cp_space,
 )
+from dynacell.evaluation.cross_condition_probe import GROUP_PROBE_FILENAME
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -2306,6 +2307,29 @@ def _select_conditions(conditions, only) -> list[tuple[str, object]]:
     return [(name, cond) for name, cond in named if name in wanted]
 
 
+def _cached_counterpart_dirs(config: DictConfig, conditions, selected: list[tuple[str, object]]) -> list[Path]:
+    """Save dirs of the unselected conditions whose cached metrics match the current inputs.
+
+    Under ``only_conditions`` the probe still pairs a rescored mock with its infected
+    conditions, and a rescored infected condition with its mock. A counterpart is
+    used only when its cache would be reused if it were selected; ``force_recompute``
+    is ignored here, since it asks to rescore the selected conditions, not to distrust
+    the others.
+    """
+    selected_names = {name for name, _ in selected}
+    dirs = []
+    for name, cond in _select_conditions(conditions, None):
+        if name in selected_names:
+            continue
+        merged = _merge_condition(config, cond)
+        apply_dataset_ref(merged)
+        merged.force_recompute.all = False
+        merged.force_recompute.final_metrics = False
+        if _final_metrics_cache_valid(merged):
+            dirs.append(Path(merged.save.save_dir))
+    return dirs
+
+
 def _check_grouped_field_invariants(
     base_snapshot: dict[str, object],
     base_seg_required: bool,
@@ -2501,7 +2525,15 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
-        written = _cross_condition_run_for_group(condition_save_dirs, n_splits=n_splits, rng_seed=rng_seed)
+        probe_dirs = condition_save_dirs + _cached_counterpart_dirs(config, conditions, selected)
+        written = _cross_condition_run_for_group(probe_dirs, n_splits=n_splits, rng_seed=rng_seed)
+        # A rescored condition that found no counterpart to pair with must not keep a
+        # probe scored on the embeddings it just replaced.
+        for save_dir in condition_save_dirs:
+            stale = save_dir / GROUP_PROBE_FILENAME
+            if stale not in written and stale.is_file():
+                stale.unlink()
+                print(f"[grouped] removed stale cross-condition probe {stale}")
         if written:
             print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
 
