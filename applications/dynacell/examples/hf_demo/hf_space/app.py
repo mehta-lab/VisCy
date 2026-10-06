@@ -445,7 +445,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
             )
             load_demo_btn = gr.Button("Load Demo Data", variant="primary")
             data_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
-            data_z = gr.Slider(0, 15, step=1, value=8, label="Z slice")
+            data_z = gr.Slider(0, 31, step=1, value=16, label="Z slice")
             data_status = gr.Markdown("")
         with gr.Column(scale=2):
             data_view = gr.Plot(label="Phase | Experimental fluorescence")
@@ -461,7 +461,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
                 label="Models",
             )
             reg_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
-            reg_z = gr.Slider(0, 15, step=1, value=8, label="Z slice")
+            reg_z = gr.Slider(0, 31, step=1, value=16, label="Z slice")
             reg_run_btn = gr.Button("Run regression", variant="primary")
         with gr.Column(scale=2):
             reg_plot = gr.Plot(label="Predictions")
@@ -473,7 +473,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
         with gr.Column(scale=1):
             gen_steps = gr.Slider(10, 100, step=10, value=50, label="ODE steps")
             gen_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
-            gen_z = gr.Slider(4, 11, step=1, value=8, label="Z slice")
+            gen_z = gr.Slider(12, 19, step=1, value=16, label="Z slice")
             gr.Markdown("_CELL-Diff inference requires 8 input slices._")
             gen_btn = gr.Button("Generate", variant="primary")
             gen_step = gr.Slider(0, 1, step=1, value=0, label="ODE step", info="Slide after generating.")

@@ -10,6 +10,7 @@ Space. Generic fit/predict config stubs live separately under [`../configs/examp
 - **hf_demo/** — the DynaCell virtual-staining Hugging Face Space (Gradio, ZeroGPU) and its deploy tooling:
   - `hf_space/` — the deployed app (`app.py`, `predict_runner.py`, `config_templates/`, `requirements.txt`) and
     its own [Space README](hf_demo/hf_space/README.md) (HF card front-matter).
+  - `build_demo_data.py`, `upload_demo_data.py` — build the demo-data zips from the release test split / push them to HF.
   - `upload_checkpoints.py`, `upload_hf_space.py` — push checkpoints / the Space to HF.
   - `cards/` — HF repo cards for the checkpoints and demo-data repos.
   - `AGENT.md` — how the demo is structured and deployed (see also the `hf-dynacell` skill).
