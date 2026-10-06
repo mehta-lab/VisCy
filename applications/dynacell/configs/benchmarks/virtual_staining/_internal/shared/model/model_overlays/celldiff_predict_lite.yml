@@ -1,6 +1,6 @@
 # CellDiff fast predict overlay for the DynaCell-lite test set.
 # Same model and the same tile grid as celldiff_predict.yml (512^2 tiles, YX overlap 256,
-# iterative anchoring); only the Z overlap, the sampler and the precision change. Chosen and
+# iterative anchoring); only the Z overlap, the sampler, the precision and cudnn.benchmark change. Chosen and
 # validated in applications/dynacell/experiments/2026-10-01_celldiff-fast-inference/ (1.43 h per fit
 # for the whole lite test set on one H100; the full benchmark's orderings hold except two pairs that
 # are marginal on the full benchmark -- see "DynaCell-lite" in applications/dynacell/CLAUDE.md):
