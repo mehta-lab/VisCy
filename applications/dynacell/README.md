@@ -196,6 +196,12 @@ a bare invocation writes **and** submits.
   Institute Terms of Use.
 - **Demo** — a small reviewer sample is at
   [dynacell_a549_demo.zip](https://dynacell.s3.us-west-2.amazonaws.com/v1/demo/dynacell_a549_demo.zip).
+- **Trained checkpoints** — one per (training set, organelle, model) for all six
+  baselines, at `s3://dynacell/v1/models/`. The
+  [models README](https://dynacell.s3.us-west-2.amazonaws.com/v1/models/README.md)
+  describes the layout, the `checkpoints.csv` manifest, and how to load a checkpoint.
+  Download one model with
+  `aws s3 cp --no-sign-request --recursive s3://dynacell/v1/models/ipsc/nucleus/vscyto3d/ ./vscyto3d_nucleus/`.
 
 ## Navigation
 
