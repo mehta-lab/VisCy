@@ -191,8 +191,8 @@ def check_cubic_pin() -> None:
             f"cubic {installed!r} is installed but this repo declares "
             f"{REQUIRED_CUBIC_VERSION!r}. Metric values are not comparable across "
             "cubic versions (FSC/FRC/Spectral_PCC move), so refusing to write "
-            "metrics. Point UV_PROJECT_ENVIRONMENT / DYNACELL_EVAL_VENV at an "
-            "environment holding the declared version."
+            "metrics. Sync the project environment from uv.lock "
+            "(`uv sync --package dynacell --extra eval --extra eval_gpu`)."
         )
 
 

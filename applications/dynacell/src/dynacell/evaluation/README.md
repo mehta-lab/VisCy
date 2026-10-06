@@ -33,11 +33,14 @@ Scores virtual-staining predictions against fluorescence ground truth at three l
 
 ### Environment
 
+From the repository root:
+
 ```bash
-uv pip install -e "applications/dynacell[eval]"   # add [eval_gpu] for the CUDA cupy/cuCIM stack
+uv sync --package dynacell --extra eval --extra eval_gpu
+uv run --package dynacell --extra eval --extra eval_gpu dynacell evaluate-grouped leaf=...
 ```
 
-`[eval]` pins `cubic` (currently `v0.9.0a4`) and requires `cellpose>=4.2`. The cubic version is part of the numeric contract: an unsupported version fails the run. The shared `.venv` cannot run the cpdino backend; benchmark evals run in the dedicated environment named by `DYNACELL_EVAL_VENV`.
+Every eval command and script runs in this uv-built `.venv`. The `eval` extra pins `cubic` (currently `v0.9.0a4`) and requires `cellpose>=4.2`, which provides Cellpose-DINO. `eval_gpu` adds the CUDA 13 CuPy/cuCIM stack, which the GPU segmentation and metric paths require. The cubic version is part of the numeric contract: an unsupported version fails the run. To use another environment, set uv's `UV_PROJECT_ENVIRONMENT`.
 
 **Hugging Face cache.** On a repo checkout, every eval command sets `HF_HUB_CACHE` to a team-shared cache unless it is already set. Other sites override the location with `DYNACELL_SHARED_HF_CACHE`. Only `HF_HUB_CACHE` moves, so access tokens stay per user. The gated DINOv3 weights must be downloaded once by someone with access.
 
@@ -66,8 +69,7 @@ Use `leaf=`, not `-c` (`-c` is Hydra's display-only `--cfg`).
 sbatch applications/dynacell/tools/run_eval_direct.slurm grouped/<bucket>/eval_grouped [overrides...]
 ```
 
-- **What it does:** runs `evaluate-grouped` for grouped leaves and `evaluate` otherwise, inside `$DYNACELL_EVAL_VENV`. It requests one GPU with at least 40 GB, 16 CPUs and 256 GB of memory.
-- **Other submitters:** `tools/submit_evaluation_job.py` and `tools/submit_evaluation_batch.py` (wrapper `tools/evaluate_batch.sh`) go through the shared `.venv`, so they cannot run cpdino leaves.
+- **What it does:** runs `evaluate-grouped` for grouped leaves and `evaluate` otherwise, in the project `.venv`. It requests one GPU with at least 40 GB, 16 CPUs and 256 GB of memory.
 
 ### Common overrides
 

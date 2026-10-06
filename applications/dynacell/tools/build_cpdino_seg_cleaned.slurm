@@ -22,7 +22,6 @@ set -euo pipefail
 mkdir -p slurm_logs
 
 VISCY_ROOT=/hpc/mydata/alex.kalinin/VisCy
-CPDINO_VENV=/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval
 HF_HUB_CACHE=/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache
 TEST_DIR=/hpc/projects/virtual_staining/training/dynacell/a549/mantis/test
 
@@ -42,7 +41,6 @@ VS_STORE="${VS_STORES[$SLURM_ARRAY_TASK_ID]}"
 echo "Array task $SLURM_ARRAY_TASK_ID: $VS_STORE"
 
 export PYTHONUNBUFFERED=1
-export UV_PROJECT_ENVIRONMENT="$CPDINO_VENV"
 export HF_HUB_CACHE="$HF_HUB_CACHE"
 
 ml uv 2>/dev/null || true
@@ -50,6 +48,6 @@ ml uv 2>/dev/null || true
 # The builder refuses an existing output rather than truncating it. To rebuild
 # the nine stores in place, add --force to the line below -- deliberately not on
 # by default, since these are the canonical io.cell_segmentation_path stores.
-uv run --no-sync --directory "$VISCY_ROOT" python \
+uv run --frozen --package dynacell --extra eval --extra eval_gpu --directory "$VISCY_ROOT" python \
     "$VISCY_ROOT/applications/dynacell/tools/build_cpdino_seg_cleaned.py" \
     --vs-store "$VS_STORE"
