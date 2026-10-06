@@ -534,6 +534,25 @@ def test_infected_only_rerun_never_keeps_a_stale_probe(tmp_path: Path, monkeypat
         assert not probe_csv.exists()
 
 
+def test_forced_mock_rerun_pairs_no_unverified_counterpart(tmp_path: Path, monkeypatch):
+    """A forced rerun trusts no counterpart cache; the infected probe on the old mock is dropped.
+
+    ``force_recompute`` is how a recipe change the cache check cannot see (e.g.
+    ``feature_metrics.focus_slab``) is applied, so pairing the rescored mock with an
+    infected cache from before the change would mix recipes.
+    """
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"], force=True)
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("stale")
+    calls, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert calls == [[dirs["mock"]]]
+    assert not probe_csv.exists()
+
+
 def test_subset_rerun_skips_conditions_outside_its_probe_groups(tmp_path: Path, monkeypatch):
     """Only real counterparts are checked; another model's or a missing-store sibling cannot fail the run."""
     pipeline = live_pipeline_module()

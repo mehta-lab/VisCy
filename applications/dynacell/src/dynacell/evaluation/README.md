@@ -58,7 +58,7 @@ dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
 - **`conditions` entries** may override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, `benchmark.dataset_ref` and `name`. Changing any field that affects model loading or segmentation raises an error.
 - **Always re-scored:** grouped leaves set `force_recompute.final_metrics: true`. To add a condition to a finished bucket without re-scoring the others, pass `force_recompute.final_metrics=false`.
 
-To score only some conditions of a bucket, pass their names: `only_conditions=[<name>,...]`. An unknown name raises an error. The cross-condition probe still pairs each rescored condition with its unselected mock or infected counterparts whose cached metrics are current; a rescored infected condition with no such mock loses its old `cross_condition_probe.csv`.
+To score only some conditions of a bucket, pass their names: `only_conditions=[<name>,...]`. An unknown name raises an error. The cross-condition probe still pairs each rescored condition with the unselected mock or infected conditions of its probe group whose cached metrics are current. Under `force_recompute` no cache counts as current, since the check cannot see recipe changes such as `feature_metrics.focus_slab`. A probe CSV that the run cannot rewrite is removed: one in a rescored infected condition that found no current mock, or one in an infected condition whose mock was rescored.
 
 Use `leaf=`, not `-c` (`-c` is Hydra's display-only `--cfg`).
 

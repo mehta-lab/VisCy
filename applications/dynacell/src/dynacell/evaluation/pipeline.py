@@ -1,6 +1,7 @@
 """Batch orchestration: load, segment, evaluate, save."""
 
 import json
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass, field, fields
@@ -2309,16 +2310,25 @@ def _select_conditions(conditions, only) -> list[tuple[str, object]]:
 
 def _probe_counterparts(
     config: DictConfig, conditions, selected_names: set[str], selected_dirs: list[Path]
-) -> list[Path]:
-    """Save dirs of the unselected conditions that can pair with a selected one in the probe.
+) -> tuple[list[Path], list[Path]]:
+    """Unselected conditions that share a probe group with a selected one.
 
-    Only conditions sharing a probe group with a selected one are inspected, and only
-    those whose cache would be reused if they were selected qualify; ``force_recompute``
-    is ignored for that check, since it asks to rescore the selected conditions. A
-    counterpart without a prediction store is reported and left out.
+    Returns ``(usable, invalidated)``. ``usable`` dirs hold a cache this run would reuse
+    if they were selected, so the probe pairs their embeddings with the rescored ones.
+    Under ``force_recompute`` none qualifies: forcing is how a recipe change the cache
+    check cannot see (``feature_metrics.focus_slab``) is applied, so an old counterpart
+    may have been scored under another recipe. ``invalidated`` dirs are the infected
+    conditions of a group whose mock was rescored; a probe CSV the run does not rewrite
+    there pairs them with the mock's old embeddings. Conditions of other groups are not
+    inspected at all.
     """
-    groups = {m[0] for m in map(probe_group, selected_dirs) if m is not None}
+    groups: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for save_dir in selected_dirs:
+        membership = probe_group(save_dir)
+        if membership is not None:
+            groups[membership[0]].add(membership[1])
     usable: list[Path] = []
+    invalidated: list[Path] = []
     for name, cond in _select_conditions(conditions, None):
         if name in selected_names:
             continue
@@ -2327,16 +2337,17 @@ def _probe_counterparts(
         membership = probe_group(save_dir)
         if membership is None or membership[0] not in groups:
             continue
+        key, condition = membership
+        if condition != "mock" and "mock" in groups[key]:
+            invalidated.append(save_dir)
         apply_dataset_ref(merged)
-        merged.force_recompute.all = False
-        merged.force_recompute.final_metrics = False
         if not Path(merged.io.pred_path).exists():
             print(f"[grouped] probe counterpart {name!r}: no prediction store at {merged.io.pred_path}; not paired")
         elif _final_metrics_cache_valid(merged):
             usable.append(save_dir)
         else:
             print(f"[grouped] probe counterpart {name!r}: cached metrics not current; not paired")
-    return usable
+    return usable, invalidated
 
 
 def _check_grouped_field_invariants(
@@ -2534,11 +2545,13 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
-        usable = _probe_counterparts(config, conditions, {name for name, _ in selected}, condition_save_dirs)
+        usable, invalidated = _probe_counterparts(
+            config, conditions, {name for name, _ in selected}, condition_save_dirs
+        )
         written = _cross_condition_run_for_group(condition_save_dirs + usable, n_splits=n_splits, rng_seed=rng_seed)
-        # A rescored condition that found no counterpart to pair with must not keep a
-        # probe scored on the embeddings it just replaced.
-        for save_dir in condition_save_dirs:
+        # A probe CSV the run did not rewrite must not outlive the embeddings it was
+        # scored on: a rescored condition's own, or its group's rescored mock.
+        for save_dir in condition_save_dirs + invalidated:
             stale = save_dir / GROUP_PROBE_FILENAME
             if stale not in written and stale.is_file():
                 stale.unlink()
