@@ -2344,24 +2344,66 @@ def _with_forced_probe_siblings(config: DictConfig, conditions, selected: list) 
     return [(name, cond) for name, cond in _select_conditions(conditions, None) if name in selected_names | set(added)]
 
 
+#: Marker in a mock's eval dir: its embeddings were replaced, and the probe CSVs of its
+#: group's infected conditions are not yet rebuilt against them. A probe pass clears it.
+PROBE_PENDING_FILENAME = "cross_condition_probe.pending"
+
+
+def _probe_group_dirs(config: DictConfig, conditions) -> dict[tuple[str, str, str], dict[str, Path]]:
+    """Each condition's eval dir, by probe group and then condition token."""
+    groups: dict[tuple[str, str, str], dict[str, Path]] = defaultdict(dict)
+    for _, cond in _select_conditions(conditions, None):
+        save_dir = Path(_merge_condition(config, cond).save.save_dir)
+        membership = probe_group(save_dir)
+        if membership is not None:
+            groups[membership[0]][membership[1]] = save_dir
+    return groups
+
+
+def _mark_probes_pending(group: dict[str, Path]) -> None:
+    """Before a mock's embeddings are replaced, drop its group's infected probe CSVs.
+
+    The marker outlives a run that fails later, so a retry that finds the new mock cached
+    still rebuilds the infected probes against it.
+    """
+    group["mock"].mkdir(parents=True, exist_ok=True)
+    (group["mock"] / PROBE_PENDING_FILENAME).touch()
+    for condition, save_dir in group.items():
+        stale = save_dir / GROUP_PROBE_FILENAME
+        if condition != "mock" and stale.is_file():
+            stale.unlink()
+            print(f"[grouped] removed cross-condition probe {stale}: its mock is being rescored")
+
+
 def _probe_counterparts(
-    config: DictConfig, conditions, selected_names: set[str], selected_dirs: list[Path], rescored_dirs: list[Path]
-) -> tuple[list[Path], list[Path]]:
+    config: DictConfig,
+    conditions,
+    selected_names: set[str],
+    selected_dirs: list[Path],
+    group_dirs: dict[tuple[str, str, str], dict[str, Path]],
+) -> tuple[list[Path], list[Path], list[Path]]:
     """Unselected conditions whose probe the selected ones change.
 
-    Returns ``(usable, invalidated)``. A selected infected condition is probed against its
-    group's mock, so an unselected mock is a counterpart. An unselected infected condition
-    is one only when its group's mock was rescored, not served from its cache: its probe
-    CSV pairs it with the mock's old embeddings, so it is ``invalidated``. ``usable``
-    counterparts hold a cache this run would reuse if they were selected, so the probe
-    pairs their embeddings with the selected ones. Other conditions are not inspected.
+    Returns ``(usable, invalidated, pending)``. A selected infected condition is probed
+    against its group's mock, so an unselected mock is a counterpart. An unselected
+    infected condition is one only when its group's mock carries the
+    :data:`PROBE_PENDING_FILENAME` marker (rescored by this run or by one that failed
+    before its probe finished): its probe CSV pairs it with the mock's old embeddings, so
+    it is ``invalidated``. ``usable`` counterparts hold a cache this run would reuse if
+    they were selected, so the probe pairs their embeddings with the selected ones.
+    ``pending`` are the markers the probe pass resolves. Other conditions are not inspected.
     """
     groups: dict[tuple[str, str, str], set[str]] = defaultdict(set)
     for save_dir in selected_dirs:
         membership = probe_group(save_dir)
         if membership is not None:
             groups[membership[0]].add(membership[1])
-    remocked = {m[0] for m in map(probe_group, rescored_dirs) if m is not None and m[1] == "mock"}
+    pending = [
+        marker
+        for key in groups
+        if "mock" in group_dirs[key] and (marker := group_dirs[key]["mock"] / PROBE_PENDING_FILENAME).is_file()
+    ]
+    remocked = {probe_group(marker.parent)[0] for marker in pending}
     usable: list[Path] = []
     invalidated: list[Path] = []
     for name, cond in _select_conditions(conditions, None):
@@ -2384,7 +2426,7 @@ def _probe_counterparts(
             usable.append(save_dir)
         else:
             print(f"[grouped] probe counterpart {name!r}: cached metrics not current; not paired")
-    return usable, invalidated
+    return usable, invalidated, pending
 
 
 def _check_grouped_field_invariants(
@@ -2549,7 +2591,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
 
     results: list[tuple[str, tuple]] = []
     condition_save_dirs: list[Path] = []
-    rescored_dirs: list[Path] = []
+    group_dirs = _probe_group_dirs(config, conditions)
     for idx, (name, cond) in enumerate(selected):
         merged = _merge_condition(config, cond)
         apply_dataset_ref(merged)
@@ -2562,6 +2604,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
         else:
             cp_space = eval_cp_space(merged) if merged.compute_feature_metrics else None
             snapshot = prediction_sources(merged.io.pred_path, merged.io.pred_channel_name)
+            membership = probe_group(Path(merged.save.save_dir))
+            if membership is not None and membership[1] == "mock":
+                _mark_probes_pending(group_dirs[membership[0]])
             pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
                 merged, models=get_models(), cp_space=cp_space, prediction_snapshot=snapshot
             )
@@ -2573,7 +2618,6 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
                 cp_space=cp_space,
                 prediction_digest=prediction_sources_sha256_12(snapshot),
             )
-            rescored_dirs.append(Path(merged.save.save_dir))
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
         condition_save_dirs.append(Path(merged.save.save_dir))
 
@@ -2587,8 +2631,8 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
-        usable, invalidated = _probe_counterparts(
-            config, conditions, {name for name, _ in selected}, condition_save_dirs, rescored_dirs
+        usable, invalidated, pending = _probe_counterparts(
+            config, conditions, {name for name, _ in selected}, condition_save_dirs, group_dirs
         )
         # A probe CSV must not outlive the embeddings it was scored on: a selected
         # condition's own, or its group's rescored mock. Drop each one this run rewrites
@@ -2599,6 +2643,8 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
                 stale.unlink()
                 print(f"[grouped] removed cross-condition probe {stale} before re-probing")
         written = _cross_condition_run_for_group(condition_save_dirs + usable, n_splits=n_splits, rng_seed=rng_seed)
+        for marker in pending:
+            marker.unlink()
         if written:
             print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
 

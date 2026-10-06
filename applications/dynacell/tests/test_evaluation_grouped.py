@@ -593,6 +593,49 @@ def test_failed_probe_leaves_no_probe_on_replaced_embeddings(tmp_path: Path, mon
     assert not any(path.exists() for path in stale)
 
 
+@pytest.mark.parametrize("fails_at", ["counterpart", "probe"])
+def test_cached_retry_repairs_probes_after_a_failed_mock_rescore(tmp_path: Path, monkeypatch, fails_at: str):
+    """A rescore that fails after replacing the mock's embeddings is repaired by a cached retry.
+
+    The failed run leaves no infected probe scored on the old mock; the retry reuses the
+    mock it saved, yet still re-probes the infected conditions.
+    """
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"])
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("old mock")
+    cached = {dirs["denv"]}
+    calls, _, scored = _stub_grouped_scoring(pipeline, monkeypatch, cached=cached)
+    stub_probe = pipeline._cross_condition_run_for_group
+
+    def failing_ref(cfg):
+        if Path(cfg.save.save_dir) == dirs["denv"]:
+            raise RuntimeError("counterpart failed")
+
+    def failing_probe(dirs, n_splits, rng_seed):
+        raise RuntimeError("probe failed")
+
+    if fails_at == "counterpart":
+        monkeypatch.setattr(pipeline, "apply_dataset_ref", failing_ref)
+    else:
+        monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", failing_probe)
+    with pytest.raises(RuntimeError, match=f"{fails_at} failed"):
+        pipeline.evaluate_predictions_grouped(config)
+    assert scored == [dirs["mock"]]
+    assert not probe_csv.exists()
+
+    # The dependency is restored, and the retry finds the mock it saved current.
+    monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", stub_probe)
+    cached.add(dirs["mock"])
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert scored == [dirs["mock"]]
+    assert calls == [[dirs["mock"], dirs["denv"]]]
+    assert probe_csv.read_text() == "fresh"
+    assert not (dirs["mock"] / pipeline.PROBE_PENDING_FILENAME).exists()
+
+
 def test_reused_mock_keeps_infected_probes(tmp_path: Path, monkeypatch):
     """A selected mock served from its cache changed no embeddings, so infected probes stay."""
     pipeline = live_pipeline_module()
