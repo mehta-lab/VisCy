@@ -192,6 +192,11 @@ class ODESolver:
             raise ValueError(
                 f"time_schedule must be 'uniform', 'cosine' or finite positive (p, q), got {time_schedule!r}"
             )
+        if not bool((self.t.diff() > 0).all()):
+            raise ValueError(
+                f"time_schedule {time_schedule!r} puts {num_steps} time points on [{t0}, {t1}] that are not"
+                " strictly increasing in float32; use fewer points or a less extreme shape"
+            )
         self.atol = atol
         self.rtol = rtol
         self.sampler_type = sampler_type

@@ -139,6 +139,22 @@ def test_ode_solver_beta_schedule_spans_cosine_and_uniform():
     torch.testing.assert_close(inner, 0.1 + 0.8 * skewed)
 
 
+def test_ode_solver_rejects_a_beta_grid_that_collapses_in_float32():
+    """Beta(1, 0.1) at 8 points puts its last two quantiles within float32 rounding of 1.0, which odeint
+    would only reject mid-predict."""
+    with pytest.raises(ValueError, match="strictly increasing"):
+        ODESolver(
+            drift=lambda x, t, model: x,
+            t0=0.0,
+            t1=1.0,
+            sampler_type="euler",
+            num_steps=8,
+            atol=1e-5,
+            rtol=1e-3,
+            time_schedule=(1.0, 0.1),
+        )
+
+
 @pytest.mark.parametrize("schedule", ["cos", (0.0, 0.5), (0.5,), (0.5, float("nan")), (0.5, float("inf"))])
 def test_ode_solver_rejects_unknown_schedule(schedule):
     """A misspelled schedule or a non-positive or non-finite Beta shape raises instead of building a bad grid."""
