@@ -309,7 +309,7 @@ class CELLDiff3DVS(nn.Module):
         phase: Tensor,
         num_steps: int = 100,
         sampling_method: str = "dopri5",
-        time_schedule: str = "uniform",
+        time_schedule: str | tuple[float, float] = "uniform",
         compiled: bool = False,
     ) -> Tensor:
         """Generate virtual staining via ODE sampling.
@@ -325,9 +325,11 @@ class CELLDiff3DVS(nn.Module):
         sampling_method : str
             ``torchdiffeq`` method: adaptive ``"dopri5"`` (default) or a
             fixed-grid one such as ``"euler"``, ``"midpoint"`` or ``"heun2"``.
-        time_schedule : str
-            Spacing of the time points, ``"uniform"`` or ``"cosine"`` (dense at
-            both ends, where the velocity field changes fastest).
+        time_schedule : str or tuple of float
+            Spacing of the time points, ``"uniform"``, ``"cosine"`` (dense at
+            both ends, where the velocity field changes fastest) or ``(p, q)``
+            for the Beta(p, q) quantiles of a uniform grid (cosine is
+            Beta(0.5, 0.5)).
         compiled : bool
             Sample through the compiled copy of the network (see
             :meth:`inference_net`).
@@ -381,7 +383,7 @@ class CELLDiff3DVS(nn.Module):
         phase: Tensor,
         num_steps: int = 100,
         sampling_method: str = "dopri5",
-        time_schedule: str = "uniform",
+        time_schedule: str | tuple[float, float] = "uniform",
         compiled: bool = False,
     ) -> Tensor:
         """Generate virtual staining via tiled sliding window (stride == patch size).
@@ -401,7 +403,7 @@ class CELLDiff3DVS(nn.Module):
             Number of ODE time points per patch; see :meth:`generate`.
         sampling_method : str
             ``torchdiffeq`` method, as in :meth:`generate`.
-        time_schedule : str
+        time_schedule : str or tuple of float
             Spacing of the time points, as in :meth:`generate`.
         compiled : bool
             Sample through the compiled copy of the network, as in
@@ -514,7 +516,7 @@ class CELLDiff3DVS(nn.Module):
         num_steps: int = 100,
         overlap_size: int | tuple[int, ...] = 256,
         sampling_method: str = "dopri5",
-        time_schedule: str = "uniform",
+        time_schedule: str | tuple[float, float] = "uniform",
         compiled: bool = False,
     ) -> Tensor:
         """Generate virtual staining via overlapping sliding window with velocity anchoring.
@@ -543,7 +545,7 @@ class CELLDiff3DVS(nn.Module):
             A single int applies the same overlap to all three dimensions.
         sampling_method : str
             ``torchdiffeq`` method, as in :meth:`generate`.
-        time_schedule : str
+        time_schedule : str or tuple of float
             Spacing of the time points, as in :meth:`generate`.
         compiled : bool
             Sample through the compiled copy of the network, as in

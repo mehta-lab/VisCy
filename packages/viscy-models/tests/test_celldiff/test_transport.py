@@ -124,8 +124,22 @@ def test_ode_solver_cosine_schedule_packs_points_at_both_ends():
     torch.testing.assert_close(gaps, gaps.flip(0))
 
 
-def test_ode_solver_rejects_unknown_schedule():
-    """A misspelled schedule raises instead of silently falling back to uniform."""
+def test_ode_solver_beta_schedule_spans_cosine_and_uniform():
+    """Beta(0.5, 0.5) is the cosine grid, Beta(1, 1) the uniform one, and p < q packs points toward t0."""
+    kwargs = dict(drift=lambda x, t, model: x, t0=0.0, t1=1.0, sampler_type="euler", num_steps=8, atol=1e-5, rtol=1e-3)
+    torch.testing.assert_close(
+        ODESolver(**kwargs, time_schedule=(0.5, 0.5)).t, ODESolver(**kwargs, time_schedule="cosine").t
+    )
+    torch.testing.assert_close(ODESolver(**kwargs, time_schedule=(1.0, 1.0)).t, ODESolver(**kwargs).t)
+    skewed = ODESolver(**kwargs, time_schedule=(0.3, 0.6)).t
+    assert skewed[0] == 0.0 and skewed[-1] == 1.0
+    gaps = skewed.diff()
+    assert (gaps > 0).all() and gaps[0] < gaps[-1]
+
+
+@pytest.mark.parametrize("schedule", ["cos", (0.0, 0.5), (0.5,)])
+def test_ode_solver_rejects_unknown_schedule(schedule):
+    """A misspelled schedule or a non-positive Beta shape raises instead of silently falling back to uniform."""
     with pytest.raises(ValueError, match="time_schedule"):
         ODESolver(
             drift=lambda x, t, model: x,
@@ -135,7 +149,7 @@ def test_ode_solver_rejects_unknown_schedule():
             num_steps=5,
             atol=1e-5,
             rtol=1e-3,
-            time_schedule="cos",
+            time_schedule=schedule,
         )
 
 

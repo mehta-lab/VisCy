@@ -450,7 +450,7 @@ class Sampler:
         atol: float = 1e-6,
         rtol: float = 1e-3,
         reverse: bool = False,
-        time_schedule: str = "uniform",
+        time_schedule: str | tuple[float, float] = "uniform",
     ) -> Callable:
         """Return an ODE sampling function.
 
@@ -466,10 +466,11 @@ class Sampler:
             Relative error tolerance.
         reverse : bool
             Whether to integrate in reverse (data to noise).
-        time_schedule : str
-            Spacing of the ``num_steps`` time points: ``"uniform"`` or
+        time_schedule : str or tuple of float
+            Spacing of the ``num_steps`` time points: ``"uniform"``,
             ``"cosine"`` (``(1 - cos(pi * s)) / 2`` over uniform ``s``, dense at
-            both ends of the interval). Fixed-grid solvers step on these points.
+            both ends of the interval) or ``(p, q)`` for Beta(p, q) quantiles
+            (see :class:`ODESolver`). Fixed-grid solvers step on these points.
 
         Returns
         -------

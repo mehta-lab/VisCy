@@ -969,10 +969,12 @@ class DynacellFlowMatching(LightningModule):
         ``iterative``: adaptive ``"dopri5"`` (default), or a fixed-grid method
         (``"euler"``, ``"midpoint"``, ``"heun2"``, ``"rk4"``) that takes
         ``num_generate_steps - 1`` steps.
-    predict_time_schedule : {"uniform", "cosine"}
+    predict_time_schedule : {"uniform", "cosine"} or tuple of float
         Spacing of the ``num_generate_steps`` ODE time points; ``"cosine"``
         packs a fixed-grid solver's steps toward both ends of the interval,
-        where adaptive dopri5 spends most of its evaluations.
+        where adaptive dopri5 spends most of its evaluations, and ``(p, q)``
+        takes the Beta(p, q) quantiles of a uniform grid (cosine is
+        Beta(0.5, 0.5); ``p < q`` packs more of them toward the noise end).
     predict_compile : bool
         ``torch.compile`` the velocity network for the ``generate``,
         ``sliding_window`` and ``iterative`` predict methods (``denoise`` calls
@@ -1041,7 +1043,7 @@ class DynacellFlowMatching(LightningModule):
         predict_method: Literal["denoise", "generate", "sliding_window", "iterative"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
         predict_sampling_method: str = "dopri5",
-        predict_time_schedule: Literal["uniform", "cosine"] = "uniform",
+        predict_time_schedule: Literal["uniform", "cosine"] | tuple[float, float] = "uniform",
         predict_compile: bool = False,
         ckpt_path: str | None = None,
         seg_aux: SegAuxDice | None = None,
