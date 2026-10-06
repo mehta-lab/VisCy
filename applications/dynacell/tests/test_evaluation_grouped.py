@@ -472,16 +472,21 @@ def _probe_rerun_config(tmp_path: Path, only: list[str], *, force: bool = False,
     return config, save_dirs
 
 
-def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> tuple[list[list[Path]], list[Path]]:
+def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> tuple[list[list[Path]], list[Path], list[Path]]:
     """Stub scoring; ``cached`` dirs hold metrics that a non-forced run would reuse.
 
     The cache check keeps the real one's order: a force flag rejects first, and a
     missing prediction store raises. The probe stub writes a fresh CSV into every
-    infected dir it can pair with a mock. Returns the dirs each probe call received
-    and the dirs whose cache was checked.
+    infected dir it can pair with a mock. Returns the dirs each probe call received,
+    the dirs whose cache was checked, and the dirs that were scored.
     """
     calls: list[list[Path]] = []
     checked: list[Path] = []
+    scored: list[Path] = []
+
+    def evaluate(cfg, *, models, cp_space, prediction_snapshot):
+        scored.append(Path(cfg.save.save_dir))
+        return [], [], []
 
     def cache_valid(cfg):
         checked.append(Path(cfg.save.save_dir))
@@ -503,13 +508,12 @@ def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> tuple[lis
     monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
     monkeypatch.setattr(pipeline, "load_eval_models", lambda cfg: object())
     monkeypatch.setattr(pipeline, "prediction_sources", lambda *a: {})
-    monkeypatch.setattr(
-        pipeline, "evaluate_predictions", lambda cfg, *, models, cp_space, prediction_snapshot: ([], [], [])
-    )
+    monkeypatch.setattr(pipeline, "evaluate_predictions", evaluate)
+    monkeypatch.setattr(pipeline, "_load_cached_final_metrics", lambda cfg: ([], [], []))
     monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
     monkeypatch.setattr(pipeline, "_final_metrics_cache_valid", cache_valid)
     monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", probe)
-    return calls, checked
+    return calls, checked, scored
 
 
 def test_mock_only_rerun_reprobes_cached_infected(tmp_path: Path, monkeypatch):
@@ -517,7 +521,7 @@ def test_mock_only_rerun_reprobes_cached_infected(tmp_path: Path, monkeypatch):
     pipeline = live_pipeline_module()
     config, dirs = _probe_rerun_config(tmp_path, ["mock"])
     (dirs["denv"] / GROUP_PROBE_FILENAME).write_text("stale")
-    calls, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+    calls, _, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
 
     pipeline.evaluate_predictions_grouped(config)
 
@@ -532,7 +536,7 @@ def test_infected_only_rerun_never_keeps_a_stale_probe(tmp_path: Path, monkeypat
     config, dirs = _probe_rerun_config(tmp_path, ["denv"])
     probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
     probe_csv.write_text("stale")
-    calls, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]} if mock_cached else set())
+    calls, _, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]} if mock_cached else set())
 
     pipeline.evaluate_predictions_grouped(config)
 
@@ -554,12 +558,42 @@ def test_forced_mock_rerun_pairs_no_unverified_counterpart(tmp_path: Path, monke
     config, dirs = _probe_rerun_config(tmp_path, ["mock"], force=True)
     probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
     probe_csv.write_text("stale")
-    calls, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+    calls, _, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
 
     pipeline.evaluate_predictions_grouped(config)
 
     assert calls == [[dirs["mock"]]]
     assert not probe_csv.exists()
+
+
+def test_reused_mock_keeps_infected_probes(tmp_path: Path, monkeypatch):
+    """A selected mock served from its cache changed no embeddings, so infected probes stay."""
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"])
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("current")
+    calls, checked, scored = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert scored == []
+    assert dirs["denv"] not in checked
+    assert calls == [[dirs["mock"]]]
+    assert probe_csv.read_text() == "current"
+
+
+def test_infected_rerun_does_not_reprobe_its_siblings(tmp_path: Path, monkeypatch):
+    """Rescoring one infected condition re-probes it alone; a sibling's probe inputs did not change."""
+    pipeline = live_pipeline_module()
+    zikv = tmp_path / "er" / "model" / "ipsc" / "a549__zikv"
+    extra = ({"name": "zikv", "save": {"save_dir": str(zikv)}},)
+    config, dirs = _probe_rerun_config(tmp_path, ["denv"], extra=extra)
+    calls, checked, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"], zikv})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert zikv not in checked
+    assert calls == [[dirs["denv"], dirs["mock"]]]
 
 
 def test_subset_rerun_skips_conditions_outside_its_probe_groups(tmp_path: Path, monkeypatch):
@@ -573,7 +607,7 @@ def test_subset_rerun_skips_conditions_outside_its_probe_groups(tmp_path: Path, 
         {"name": "zikv", "io": {"pred_path": missing}, "save": {"save_dir": str(zikv)}},
     )
     config, dirs = _probe_rerun_config(tmp_path, ["mock"], extra=extra)
-    calls, checked = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+    calls, checked, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
 
     pipeline.evaluate_predictions_grouped(config)
 
