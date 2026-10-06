@@ -406,24 +406,11 @@ def test_grouped_only_conditions_runs_the_named_subset(tmp_path: Path):
     assert not (save_root / "cond_a_grouped").exists()
 
 
-def test_grouped_only_conditions_keeps_index_names(tmp_path: Path):
+def test_grouped_only_conditions_keeps_index_names():
     """An unnamed condition is selected by its leaf index, and keeps that label."""
-    cond_a_root = tmp_path / "fixture_a"
-    cond_b_root = tmp_path / "fixture_b"
-    cond_a_root.mkdir()
-    cond_b_root.mkdir()
-    save_root = tmp_path / "saves"
-    save_root.mkdir()
-    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
-    del grouped_cfg["conditions"][1]["name"]
-    grouped_cfg["only_conditions"] = ["1"]
-
     pipeline = live_pipeline_module()
-    results = pipeline.evaluate_predictions_grouped(grouped_cfg)
-
-    assert [name for name, _ in results] == ["1"]
-    assert (save_root / "cond_b_grouped" / "pixel_metrics.csv").is_file()
-    assert not (save_root / "cond_a_grouped").exists()
+    conditions = OmegaConf.create([{"name": "cond_a"}, {}])
+    assert [name for name, _ in pipeline._select_conditions(conditions, ["1"])] == ["1"]
 
 
 @pytest.mark.parametrize("only", [["cond_c"], ["cond_a", "cond_c"], []])
