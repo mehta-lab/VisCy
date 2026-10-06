@@ -311,6 +311,7 @@ def test_a549_eval_target_composes_and_splices(organelle: str, cond_slug: str, c
 # conditions resolves against its dataset manifest. A condition missing its
 # gene-keyed ``dataset_ref.target`` raises TargetNotFoundError here instead of at
 # eval time.
+_A549_DATASET = re.compile(r"a549-mantis-(?P<gene>[a-z0-9]+)-(mock|denv|zikv)(-lite)?")
 _GROUPED_LEAVES = sorted(p.parent.name for p in (_LEAF_ROOT / "grouped").glob("*/eval_grouped.yaml"))
 
 
@@ -326,9 +327,15 @@ def test_every_grouped_leaf_composes(bucket: str) -> None:
     for name, cond in selected:
         merged = _merge_condition(splice_base, cond)
         apply_dataset_ref(merged)
-        if OmegaConf.select(merged, "benchmark.dataset_ref.dataset", default=None) is not None:
-            assert merged.io.gt_path, f"{bucket}/{name}: io.gt_path not resolved"
-            assert len(merged.pixel_metrics.spacing) == 3, f"{bucket}/{name}: spacing not resolved"
+        ref = merged.benchmark.dataset_ref
+        assert ref.dataset, f"{bucket}/{name}: no dataset_ref.dataset"
+        assert merged.io.gt_path, f"{bucket}/{name}: io.gt_path not resolved"
+        assert len(merged.pixel_metrics.spacing) == 3, f"{bucket}/{name}: spacing not resolved"
+        a549 = _A549_DATASET.fullmatch(ref.dataset)
+        if a549 is not None:
+            # The manifest target is the marker gene, not the iPSC-side organelle key.
+            assert ref.target == a549.group("gene"), f"{bucket}/{name}: target {ref.target!r} for {ref.dataset}"
+            assert list(merged.pixel_metrics.spacing) == [0.174, 0.1494, 0.1494], f"{bucket}/{name}"
 
 
 def test_only_conditions_override_composes_on_a_grouped_leaf() -> None:
