@@ -48,7 +48,30 @@ monorepo. See the paper for the full benchmark description.
 
 ## Installation
 
-DynaCell is part of the VisCy `uv` workspace. From the repository root:
+DynaCell is part of the VisCy [uv](https://docs.astral.sh/uv/) workspace and
+must be installed with `uv`. Install uv first if you don't have it
+(`curl -LsSf https://astral.sh/uv/install.sh | sh`), then:
+
+```bash
+git clone --branch dynacell-models https://github.com/mehta-lab/VisCy.git
+cd VisCy
+uv venv -p 3.13
+source .venv/bin/activate
+uv pip install -e "applications/dynacell[eval]"
+```
+
+The `eval` extra adds the evaluation stack (segmentation models, deep-feature
+extractors, `cubic`) used for the paper's metrics; drop it if you only train
+or predict. Python 3.12 or newer is required.
+
+Plain `pip` does not work. DynaCell depends on in-workspace packages
+(`viscy-data`, `viscy-models`, `viscy-transforms`, `viscy-utils`, `dynaclr`)
+that are wired through `[tool.uv.sources]` in the repository-root
+`pyproject.toml`. `pip` ignores that table: it fetches older, incompatible
+`viscy-*` releases from PyPI and cannot find `dynaclr` at all.
+
+For development (every workspace package, all extras, tests), sync the whole
+workspace from the repository root instead:
 
 ```bash
 uv venv -p 3.13
