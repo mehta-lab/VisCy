@@ -312,12 +312,13 @@ Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md` §11–§15 and
   - mitochondria, A549 ZIKV, MorphEm median cosine, joint-trained CELL-Diff vs pix2pix3d (full z = 2.02);
   - nucleus, A549 mock, DINOv3 median cosine, iPSC-trained CELL-Diff vs FNet3D-VSCyto3DAug (full z = 2.05).
 
-  Read CELL-Diff's A549 deep-feature cosines on the lite as slightly optimistic. The mitochondria pair follows the Z
-  overlap, not the number of evaluations: Z overlap 4 keeps it, while Z overlap 3 and 18 or 24 evaluations do not.
+  Read CELL-Diff's A549 deep-feature cosines on the lite as slightly optimistic. Measured on the mitochondria pair:
+  Z overlap 4 keeps it (16 evaluations), while Z overlap 3, and 18 or 24 evaluations at Z overlap 2, do not.
   Three shortcuts break ordering:
   - 12 or fewer evaluations on a cosine grid flip deep-feature orderings of the A549-trained nucleus fit;
   - a grid with a coarse last step (Beta(0.5, 0.7), last step 0.13) loses fine texture: A549 DynaCLR KID
-    moves ~20 between-FOV SD. Pick grids by high-pass error, not whole-tile error;
+    moves ~20 between-FOV SD. High-pass error against dopri5 ranked the three measured grids in the order of
+    their deep-feature shifts; whole-tile error did not;
   - full-field slabs instead of 512^2 tiles break the OOD membrane fit.
 
   Evidence: `experiments/2026-10-01_celldiff-fast-inference/`.
