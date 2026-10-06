@@ -15,7 +15,7 @@ from typing import Literal, Sequence
 import numpy as np
 import torch
 import torch.nn.functional as F
-from lightning.pytorch import LightningModule
+from lightning.pytorch import Callback, LightningModule
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
@@ -917,6 +917,19 @@ class DynacellUNet(LightningModule):
         )
 
 
+class _DropCompiledNetOnException(Callback):
+    """Free :class:`DynacellFlowMatching`'s compiled inference copy when a Trainer run raises.
+
+    Lightning skips ``on_predict_end`` on an exception and runs only callback ``on_exception``
+    hooks, so without this the copy, which is not a registered submodule, keeps its device memory
+    until the next predict run.
+    """
+
+    def on_exception(self, trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        """Drop the compiled copy."""
+        pl_module.model.drop_compiled_net()
+
+
 class DynacellFlowMatching(LightningModule):
     """Flow-matching LightningModule for generative virtual staining.
 
@@ -1267,11 +1280,14 @@ class DynacellFlowMatching(LightningModule):
         self._validation_dice_losses.clear()
         self._validation_mask_velocity_losses.clear()
 
-    def on_predict_start(self) -> None:
-        """Drop any compiled copy an earlier run left behind.
+    def configure_callbacks(self) -> Callback:
+        """Attach the callback that frees the compiled inference copy when a run raises."""
+        return _DropCompiledNetOnException()
 
-        A run that raised never reaches :meth:`on_predict_end`; dropping here builds this run's
-        copy from the current weights, device and autocast state.
+    def on_predict_start(self) -> None:
+        """Drop any compiled copy left behind, so this run builds its own from the current weights.
+
+        The copy also follows the current device and autocast state.
         """
         self.model.drop_compiled_net()
 

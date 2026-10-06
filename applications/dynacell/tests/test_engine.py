@@ -464,10 +464,10 @@ def test_flow_matching_rebuilds_the_compiled_net_for_every_predict_run():
     assert model.model.inference_net(compiled=True) is not compiled
 
 
-def test_flow_matching_failed_predict_leaves_validation_on_the_live_net(monkeypatch):
+def test_flow_matching_failed_predict_frees_its_compiled_copy(monkeypatch):
     """A predict run that raises never reaches ``on_predict_end`` (Lightning only calls ``on_exception``
-    hooks), so its compiled snapshot stays cached; validation sampling after more training must still
-    use the live weights."""
+    hooks); the module's own callback still drops the compiled snapshot, and validation sampling after
+    more training uses the live weights."""
     monkeypatch.setattr(torch, "compile", lambda module, **kwargs: module)  # the snapshot, uncompiled: fast
     config = dict(
         net_config=CELLDIFF_TEST_NET_CONFIG,
@@ -479,9 +479,11 @@ def test_flow_matching_failed_predict_leaves_validation_on_the_live_net(monkeypa
         predict_compile=True,
     )
     model = DynacellFlowMatching(**config)
+    compiled_when_failing: list[bool] = []
 
     class _Fail(Callback):
         def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+            compiled_when_failing.append("net" in pl_module.model._compiled)
             raise RuntimeError("injected predict failure")
 
     trainer = Trainer(
@@ -495,7 +497,8 @@ def test_flow_matching_failed_predict_leaves_validation_on_the_live_net(monkeypa
     loader = torch.utils.data.DataLoader([{"source": torch.randn(1, 8, 32, 32)}], batch_size=1)
     with pytest.raises(RuntimeError, match="injected predict failure"):
         trainer.predict(model, dataloaders=loader)
-    assert model.model._compiled  # the failed run's snapshot is still cached
+    assert compiled_when_failing == [True]
+    assert not model.model._compiled
     with torch.no_grad():
         for param in model.model.net.parameters():
             param.add_(0.01 * torch.randn_like(param))  # training moves the live weights on
