@@ -135,6 +135,8 @@ def test_ode_solver_beta_schedule_spans_cosine_and_uniform():
     assert skewed[0] == 0.0 and skewed[-1] == 1.0
     gaps = skewed.diff()
     assert (gaps > 0).all() and gaps[0] < gaps[-1]
+    inner = ODESolver(**{**kwargs, "t0": 0.1, "t1": 0.9}, time_schedule=(0.3, 0.6)).t
+    torch.testing.assert_close(inner, 0.1 + 0.8 * skewed)
 
 
 @pytest.mark.parametrize("schedule", ["cos", (0.0, 0.5), (0.5,), (0.5, float("nan")), (0.5, float("inf"))])

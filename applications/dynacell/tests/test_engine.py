@@ -8,6 +8,7 @@ import pytest
 import torch
 from lightning.pytorch import Callback, Trainer, seed_everything
 from monai.data import MetaTensor
+from scipy.special import betaincinv
 from torch import nn
 
 from dynacell.celldiff_wrapper import _channels_last_copy, _ChannelsLastGroupNorm
@@ -380,6 +381,32 @@ def test_flow_matching_fixed_grid_sampler_nfe(method, per_step):
         prediction = model.predict_step({"source": torch.randn(1, 1, 16, 32, 32)}, batch_idx=0)
     assert prediction.shape == (1, 1, 16, 32, 32)
     assert calls[0] == 2 * 3 * per_step  # two Z tiles
+
+
+def test_flow_matching_iterative_predict_steps_on_a_beta_time_grid():
+    """``predict_time_schedule=(p, q)`` reaches the iterative sampler: every tile's Euler steps evaluate the
+    net at the left points of the Beta(p, q) grid."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=5,
+        predict_method="iterative",
+        predict_overlap=[2, 0, 0],
+        predict_sampling_method="euler",
+        predict_time_schedule=(0.4, 0.3),
+    ).eval()
+    seen: list[float] = []
+    forward = model.model.net.forward
+
+    def recorded(x, cond, t):
+        seen.append(float(t[0]))
+        return forward(x, cond, t)
+
+    model.model.net.forward = recorded
+    with torch.no_grad():
+        model.predict_step({"source": torch.randn(1, 1, 14, 32, 32)}, batch_idx=0)
+    grid = betaincinv(0.4, 0.3, np.linspace(0.0, 1.0, 5))[:-1]
+    assert seen == pytest.approx(np.tile(grid, 2).tolist(), abs=1e-6)  # two Z tiles
 
 
 def test_flow_matching_compiled_inference_net_stays_out_of_the_state_dict():
