@@ -58,7 +58,10 @@ dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
 - **`conditions` entries** may override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, `benchmark.dataset_ref` and `name`. Changing any field that affects model loading or segmentation raises an error.
 - **Always re-scored:** grouped leaves set `force_recompute.final_metrics: true`. To add a condition to a finished bucket without re-scoring the others, pass `force_recompute.final_metrics=false`.
 
-The single-condition leaves (`<org>/<model>/<train_set>/eval__<predict_set>.yaml`, run with `dynacell evaluate leaf=…`) are older. They keep the SuperModel segmentation defaults and write to `…/{ipsc,a549}/predictions/eval_*`.
+To score only some conditions of a bucket, pass their names: `only_conditions=[<name>,...]`. An unknown name, or a bare name without brackets, raises an error. The cross-condition probe pairs mock with each infected condition of the same model and test set (its probe group), so a subset run keeps those pairs consistent:
+
+- **Forced (the leaf default):** no cache counts as current, since the check cannot see recipe changes such as `feature_metrics.focus_slab`. Each selected condition therefore brings the rest of its probe group into the run, and `only_conditions=[<model>__a549_mock]` rescores that model's mock, DENV and ZIKV.
+- **Not forced:** a rescored infected condition is probed against its group's mock when the mock's cache is current. A rescored mock re-probes each infected condition whose cache is current. A probe CSV that the run cannot rewrite is removed: one in a selected infected condition that found no current mock, or one in an infected condition whose mock was rescored. Rescoring a mock first removes its group's infected probe CSVs and leaves a `cross_condition_probe.pending` marker in its dir. Any later run that touches the group re-probes against that mock even when its metrics come from the cache, and clears the marker once the probe pass finishes, so a failed run is repaired by a plain retry.
 
 Use `leaf=`, not `-c` (`-c` is Hydra's display-only `--cfg`).
 
@@ -70,12 +73,14 @@ sbatch applications/dynacell/tools/run_eval_direct.slurm grouped/<bucket>/eval_g
 ```
 
 - **What it does:** runs `evaluate-grouped` for grouped leaves and `evaluate` otherwise, in the project `.venv`. It requests one GPU with at least 40 GB, 16 CPUs and 256 GB of memory.
+- **One condition:** append `'only_conditions=[<name>]'` to the overrides.
 
 ### Common overrides
 
 | Override | Effect |
 |---|---|
 | `limit_positions=N compute_feature_metrics=false` | Smoke test on the first N FOVs. Feature metrics need every GT position. |
+| `only_conditions=[<name>,...]` | Grouped leaves: score only the named conditions. |
 | `force_recompute.final_metrics=true` | Re-score even if the saved metrics are valid. |
 | `io.require_complete_cache=true` | Cache-only run; see [Caches](#caches). |
 | `runtime.executor=process runtime.fov_workers=auto` | Parallel FOVs; see [Parallelism](#parallelism). |

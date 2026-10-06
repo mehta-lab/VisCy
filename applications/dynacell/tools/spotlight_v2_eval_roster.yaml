@@ -72,6 +72,12 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # FNet-3D vscyto3daug ER SAUNA-map-weighted Dice arm (fit 36933625, max_steps 200000,
+  # --ckpt best epoch=80-step=177957), 2026-10-06: all four legs. Stage-matched to the wave2s
+  # ER baselines (epoch 90 / 68) and segaux (epoch 86). Generate with --wave wave2x.
+  wave2x:
+    er:
+      - fnet3d_vscyto3daug_segaux_sauna
   # Checkpoint-stage control for the FNet-3D vscyto3daug mito segaux arm (2026-10-06): segaux
   # re-predicted from latest-epoch=76-step=200000 (its --ckpt best is epoch=30-step=80600; the
   # baselines used epoch 62 / 65). No checkpoint between epoch 36 and 75 was retained, so e76 is

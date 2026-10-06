@@ -128,18 +128,6 @@ def test_predict_leaf_composes(organelle: str, model: str, predict_file: str, mo
     assert "test_cropped" in data_path, f"{organelle}/{model}: data_path must point at test_cropped/, got {data_path}"
 
 
-@pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
-def test_eval_leaf_symlink_resolves(organelle: str, model: str) -> None:
-    """Every canonical eval leaf at <org>/<model>/<train_set>/eval__<predict_set>.yaml
-    has a corresponding symlink under _internal/leaf/ so Hydra can resolve
-    ``leaf=<path>`` from the _internal searchpath."""
-    real = BENCHMARKS / organelle / model / "ipsc_confocal" / "eval__ipsc_confocal.yaml"
-    link = BENCHMARKS / "_internal" / "leaf" / organelle / model / "ipsc_confocal" / "eval__ipsc_confocal.yaml"
-    assert real.is_file(), f"missing canonical eval leaf: {real}"
-    assert link.is_symlink(), f"missing symlink: {link}"
-    assert link.resolve() == real.resolve()
-
-
 def test_unext2_train_leaf_inherits_topology_and_logger() -> None:
     """Regression guard: unified fit.yml pins WandbLogger for a leaf that previously had no class_path."""
     leaf = BENCHMARKS / "er" / "unext2" / "ipsc_confocal" / "train.yml"
