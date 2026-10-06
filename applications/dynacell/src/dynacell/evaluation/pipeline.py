@@ -2257,6 +2257,10 @@ def _seg_model_required(cfg: DictConfig) -> bool:
     return pred_cache_dir is None
 
 
+#: Keys that describe the grouping itself; no single condition's config carries them.
+_GROUPING_KEYS = ("conditions", "only_conditions")
+
+
 def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
     """Return a fresh DictConfig with ``overrides`` deep-merged into ``base``.
 
@@ -2270,7 +2274,7 @@ def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConf
     """
     base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
     merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
-    for key in ("conditions", "only_conditions", "name"):
+    for key in (*_GROUPING_KEYS, "name"):
         if key in merged:
             del merged[key]
     return merged  # type: ignore[return-value]
@@ -2278,9 +2282,7 @@ def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConf
 
 def _condition_name(cond, idx: int) -> str:
     """Label of one ``conditions`` entry: its ``name``, else its index in the leaf."""
-    if isinstance(cond, dict):
-        return str(cond.get("name", idx))
-    return str(OmegaConf.select(cond, "name", default=idx))
+    return str(cond.get("name", idx))
 
 
 def _select_conditions(conditions, only) -> list[tuple[str, object]]:
@@ -2435,7 +2437,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # to escape Hydra's struct-mode flag — ``del`` on a struct DictConfig
     # raises ``ConfigTypeError``.
     models_base = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
-    for key in ("conditions", "only_conditions"):
+    for key in _GROUPING_KEYS:
         if key in models_base:
             del models_base[key]
     base_snapshot = {
