@@ -320,8 +320,11 @@ def test_every_grouped_leaf_composes(bucket: str) -> None:
     cfg = _compose_eval_cfg([f"leaf=grouped/{bucket}/eval_grouped"], config_name="eval_grouped")
     selected = _select_conditions(cfg.conditions, cfg.only_conditions)
     assert selected, f"{bucket}: no conditions"
+    # The splice reads and writes only these blocks; merging onto them alone keeps
+    # 1164 conditions from copying the whole eval schema each.
+    splice_base = OmegaConf.masked_copy(cfg, ["benchmark", "io", "pixel_metrics"])
     for name, cond in selected:
-        merged = _merge_condition(cfg, cond)
+        merged = _merge_condition(splice_base, cond)
         apply_dataset_ref(merged)
         if OmegaConf.select(merged, "benchmark.dataset_ref.dataset", default=None) is not None:
             assert merged.io.gt_path, f"{bucket}/{name}: io.gt_path not resolved"
