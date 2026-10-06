@@ -1,13 +1,15 @@
 # CellDiff fast predict overlay for the DynaCell-lite test set.
 # Same model and the same tile grid as celldiff_predict.yml (512^2 tiles, YX overlap 256,
 # iterative anchoring); only the Z overlap, the sampler and the precision change. Chosen and
-# validated in applications/dynacell/experiments/2026-10-01_celldiff-fast-inference/ (1.66 h per fit
-# for the whole lite test set on one H100; the full benchmark's orderings hold except one marginal
-# mitochondria MorphEm pair -- see "DynaCell-lite" in applications/dynacell/CLAUDE.md):
+# validated in applications/dynacell/experiments/2026-10-01_celldiff-fast-inference/ (1.43 h per fit
+# for the whole lite test set on one H100; the full benchmark's orderings hold except two pairs that
+# are marginal on the full benchmark -- see "DynaCell-lite" in applications/dynacell/CLAUDE.md):
 # - Z overlap 2 instead of 4 (8 instead of 11 Z tiles per A549 volume);
-# - sampler: midpoint on a cosine time grid, 16 velocity evaluations per tile, instead of
-#   adaptive dopri5 (~56-66); 12 or fewer flip deep-feature orderings for the A549-trained
-#   nucleus fit;
+# - sampler: midpoint on the Beta(0.4, 0.3) quantiles of 8 uniform points, 14 velocity evaluations
+#   per tile, instead of adaptive dopri5 (~56-66). The grid is packed toward the data end (last
+#   step 0.006): grids with a coarse last step lose the fine texture the deep features read
+#   (Beta(0.5, 0.7), last step 0.13, shifted A549 DynaCLR KID by ~20 between-FOV SD), and the
+#   cosine grid needs 16 evaluations (12 flip the A549-trained nucleus fit);
 # - bf16 autocast + torch.compile of a channels-last copy of the net.
 # - cudnn.benchmark (trainer.benchmark): -6.7 % end to end on H100; it moves pixels by relL2 0.0016,
 #   20x below the GPU-model drift the orderings were checked across.
@@ -23,8 +25,8 @@ model:
     predict_method: iterative
     predict_overlap: [2, 256, 256]
     predict_sampling_method: midpoint
-    predict_time_schedule: cosine
-    num_generate_steps: 9
+    predict_time_schedule: [0.4, 0.3]
+    num_generate_steps: 8
     predict_compile: true
 trainer:
   precision: bf16-mixed

@@ -301,18 +301,23 @@ Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md` §11–§15 and
   CELL-Diff prediction is a different sample, not a subset of the production one. It keeps
   production's tile grid (512^2 tiles, YX overlap 256, iterative anchoring) and changes:
   - Z overlap 4 -> 2;
-  - adaptive dopri5 (~56-66 velocity evaluations per tile) -> midpoint on a cosine time grid, 16
-    evaluations;
+  - adaptive dopri5 (~56-66 velocity evaluations per tile) -> midpoint on a Beta(0.4, 0.3) time grid,
+    14 evaluations, packed toward the data end;
   - bf16 + `torch.compile` of a channels-last copy of the net, with `cudnn.benchmark`.
 
-  One fit's whole lite test set: 1.66 h on an H100, against ~100 GPU-h per A549 condition in
-  production. With an organelle's three fits replaced, 10 of the 7984 pairs against other models
-  that the full benchmark resolves flip on the lite (2000-draw bootstrap), and 5 of 447 among the
-  CELL-Diff fits. One is resolved the other way on the lite:
-  mitochondria, A549 ZIKV, MorphEm median cosine, joint-trained CELL-Diff vs pix2pix3d (full z = 2.02).
-  The fast sampler raises the in-domain fits' A549 MorphEm scores; read CELL-Diff's A549 MorphEm
-  metrics on the lite as slightly optimistic. Two shortcuts break ordering:
-  - 12 or fewer evaluations flip deep-feature orderings of the A549-trained nucleus fit;
+  One fit's whole lite test set: 1.43 h on an H100, against ~100 GPU-h per A549 condition in
+  production. With an organelle's three fits replaced, 8 of the 7984 pairs against other models
+  that the full benchmark resolves flip on the lite (2000-draw bootstrap), and 3 of 447 among the
+  CELL-Diff fits. Two are resolved the other way on the lite, both marginal on the full benchmark:
+  - mitochondria, A549 ZIKV, MorphEm median cosine, joint-trained CELL-Diff vs pix2pix3d (full z = 2.02);
+  - nucleus, A549 mock, DINOv3 median cosine, iPSC-trained CELL-Diff vs FNet3D-VSCyto3DAug (full z = 2.05).
+
+  Read CELL-Diff's A549 deep-feature cosines on the lite as slightly optimistic. The mitochondria pair follows the Z
+  overlap, not the number of evaluations: Z overlap 4 keeps it, while Z overlap 3 and 18 or 24 evaluations do not.
+  Three shortcuts break ordering:
+  - 12 or fewer evaluations on a cosine grid flip deep-feature orderings of the A549-trained nucleus fit;
+  - a grid with a coarse last step (Beta(0.5, 0.7), last step 0.13) loses fine texture: A549 DynaCLR KID
+    moves ~20 between-FOV SD. Pick grids by high-pass error, not whole-tile error;
   - full-field slabs instead of 512^2 tiles break the OOD membrane fit.
 
   Evidence: `experiments/2026-10-01_celldiff-fast-inference/`.
