@@ -1,0 +1,117 @@
+cff-version: 1.2.0
+title: "DynaCell: An Evaluation Framework for Dynamic 3D Virtual Staining of Live Cells"
+message: >-
+  If you use DynaCell (code, data, or trained checkpoints), please cite the
+  paper listed under preferred-citation.
+type: software
+authors:
+  - given-names: Alexandr A.
+    family-names: Kalinin
+    affiliation: Biohub, San Francisco
+  - given-names: Dihan
+    family-names: Zheng
+    affiliation: University of California, San Francisco
+  - given-names: Taylla Milena
+    family-names: Theodoro
+    affiliation: Biohub, San Francisco
+  - given-names: Ivan
+    family-names: Ivanov
+    affiliation: Biohub, San Francisco
+  - given-names: Eduardo
+    family-names: Hirata-Miyasaki
+    affiliation: Biohub, San Francisco
+  - given-names: See-Chi
+    family-names: Lee
+    affiliation: Biohub, San Francisco
+  - given-names: Aofei
+    family-names: Liu
+    affiliation: Biohub, San Francisco
+  - given-names: Sricharan Reddy
+    family-names: Varra
+    affiliation: Biohub, San Francisco
+  - given-names: Talon
+    family-names: Chandler
+    affiliation: Biohub, San Francisco
+  - given-names: Soorya
+    family-names: Pradeep
+    affiliation: Biohub, San Francisco
+  - given-names: Chad
+    family-names: Liu
+    affiliation: Biohub, San Francisco
+  - given-names: Manuel D.
+    family-names: Leonetti
+    affiliation: Biohub, San Francisco
+  - given-names: Carolina
+    family-names: Arias
+    affiliation: Biohub, San Francisco
+  - given-names: Bo
+    family-names: Huang
+    affiliation: University of California, San Francisco
+  - given-names: Shalin B.
+    family-names: Mehta
+    affiliation: Biohub, San Francisco
+repository-code: "https://github.com/mehta-lab/VisCy"
+license: BSD-3-Clause
+abstract: >-
+  DynaCell is an evaluation framework for 3D time-lapse virtual staining of
+  live cells. It combines paired 3D time-lapse images acquired with and without
+  fluorescent labels, a suite of baseline models, and three metric tiers that
+  measure pixel-level fidelity, organelle segmentation performance, and
+  single-cell phenotype similarity.
+keywords:
+  - virtual staining
+  - live-cell imaging
+  - benchmarking
+  - microscopy
+  - deep learning
+preferred-citation:
+  type: conference-paper
+  title: "DynaCell: An Evaluation Framework for Dynamic 3D Virtual Staining of Live Cells"
+  collection-title: "Advances in Neural Information Processing Systems (NeurIPS 2026), Evaluations and Datasets Track"
+  year: 2026
+  authors:
+    - given-names: Alexandr A.
+      family-names: Kalinin
+      affiliation: Biohub, San Francisco
+    - given-names: Dihan
+      family-names: Zheng
+      affiliation: University of California, San Francisco
+    - given-names: Taylla Milena
+      family-names: Theodoro
+      affiliation: Biohub, San Francisco
+    - given-names: Ivan
+      family-names: Ivanov
+      affiliation: Biohub, San Francisco
+    - given-names: Eduardo
+      family-names: Hirata-Miyasaki
+      affiliation: Biohub, San Francisco
+    - given-names: See-Chi
+      family-names: Lee
+      affiliation: Biohub, San Francisco
+    - given-names: Aofei
+      family-names: Liu
+      affiliation: Biohub, San Francisco
+    - given-names: Sricharan Reddy
+      family-names: Varra
+      affiliation: Biohub, San Francisco
+    - given-names: Talon
+      family-names: Chandler
+      affiliation: Biohub, San Francisco
+    - given-names: Soorya
+      family-names: Pradeep
+      affiliation: Biohub, San Francisco
+    - given-names: Chad
+      family-names: Liu
+      affiliation: Biohub, San Francisco
+    - given-names: Manuel D.
+      family-names: Leonetti
+      affiliation: Biohub, San Francisco
+    - given-names: Carolina
+      family-names: Arias
+      affiliation: Biohub, San Francisco
+    - given-names: Bo
+      family-names: Huang
+      affiliation: University of California, San Francisco
+    - given-names: Shalin B.
+      family-names: Mehta
+      affiliation: Biohub, San Francisco

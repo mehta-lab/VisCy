@@ -72,6 +72,99 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Checkpoint-stage control for the FNet-3D vscyto3daug mito segaux arm (2026-10-06): segaux
+  # re-predicted from latest-epoch=76-step=200000 (its --ckpt best is epoch=30-step=80600; the
+  # baselines used epoch 62 / 65). No checkpoint between epoch 36 and 75 was retained, so e76 is
+  # the closest stage, and later than both baselines. Stores and leaves are outside the generated
+  # tree (experiments/2026-09-24_spotlight-v2/e76_mito_control/). Read against wave2s + wave2v.
+  # Generate with --wave ctrl3.
+  ctrl3:
+    mito:
+      - model: fnet3d_vscyto3daug_segaux_e76
+        pred_paths:
+          ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_e76/ipsc/ipsc/prediction.zarr
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_e76/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_e76/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_e76/ipsc/a549__zikv/prediction.zarr
+  # FNet-3D vscyto3daug mito segaux arm (fit 36933644, max_steps 200000, --ckpt best
+  # epoch=30-step=80600), 2026-10-06: all four legs. Read against the wave2s + wave2v mito
+  # baselines; cubic 0.9.0a4 eval venv. Generate with --wave wave2w.
+  wave2w:
+    mito:
+      - fnet3d_vscyto3daug_segaux
+  # Checkpoint-stage control for the FNet-3D vscyto3daug nucleus floor (2026-10-05): v2_seed1
+  # re-predicted from epoch=74-step=195000 (its --ckpt best is epoch=17; v2 used epoch=64 and
+  # the arms 127k-190k steps). Stores and leaves are outside the generated tree
+  # (experiments/2026-09-24_spotlight-v2/e74_control/). Read against the wave2q 2x2.
+  # Generate with --wave ctrl2.
+  ctrl2:
+    nucleus:
+      - model: fnet3d_vscyto3daug_v2_seed1_e74
+        pred_paths:
+          ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/ipsc/prediction.zarr
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_seed1_e74/ipsc/a549__zikv/prediction.zarr
+  # FNet-3D vscyto3daug mito v2 baseline, seed 1 (fit 36890546 resumed as 37004479 after a
+  # NODE_FAIL requeue, max_steps 200000, --ckpt best epoch 65), 2026-10-05: all four legs. Gives
+  # the mito baseline seed floor next to wave2s's seed 0; cubic 0.9.0a4 eval venv. Generate with
+  # --wave wave2v.
+  wave2v:
+    mito:
+      - fnet3d_vscyto3daug_v2_seed1
+  # FNet-3D vscyto3daug nucleus soft-clDice arm (Stage 2 #5; fit 36910358, max_steps 200000,
+  # --ckpt best epoch 72), 2026-10-05: all four legs. Nucleus bodies never skeletonize at
+  # cldice_iters=5, so this arm is ~segaux at half the Dice weight, not a clDice test. Read
+  # against the wave2q 2x2. Generate with --wave wave2u.
+  wave2u:
+    nucleus:
+      - fnet3d_vscyto3daug_segaux_cldice
+  # FNet-3D vscyto3daug ER segaux arm (fit 36933617, max_steps 200000, --ckpt best epoch 86),
+  # 2026-10-04: all four legs. Read against the wave2s ER baselines; cubic 0.9.0a4 eval venv.
+  # Generate with --wave wave2t.
+  wave2t:
+    er:
+      - fnet3d_vscyto3daug_segaux
+  # First ER/mito wave (2026-10-04, all four legs): the FNet-3D vscyto3daug v2
+  # baselines the ER/mito Spotlight arms are read against -- ER at two seeds (epoch 90 / 68),
+  # mito seed 0 (epoch 62). Scored like the canonical er_/mitochondria_ grouped leaves (semantic
+  # Dice, no instance AP); submit in the cubic 0.9.0a4 eval venv. Generate with --wave wave2s.
+  wave2s:
+    er:
+      - fnet3d_vscyto3daug_v2
+      - fnet3d_vscyto3daug_v2_seed1
+    mito:
+      - fnet3d_vscyto3daug_v2
+  # FNet-3D vscyto3daug nucleus SAUNA-map-weighted Dice arm (Stage 2 #5; fit 36906516,
+  # max_steps 200000, --ckpt best epoch 64), 2026-10-04: all four legs. Read against the
+  # wave2q 2x2. Generate with --wave wave2r.
+  wave2r:
+    nucleus:
+      - fnet3d_vscyto3daug_segaux_sauna
+  # 2026-10-04, all four legs, --ckpt best:
+  # - the FNet-3D vscyto3daug nucleus 2x2 (big patch + VSCyto3D augs, the OOD-competent FNet:
+  #   {v2, segaux} x {seed 0, seed 1});
+  # - the second draw of the fresh UNeXt2-3D baselines (the seed floor for their segaux arms).
+  # Generate with --wave wave2q.
+  wave2q:
+    nucleus:
+      - fnet3d_vscyto3daug_v2
+      - fnet3d_vscyto3daug_v2_seed1
+      - fnet3d_vscyto3daug_segaux
+      - fnet3d_vscyto3daug_segaux_seed1
+      - fcmae_vscyto3d_scratch_v2_seed1
+    membrane:
+      - fcmae_vscyto3d_scratch_v2_seed1
+  # Second draw of the pix2pix3d nucleus segaux arm (--ckpt last, EMA), 2026-10-03: all four legs.
+  # Gates the membrane pix2pix3d segaux_seed1 fit. Generate with --wave wave2p.
+  wave2p:
+    nucleus:
+      - pix2pix3d_unetvit_segaux_seed1
+  # Second draw of the UNeXt2-3D MEMBRANE segaux arm (--ckpt best epoch 164), 2026-10-02: all four legs.
+  # Generate with --wave wave2o.
+  wave2o:
+    membrane:
+      - fcmae_vscyto3d_scratch_segaux_seed1
   # Second draw of the pix2pix3d v2 MEMBRANE baseline (--ckpt last, EMA), 2026-10-02: all four legs. The DENV
   # and MOCK jobs hit their 20 h wall after writing all 12 FOVs (markers 22:09 / 22:16, kill 22:41).
   # Generate with --wave wave2n.

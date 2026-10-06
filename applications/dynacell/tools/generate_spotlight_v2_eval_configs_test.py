@@ -8,14 +8,16 @@ import generate_spotlight_v2_eval_configs
 import numpy as np
 import pytest
 import yaml
-from generate_grouped_eval_configs import _BASE_OVERLAY
+from generate_grouped_eval_configs import _BASE_OVERLAY, _LEAF_OUT_ROOT
 from generate_spotlight_v2_eval_configs import (
     DEFAULT_ROSTER,
     PRED_FORCE,
     V2_ROOT,
     build_buckets,
+    gt_test_store,
     load_roster,
     main,
+    parsed_row,
     store_problems,
 )
 from iohub.ngff import open_ome_zarr
@@ -76,8 +78,9 @@ def test_every_pred_artifact_is_forced_without_touching_the_shared_overlay() -> 
     for body, _ in buckets.values():
         assert body["force_recompute"] == PRED_FORCE
         assert not any(k.startswith("gt_") or k == "all" for k in body["force_recompute"])
-        assert body["compute_instance_ap"] is True
-        assert body["segmentation"]["backend"] == "cpdino"
+        if body["target_name"] in {"nucleus", "membrane"}:
+            assert body["compute_instance_ap"] is True
+            assert body["segmentation"]["backend"] == "cpdino"
     assert _BASE_OVERLAY["force_recompute"] == {"final_metrics": True}
 
 
@@ -95,7 +98,8 @@ def test_pred_path_override_and_leaf_narrowing(tmp_path: Path) -> None:
     ("waves", "match"),
     [
         ({"a": {"nucleus": ["fnet2d"]}, "b": {"nucleus": ["fnet2d"]}}, "is in wave 'a' and wave 'b'"),
-        ({"a": {"er": ["fnet2d"]}}, "organelle 'er'"),
+        # Roster keys are the on-disk tokens: ``mito``, never the eval target ``mitochondria``.
+        ({"a": {"mitochondria": ["fnet2d"]}}, "organelle 'mitochondria'"),
         ({"a": {"nucleus": ["not_a_model"]}}, "PAPER_KEY"),
     ],
 )
@@ -155,3 +159,60 @@ def test_wave_filter_gates_and_writes_only_the_named_wave(tmp_path: Path, monkey
     assert sorted(p.name for p in out.iterdir()) == ["spotlight_v2_nucleus_ipsc__done"]
     with pytest.raises(ValueError, match="not in roster"):
         main(["--roster", str(roster), "--out-root", str(out), "--wave", "nope"])
+
+
+# Canonical paper buckets the ER/mito Spotlight-v2 buckets must score like.
+_CANONICAL_BUCKET = {"er": "er_ipsc_trained", "mito": "mitochondria_ipsc_trained"}
+_LEAF_SUFFIX = {"ipsc": "ipsc", "a549__mock": "a549_mock", "a549__denv": "a549_denv", "a549__zikv": "a549_zikv"}
+
+
+@pytest.mark.parametrize("organelle", ["er", "mito"])
+def test_er_mito_buckets_score_like_the_canonical_grouped_leaf(tmp_path: Path, organelle: str) -> None:
+    """Every scoring field of an ER/mito bucket equals the canonical ipsc_trained grouped leaf's.
+
+    Only the outputs (save_dir, pred_cache_dir under V2_ROOT), the store and the
+    condition name may differ, plus force_recompute (every pred_* forced).
+    """
+    leaves = list(_LEAF_SUFFIX)
+    rows = load_roster(_write_roster(tmp_path, {"w": {organelle: ["fnet3d_vscyto3daug_v2"]}}, leaves))
+    buckets = build_buckets(rows)
+    with (_LEAF_OUT_ROOT / _CANONICAL_BUCKET[organelle] / "eval_grouped.yaml").open() as f:
+        canonical = yaml.safe_load(f)
+    for leaf, suffix in _LEAF_SUFFIX.items():
+        body, n = buckets[f"spotlight_v2_{organelle}_{suffix}__w"]
+        assert n == 1
+        # Top level: same target, overlay and (absent) segmentation / instance-AP settings.
+        assert {k: v for k, v in body.items() if k not in {"conditions", "force_recompute"}} == {
+            k: v for k, v in canonical.items() if k not in {"conditions", "force_recompute"}
+        }
+        assert body["target_name"] == {"er": "er", "mito": "mitochondria"}[organelle]
+        assert "segmentation" not in body and "compute_instance_ap" not in body
+        assert body["force_recompute"] == PRED_FORCE
+        (cond,) = body["conditions"]
+        ref = next(c for c in canonical["conditions"] if c["name"] == f"fnet3d__ipsc_trained__{suffix}")
+        assert cond["name"] == f"fnet3d_vscyto3daug_v2__ipsc_trained__{suffix}"
+        assert cond["benchmark"] == ref["benchmark"]
+        assert set(cond["io"]) == set(ref["io"]) == {"pred_path", "pred_cache_dir"}
+        test_set, _, condition = leaf.partition("__")
+        assert cond["io"]["pred_path"] == str(
+            paths.prediction_store(organelle, "fnet3d_vscyto3daug_v2", "ipsc", test_set, condition or None)
+        )
+        assert cond["save"]["save_dir"] == str(V2_ROOT / organelle / "fnet3d_vscyto3daug_v2/ipsc" / leaf)
+        assert cond["io"]["pred_cache_dir"] == str(
+            V2_ROOT / test_set / "eval_cache_pred" / organelle / "fnet3d_vscyto3daug_v2/ipsc" / leaf
+        )
+
+
+@pytest.mark.parametrize(
+    ("organelle", "leaf", "store"),
+    [
+        ("er", "ipsc", "ipsc/dataset_v4/test_cropped/SEC61B.zarr"),
+        ("mito", "ipsc", "ipsc/dataset_v4/test_cropped/TOMM20.zarr"),
+        ("er", "a549__denv", "a549/mantis/test/SEC61B_DENV.zarr"),
+        ("mito", "a549__zikv", "a549/mantis/test/TOMM20_ZIKV.zarr"),
+    ],
+)
+def test_er_mito_gate_compares_against_the_per_organelle_gt(organelle: str, leaf: str, store: str) -> None:
+    """The store gate reads the per-organelle iPSC GT and the A549 sec61b/tomm20 test sets."""
+    parsed = parsed_row(organelle, "fnet3d_vscyto3daug_v2", leaf, Path("unused"))
+    assert gt_test_store(parsed) == paths.DATA_ROOT / store
