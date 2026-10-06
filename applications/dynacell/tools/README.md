@@ -10,11 +10,9 @@ builders. Not part of the installable package — run with `uv run python applic
   [README](../README.md#benchmark-submit).
 - `submit_benchmark_batch.py` (+ wrapper `predict_batch.sh`) — submit N leaves in one call; modes: serial /
   `--array` / `--parallel P` (see [CLAUDE.md § Predict submission modes](../CLAUDE.md#predict-submission-modes)).
-- `submit_evaluation_job.py` / `submit_evaluation_batch.py` (+ wrapper `evaluate_batch.sh`) — the eval-side
-  mirrors: one eval leaf as one sbatch, or N eval leaves chunked `--parallel N` on a shared GPU.
-- `predict_local.sh` / `evaluate_local.sh` — foreground runs on the current host's GPU (`--parallel N` backgrounds
-  concurrent processes).
-- `run_eval_direct.slurm` — direct-launch slurm for hand-authored eval leaves that bypass the submit helpers.
+- `predict_local.sh` — foreground predicts on the current host's GPU (`--parallel N` backgrounds concurrent
+  processes).
+- `run_eval_direct.slurm` — submit one eval leaf (grouped or single) as one sbatch, in the uv project environment.
 - `sbatch_template.sbatch`, `sbatch_template_batch.sbatch`, `sbatch_template_array.sbatch` — sbatch templates the
   submit tools render into.
 

@@ -1,6 +1,7 @@
 """Batch orchestration: load, segment, evaluate, save."""
 
 import json
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass, field, fields
@@ -25,6 +26,7 @@ from dynacell.evaluation.cp_reference import (
     cp_sidecar_payload,
     eval_cp_space,
 )
+from dynacell.evaluation.cross_condition_probe import GROUP_PROBE_FILENAME, probe_group
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -2055,6 +2057,12 @@ def save_metrics(
 _SCALED_PIXEL_COLUMNS = frozenset({"SI_PSNR", "SI_SSIM", "SI_NRMSE"})
 
 
+def _forces_final_metrics(config: DictConfig) -> bool:
+    """True when ``force_recompute`` rejects every final-metrics cache of ``config``."""
+    force = config.force_recompute
+    return bool(force.all or force.final_metrics)
+
+
 def _final_metrics_cache_valid(config: DictConfig) -> bool:
     """Return True when the saved CSV/NPY caches can be reused.
 
@@ -2068,8 +2076,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # Resolved before every early return: both entrypoints call this gate before any
     # model load, so an invalid recipe fails here rather than after the load.
     foreground = _foreground_stamp(config)
-    force = config.force_recompute
-    if force.all or force.final_metrics:
+    if _forces_final_metrics(config):
         return False
     save_dir = Path(config.save.save_dir)
     # Metric values are not comparable across cubic versions — FSC/FRC/Spectral_PCC
@@ -2257,6 +2264,10 @@ def _seg_model_required(cfg: DictConfig) -> bool:
     return pred_cache_dir is None
 
 
+#: Keys that describe the grouping itself; no single condition's config carries them.
+_GROUPING_KEYS = ("conditions", "only_conditions")
+
+
 def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
     """Return a fresh DictConfig with ``overrides`` deep-merged into ``base``.
 
@@ -2270,10 +2281,152 @@ def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConf
     """
     base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
     merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
-    for key in ("conditions", "name"):
+    for key in (*_GROUPING_KEYS, "name"):
         if key in merged:
             del merged[key]
     return merged  # type: ignore[return-value]
+
+
+def _condition_name(cond, idx: int) -> str:
+    """Label of one ``conditions`` entry: its ``name``, else its index in the leaf."""
+    return str(cond.get("name", idx))
+
+
+def _select_conditions(conditions, only) -> list[tuple[str, object]]:
+    """Return ``(name, condition)`` pairs, restricted to ``only`` when it is set.
+
+    ``only`` is the ``only_conditions`` list. Conditions keep their leaf order, and
+    names keep their leaf index, so filtering never relabels a condition. An empty list
+    or a name the leaf does not define raises, as does a scalar: a bracketless override
+    (``only_conditions=x``) would otherwise select by the characters of ``x``.
+    """
+    named = [(_condition_name(cond, idx), cond) for idx, cond in enumerate(conditions)]
+    if only is None:
+        return named
+    if not (OmegaConf.is_list(only) or isinstance(only, list)):
+        raise ValueError(f"only_conditions must be a list of condition names, e.g. only_conditions=[{only}]")
+    wanted = {str(name) for name in only}
+    available = [name for name, _ in named]
+    unknown = sorted(wanted - set(available))
+    if not wanted or unknown:
+        raise ValueError(
+            f"only_conditions={sorted(wanted)!r} must name at least one condition of this leaf; "
+            f"unknown: {unknown!r}; available: {available!r}"
+        )
+    return [(name, cond) for name, cond in named if name in wanted]
+
+
+def _with_forced_probe_siblings(config: DictConfig, conditions, selected: list) -> list:
+    """Add the unselected probe-group siblings of ``selected`` that ``force_recompute`` forces.
+
+    A forced condition has no cache that counts as current: forcing is how a recipe change
+    the cache check cannot see (``feature_metrics.focus_slab``) is applied, so pairing a
+    rescored condition with a forced sibling's old embeddings could mix recipes. Rescoring
+    the sibling keeps the probe whole. Every grouped leaf forces ``final_metrics``, so there
+    ``only_conditions=[<model>__a549_mock]`` rescores that model's mock, DENV and ZIKV.
+    Leaf order is kept.
+    """
+    selected_names = {name for name, _ in selected}
+    merged = {name: _merge_condition(config, cond) for name, cond in _select_conditions(conditions, None)}
+    membership = {name: probe_group(Path(cfg.save.save_dir)) for name, cfg in merged.items()}
+    keys = {membership[name][0] for name in selected_names if membership[name] is not None}
+    added = [
+        name
+        for name in merged
+        if name not in selected_names
+        and membership[name] is not None
+        and membership[name][0] in keys
+        and _forces_final_metrics(merged[name])
+    ]
+    if not added:
+        return selected
+    print(f"[grouped] force_recompute: also rescoring probe-group siblings {added}")
+    return [(name, cond) for name, cond in _select_conditions(conditions, None) if name in selected_names | set(added)]
+
+
+#: Marker in a mock's eval dir: its embeddings were replaced, and the probe CSVs of its
+#: group's infected conditions are not yet rebuilt against them. A probe pass clears it.
+PROBE_PENDING_FILENAME = "cross_condition_probe.pending"
+
+
+def _probe_group_dirs(config: DictConfig, conditions) -> dict[tuple[str, str, str], dict[str, Path]]:
+    """Each condition's eval dir, by probe group and then condition token."""
+    groups: dict[tuple[str, str, str], dict[str, Path]] = defaultdict(dict)
+    for _, cond in _select_conditions(conditions, None):
+        save_dir = Path(_merge_condition(config, cond).save.save_dir)
+        membership = probe_group(save_dir)
+        if membership is not None:
+            groups[membership[0]][membership[1]] = save_dir
+    return groups
+
+
+def _mark_probes_pending(group: dict[str, Path]) -> None:
+    """Before a mock's embeddings are replaced, drop its group's infected probe CSVs.
+
+    The marker outlives a run that fails later, so a retry that finds the new mock cached
+    still rebuilds the infected probes against it.
+    """
+    group["mock"].mkdir(parents=True, exist_ok=True)
+    (group["mock"] / PROBE_PENDING_FILENAME).touch()
+    for condition, save_dir in group.items():
+        stale = save_dir / GROUP_PROBE_FILENAME
+        if condition != "mock" and stale.is_file():
+            stale.unlink()
+            print(f"[grouped] removed cross-condition probe {stale}: its mock is being rescored")
+
+
+def _probe_counterparts(
+    config: DictConfig,
+    conditions,
+    selected_names: set[str],
+    selected_dirs: list[Path],
+    group_dirs: dict[tuple[str, str, str], dict[str, Path]],
+) -> tuple[list[Path], list[Path], list[Path]]:
+    """Unselected conditions whose probe the selected ones change.
+
+    Returns ``(usable, invalidated, pending)``. A selected infected condition is probed
+    against its group's mock, so an unselected mock is a counterpart. An unselected
+    infected condition is one only when its group's mock carries the
+    :data:`PROBE_PENDING_FILENAME` marker (rescored by this run or by one that failed
+    before its probe finished): its probe CSV pairs it with the mock's old embeddings, so
+    it is ``invalidated``. ``usable`` counterparts hold a cache this run would reuse if
+    they were selected, so the probe pairs their embeddings with the selected ones.
+    ``pending`` are the markers the probe pass resolves. Other conditions are not inspected.
+    """
+    groups: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for save_dir in selected_dirs:
+        membership = probe_group(save_dir)
+        if membership is not None:
+            groups[membership[0]].add(membership[1])
+    pending = [
+        marker
+        for key in groups
+        if "mock" in group_dirs[key] and (marker := group_dirs[key]["mock"] / PROBE_PENDING_FILENAME).is_file()
+    ]
+    remocked = {probe_group(marker.parent)[0] for marker in pending}
+    usable: list[Path] = []
+    invalidated: list[Path] = []
+    for name, cond in _select_conditions(conditions, None):
+        if name in selected_names:
+            continue
+        merged = _merge_condition(config, cond)
+        save_dir = Path(merged.save.save_dir)
+        membership = probe_group(save_dir)
+        if membership is None or membership[0] not in groups:
+            continue
+        key, condition = membership
+        if condition != "mock":
+            if key not in remocked:
+                continue
+            invalidated.append(save_dir)
+        apply_dataset_ref(merged)
+        if not Path(merged.io.pred_path).exists():
+            print(f"[grouped] probe counterpart {name!r}: no prediction store at {merged.io.pred_path}; not paired")
+        elif _final_metrics_cache_valid(merged):
+            usable.append(save_dir)
+        else:
+            print(f"[grouped] probe counterpart {name!r}: cached metrics not current; not paired")
+    return usable, invalidated, pending
 
 
 def _check_grouped_field_invariants(
@@ -2344,13 +2497,15 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     ----------
     config : DictConfig
         Eval config with an extra top-level ``conditions: [...]`` list.
-        Each entry is a dict-like overlay applied to the base.
+        Each entry is a dict-like overlay applied to the base. An optional
+        ``only_conditions: [...]`` list of names restricts the run to those
+        conditions.
 
     Returns
     -------
     list[tuple[str, tuple]]
         ``[(condition_name, (pixel_rows, mask_rows, feature_rows)), ...]``
-        in input order. ``condition_name`` is taken from the entry's
+        for the evaluated conditions, in input order. ``condition_name`` is taken from the entry's
         ``name`` field, falling back to its index as a string.
 
     Notes
@@ -2363,10 +2518,23 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     conditions = OmegaConf.select(config, "conditions", default=None)
     if not conditions:
         raise ValueError("evaluate_predictions_grouped requires a non-empty top-level 'conditions' list")
+    only = OmegaConf.select(config, "only_conditions", default=None)
+    selected = _select_conditions(conditions, only)
+    # Gated by ``cross_condition_probe.enabled``; default-on whenever feature metrics
+    # are computed, since the probe consumes the embeddings those produce.
+    probe_enabled = bool(
+        OmegaConf.select(
+            config,
+            "cross_condition_probe.enabled",
+            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
+        )
+    )
+    if probe_enabled and only is not None:
+        selected = _with_forced_probe_siblings(config, conditions, selected)
 
     executor = OmegaConf.select(config, "runtime.executor", default="serial")
     require_complete = bool(OmegaConf.select(config, "io.require_complete_cache", default=False))
-    n_conditions = len(conditions)
+    n_conditions = len(selected)
     if executor == "process" and n_conditions > 1:
         if require_complete:
             # Cache-only path: workers still re-init per condition (pool spawn +
@@ -2404,8 +2572,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # to escape Hydra's struct-mode flag — ``del`` on a struct DictConfig
     # raises ``ConfigTypeError``.
     models_base = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
-    if "conditions" in models_base:
-        del models_base["conditions"]
+    for key in _GROUPING_KEYS:
+        if key in models_base:
+            del models_base[key]
     base_snapshot = {
         field: _snapshot_field(models_base, field) for field in (*_MODEL_LOADING_FIELDS, *_GROUPED_SHARED_FIELDS)
     }
@@ -2416,27 +2585,28 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     def get_models() -> EvalModels:
         nonlocal models
         if models is None:
-            print(f"[grouped] loading shared models for {len(conditions)} conditions ...")
+            print(f"[grouped] loading shared models for {n_conditions} conditions ...")
             models = load_eval_models(models_base)
         return models
 
     results: list[tuple[str, tuple]] = []
     condition_save_dirs: list[Path] = []
-    for idx, cond in enumerate(conditions):
-        name = (
-            cond.get("name", str(idx)) if isinstance(cond, dict) else OmegaConf.select(cond, "name", default=str(idx))
-        )
+    group_dirs = _probe_group_dirs(config, conditions)
+    for idx, (name, cond) in enumerate(selected):
         merged = _merge_condition(config, cond)
         apply_dataset_ref(merged)
         _check_grouped_field_invariants(base_snapshot, base_seg_required, merged, name)
-        print(f"[grouped] ({idx + 1}/{len(conditions)}) evaluating {name!r} → {merged.save.save_dir}")
+        print(f"[grouped] ({idx + 1}/{n_conditions}) evaluating {name!r} → {merged.save.save_dir}")
 
         if _final_metrics_cache_valid(merged):
-            print(f"[grouped] ({idx + 1}/{len(conditions)}) {name!r}: reusing cached final metrics")
+            print(f"[grouped] ({idx + 1}/{n_conditions}) {name!r}: reusing cached final metrics")
             pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
         else:
             cp_space = eval_cp_space(merged) if merged.compute_feature_metrics else None
             snapshot = prediction_sources(merged.io.pred_path, merged.io.pred_channel_name)
+            membership = probe_group(Path(merged.save.save_dir))
+            if membership is not None and membership[1] == "mock":
+                _mark_probes_pending(group_dirs[membership[0]])
             pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
                 merged, models=get_models(), cp_space=cp_space, prediction_snapshot=snapshot
             )
@@ -2454,23 +2624,27 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # Cross-condition infection probe: once every condition in the group has
     # its single-cell embeddings on disk, classify each infected condition vs
     # mock (FOV-stratified logistic probe, per feature space, GT and pred).
-    # Default-on whenever feature metrics were computed (the probe consumes the
-    # embeddings those produce) and a mock + >=1 infected condition are present.
-    # Gated by ``cross_condition_probe.enabled``. It runs after every condition's metrics
+    # It needs a mock + >=1 infected condition. It runs after every condition's metrics
     # are saved, so a failure loses nothing already written; it is not swallowed, since a
     # CP reference/sidecar failure there means the probe would score in the wrong space.
     # (Missing embeddings of one side are already a recorded skip inside the probe.)
-    probe_enabled = bool(
-        OmegaConf.select(
-            config,
-            "cross_condition_probe.enabled",
-            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
-        )
-    )
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
-        written = _cross_condition_run_for_group(condition_save_dirs, n_splits=n_splits, rng_seed=rng_seed)
+        usable, invalidated, pending = _probe_counterparts(
+            config, conditions, {name for name, _ in selected}, condition_save_dirs, group_dirs
+        )
+        # A probe CSV must not outlive the embeddings it was scored on: a selected
+        # condition's own, or its group's rescored mock. Drop each one this run rewrites
+        # or invalidates before probing, so a probe that raises leaves none behind.
+        for save_dir in condition_save_dirs + invalidated + usable:
+            stale = save_dir / GROUP_PROBE_FILENAME
+            if stale.is_file():
+                stale.unlink()
+                print(f"[grouped] removed cross-condition probe {stale} before re-probing")
+        written = _cross_condition_run_for_group(condition_save_dirs + usable, n_splits=n_splits, rng_seed=rng_seed)
+        for marker in pending:
+            marker.unlink()
         if written:
             print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
 

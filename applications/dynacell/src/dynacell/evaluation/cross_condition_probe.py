@@ -261,6 +261,17 @@ def _model_group_key(eval_dir: Path) -> tuple[str, str, str] | None:
     return (str(leaf.parent), stripped, component_rel)
 
 
+def probe_group(eval_dir: Path) -> tuple[tuple[str, str, str], str] | None:
+    """Return ``(group_key, condition)`` for the dir :func:`run_for_group` would place it in.
+
+    ``None`` for dirs without a condition token, which join no group.
+    """
+    key = _model_group_key(eval_dir)
+    if key is None:
+        return None
+    return key, _detect_condition(eval_dir)
+
+
 def _probe_one_group(by_condition: dict[str, Path], n_splits: int, rng_seed: int) -> list[Path]:
     """Run the mock-vs-infected probe for one (model, pool, organelle) group."""
     if "mock" not in by_condition:
@@ -318,10 +329,10 @@ def run_for_group(
     """
     groups: dict[tuple[str, str, str], dict[str, Path]] = {}
     for d in eval_dirs:
-        key = _model_group_key(d)
-        if key is None:
+        membership = probe_group(d)
+        if membership is None:
             continue
-        cond = _detect_condition(d)  # key is not None -> a token is present
+        key, cond = membership
         by_condition = groups.setdefault(key, {})
         if cond in by_condition:
             raise ValueError(f"duplicate condition {cond!r} in group {key[1]!r}: {by_condition[cond]} and {d}")

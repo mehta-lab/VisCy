@@ -247,9 +247,8 @@ compute win to offset the reloads.
 - **Predicts are the opposite** (cheap load, ~10 GB, GPU-light): `--parallel 2`
   is a confirmed win there (2-up on A40). See `applications/dynacell/CLAUDE.md`
   "Predict submission modes".
-- `submit_evaluation_batch.py` **cannot** drive grouped buckets: it emits
-  `dynacell evaluate` and requires one `(organelle, model, train_set)` per call,
-  while a bucket spans many models. Use `tools/run_eval_direct.slurm`.
+- Submit buckets with `tools/run_eval_direct.slurm`; restrict one to some of its
+  conditions with `only_conditions=[...]`.
 - **The real eval-side parallelism lever is bucket-level:** run independent
   grouped buckets on separate GPUs. When buckets share a GT cache
   (`sec61b`/`tomm20`, keyed by `(gene_cond, halfwidth)`), a warm-first `afterok`
