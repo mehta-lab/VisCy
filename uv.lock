@@ -6905,6 +6905,7 @@ dependencies = [
 [package.optional-dependencies]
 celldiff = [
     { name = "diffusers" },
+    { name = "scipy" },
     { name = "torchdiffeq" },
 ]
 
@@ -6924,6 +6925,7 @@ requires-dist = [
     { name = "monai", specifier = ">=1.5.2" },
     { name = "numpy", specifier = ">=2.4.1" },
     { name = "pytorch-metric-learning" },
+    { name = "scipy", marker = "extra == 'celldiff'" },
     { name = "timm", specifier = ">=1.0.15" },
     { name = "torch", specifier = ">=2.10" },
     { name = "torchdiffeq", marker = "extra == 'celldiff'" },

@@ -297,6 +297,31 @@ Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md` §11–§15 and
   MIND are off (`compute_microssim`, `feature_metrics.compute_{fid,prc,mind}`).
 - **A549 has no separate nuclei store**: `nuclei_gt_path` is the GT store itself, so lite membrane
   leaves omit it and the carve reads nuclei from the lite GT store.
+- **CELL-Diff runs a fast recipe on the lite** (`model_overlays/celldiff_predict_lite.yml`), so a lite
+  CELL-Diff prediction is a different sample, not a subset of the production one. It keeps
+  production's tile grid (512^2 tiles, YX overlap 256, iterative anchoring) and changes:
+  - Z overlap 4 -> 2;
+  - adaptive dopri5 (~56-66 velocity evaluations per tile) -> midpoint on a Beta(0.4, 0.3) time grid,
+    14 evaluations, packed toward the data end;
+  - bf16 + `torch.compile` of a channels-last copy of the net, with `cudnn.benchmark`.
+
+  One fit's whole lite test set: 1.43 h on an H100, against ~100 GPU-h per A549 condition in
+  production. With an organelle's three fits replaced, 8 of the 7984 pairs against other models
+  that the full benchmark resolves flip on the lite (2000-draw bootstrap), and 3 of 447 among the
+  CELL-Diff fits. Two are resolved the other way on the lite, both marginal on the full benchmark:
+  - mitochondria, A549 ZIKV, MorphEm median cosine, joint-trained CELL-Diff vs pix2pix3d (full z = 2.02);
+  - nucleus, A549 mock, DINOv3 median cosine, iPSC-trained CELL-Diff vs FNet3D-VSCyto3DAug (full z = 2.05).
+
+  Read CELL-Diff's A549 deep-feature cosines on the lite as slightly optimistic. Measured on the mitochondria pair:
+  Z overlap 4 keeps it (16 evaluations), while Z overlap 3, and 18 or 24 evaluations at Z overlap 2, do not.
+  Three shortcuts break ordering:
+  - 12 or fewer evaluations on a cosine grid flip deep-feature orderings of the A549-trained nucleus fit;
+  - a grid with a coarse last step (Beta(0.5, 0.7), last step 0.13) loses fine texture: A549 DynaCLR KID
+    moves ~20 between-FOV SD. High-pass error against dopri5 ranked the three measured grids in the order of
+    their deep-feature shifts; whole-tile error did not;
+  - full-field slabs instead of 512^2 tiles break the OOD membrane fit.
+
+  Evidence: `experiments/2026-10-01_celldiff-fast-inference/`.
 
 ## `experiments/` — investigations, ablations and checks (gitignored)
 

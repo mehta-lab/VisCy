@@ -15,7 +15,7 @@ from typing import Literal, Sequence
 import numpy as np
 import torch
 import torch.nn.functional as F
-from lightning.pytorch import LightningModule
+from lightning.pytorch import Callback, LightningModule
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
@@ -917,6 +917,19 @@ class DynacellUNet(LightningModule):
         )
 
 
+class _DropCompiledNetOnException(Callback):
+    """Free :class:`DynacellFlowMatching`'s compiled inference copy when a Trainer run raises.
+
+    Lightning skips ``on_predict_end`` on an exception and runs only callback ``on_exception``
+    hooks, so without this the copy, which is not a registered submodule, keeps its device memory
+    until the next predict run.
+    """
+
+    def on_exception(self, trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        """Drop the compiled copy."""
+        pl_module.model.drop_compiled_net()
+
+
 class DynacellFlowMatching(LightningModule):
     """Flow-matching LightningModule for generative virtual staining.
 
@@ -942,10 +955,11 @@ class DynacellFlowMatching(LightningModule):
     log_samples_per_batch : int
         Number of samples per batch to log.
     num_generate_steps : int
-        Number of ODE steps for prediction inference.
+        Number of ODE time points for prediction inference; a fixed-grid
+        ``predict_sampling_method`` takes ``num_generate_steps - 1`` steps.
     num_log_steps : int
-        Number of ODE steps for validation image generation (cheaper than
-        ``num_generate_steps``).
+        Number of ODE time points for validation image generation (cheaper
+        than ``num_generate_steps``).
     compute_validation_loss : bool
         Whether to compute and log flow-matching validation loss on the
         validation loader. Disabled by default to preserve the previous
@@ -963,6 +977,23 @@ class DynacellFlowMatching(LightningModule):
         Overlap for ``denoise`` and ``iterative``. Ignored by
         ``sliding_window``; must be ``0`` or ``[0, 0, 0]`` when
         ``predict_method='sliding_window'``.
+    predict_sampling_method : str
+        ``torchdiffeq`` ODE method for ``generate``, ``sliding_window`` and
+        ``iterative``: adaptive ``"dopri5"`` (default), or a fixed-grid method
+        (``"euler"``, ``"midpoint"``, ``"heun2"``, ``"rk4"``) that takes
+        ``num_generate_steps - 1`` steps.
+    predict_time_schedule : {"uniform", "cosine"} or tuple of float
+        Spacing of the ``num_generate_steps`` ODE time points; ``"cosine"``
+        packs a fixed-grid solver's steps toward both ends of the interval,
+        where adaptive dopri5 spends most of its evaluations, and ``(p, q)``
+        takes the Beta(p, q) quantiles of a uniform grid (cosine is
+        Beta(0.5, 0.5); ``p < q`` packs more of them toward the noise end).
+    predict_compile : bool
+        ``torch.compile`` the velocity network for the ``generate``,
+        ``sliding_window`` and ``iterative`` predict methods (``denoise`` calls
+        the network directly). Only :meth:`predict_step` samples through the
+        compiled copy, which every predict run rebuilds from the current
+        weights; validation sampling always uses the live network.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
@@ -1024,6 +1055,9 @@ class DynacellFlowMatching(LightningModule):
         compute_validation_loss: bool = False,
         predict_method: Literal["denoise", "generate", "sliding_window", "iterative"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
+        predict_sampling_method: str = "dopri5",
+        predict_time_schedule: Literal["uniform", "cosine"] | tuple[float, float] = "uniform",
+        predict_compile: bool = False,
         ckpt_path: str | None = None,
         seg_aux: SegAuxDice | None = None,
         seg_aux_weight: float = 0.0,
@@ -1039,6 +1073,9 @@ class DynacellFlowMatching(LightningModule):
             ignore=[
                 "predict_method",
                 "predict_overlap",
+                "predict_sampling_method",
+                "predict_time_schedule",
+                "predict_compile",
                 "num_generate_steps",
                 "num_log_steps",
                 "ckpt_path",
@@ -1078,6 +1115,9 @@ class DynacellFlowMatching(LightningModule):
         self.compute_validation_loss = compute_validation_loss
         self.predict_method = predict_method
         self.predict_overlap = predict_overlap
+        self.predict_sampling_method = predict_sampling_method
+        self.predict_time_schedule = predict_time_schedule
+        self.predict_compile = predict_compile
         self._training_step_outputs: list = []
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._validation_dice_losses: list[list[tuple[Tensor, int]]] = []
@@ -1240,6 +1280,21 @@ class DynacellFlowMatching(LightningModule):
         self._validation_dice_losses.clear()
         self._validation_mask_velocity_losses.clear()
 
+    def configure_callbacks(self) -> Callback:
+        """Attach the callback that frees the compiled inference copy when a run raises."""
+        return _DropCompiledNetOnException()
+
+    def on_predict_start(self) -> None:
+        """Drop any compiled copy left behind, so this run builds its own from the current weights.
+
+        The copy also follows the current device and autocast state.
+        """
+        self.model.drop_compiled_net()
+
+    def on_predict_end(self) -> None:
+        """Free the compiled copy's memory."""
+        self.model.drop_compiled_net()
+
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Generate virtual staining for one batch via ODE sampling.
 
@@ -1282,7 +1337,13 @@ class DynacellFlowMatching(LightningModule):
         if self.predict_method == "denoise":
             prediction = self.model.denoise_sliding_window(source, overlap_size=self.predict_overlap)
         elif self.predict_method == "generate":
-            prediction = self.model.generate(source, num_steps=self.num_generate_steps)
+            prediction = self.model.generate(
+                source,
+                num_steps=self.num_generate_steps,
+                sampling_method=self.predict_sampling_method,
+                time_schedule=self.predict_time_schedule,
+                compiled=self.predict_compile,
+            )
         elif self.predict_method == "sliding_window":
             # generate_sliding_window partitions into non-overlapping tiles
             # and does NOT consume predict_overlap. A non-zero overlap means
@@ -1297,12 +1358,21 @@ class DynacellFlowMatching(LightningModule):
                     "Use predict_method='iterative' for overlap-anchored tiled inference, "
                     "or set predict_overlap=[0, 0, 0] to acknowledge the non-overlapping behavior."
                 )
-            prediction = self.model.generate_sliding_window(source, num_steps=self.num_generate_steps)
+            prediction = self.model.generate_sliding_window(
+                source,
+                num_steps=self.num_generate_steps,
+                sampling_method=self.predict_sampling_method,
+                time_schedule=self.predict_time_schedule,
+                compiled=self.predict_compile,
+            )
         elif self.predict_method == "iterative":
             prediction = self.model.generate_iterative(
                 source,
                 num_steps=self.num_generate_steps,
                 overlap_size=self.predict_overlap,
+                sampling_method=self.predict_sampling_method,
+                time_schedule=self.predict_time_schedule,
+                compiled=self.predict_compile,
             )
         else:
             raise ValueError(
