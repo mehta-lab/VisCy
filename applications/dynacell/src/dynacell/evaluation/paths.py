@@ -54,7 +54,6 @@ LITE_DATA_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell_lite")
 
 # Legacy default retained for callers still passing the old constant name.
 _DEFAULT_DATA_ROOT = DATA_ROOT
-DEFAULT_EVAL_RUN_ROOT = DATA_ROOT / "eval_runs"
 
 # ===========================================================================
 # Canonical vocabulary
@@ -111,7 +110,7 @@ _LEGACY_TRAIN_SETS: frozenset[str] = _ABLATION_TRAIN_SETS | {_LEGACY_JOINT_DECON
 
 # Model code keys (open set — the display registry below is the closed subset with
 # known paper names; unknown-but-parseable keys can still form valid paths, but
-# paper_key() raises on them).
+# have no PAPER_KEY entry).
 _ABLATION_MODELS: frozenset[str] = frozenset(
     {
         "fcmae_vscyto3d_pretrained_randinit",
@@ -161,8 +160,7 @@ _PREDICT_ONLY_ARM_MODELS: frozenset[str] = frozenset({"pix2pix2d_unetvit_last"})
 # family as one "CELL-Diff" row (display collapse) — but the PATH always uses the
 # true model key (celldiff_r2, celldiff_r2_iterative, ...), so R1/R2 stay distinct
 # on disk. celldiff_r2 and unext2_timm_scratch are live PATH tokens now (the new
-# grammar puts the true model key in the path), so both MUST be present here or
-# paper_key() raises.
+# grammar puts the true model key in the path), so both MUST be present here.
 PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_scratch": "unext2",
     "fcmae_vscyto3d_pretrained": "vscyto3d",
@@ -426,19 +424,6 @@ _HEK_GENE: dict[str, str] = {
 }
 
 # ===========================================================================
-# Map (c): canonical eval `target` group name
-# ===========================================================================
-
-# Base organelle -> eval-side Hydra `target` group name. ER/Mito disambiguate by
-# gene to match the target YAMLs under _internal/shared/eval/target/.
-ORGANELLE_EVAL_TARGET: dict[str, str] = {
-    "nucleus": "nucleus",
-    "membrane": "membrane",
-    "er": "er_sec61b",
-    "mito": "mito_tomm20",
-}
-
-# ===========================================================================
 # CanonicalKey
 # ===========================================================================
 
@@ -591,18 +576,8 @@ def _parse_leaf_suffix(leaf: str) -> tuple[str, str | None]:
 
 
 # ===========================================================================
-# Display helpers (retained public API)
+# Predict-config helpers
 # ===========================================================================
-
-
-def paper_key(code_model: str) -> str:
-    """Translate the code-side model key to its paper display name.
-
-    Raises ``ValueError`` for a model not in the display registry.
-    """
-    if code_model not in PAPER_KEY:
-        raise ValueError(f"unknown model key {code_model!r}; expected one of {sorted(PAPER_KEY)}")
-    return PAPER_KEY[code_model]
 
 
 def extract_predict_output_store(composed: dict, leaf_path: Path) -> Path:
