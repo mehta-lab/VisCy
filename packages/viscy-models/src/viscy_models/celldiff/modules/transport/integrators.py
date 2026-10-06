@@ -181,11 +181,17 @@ class ODESolver:
         elif time_schedule == "cosine":
             s = torch.linspace(0.0, 1.0, num_steps, dtype=torch.float64)
             self.t = (t0 + (t1 - t0) * (1 - torch.cos(torch.pi * s)) / 2).float()
-        elif isinstance(time_schedule, tuple | list) and len(time_schedule) == 2 and min(time_schedule) > 0:
+        elif (
+            isinstance(time_schedule, tuple | list)
+            and len(time_schedule) == 2
+            and all(0 < v < np.inf for v in time_schedule)
+        ):
             p, q = time_schedule
             self.t = torch.from_numpy(t0 + (t1 - t0) * betaincinv(p, q, np.linspace(0.0, 1.0, num_steps))).float()
         else:
-            raise ValueError(f"time_schedule must be 'uniform', 'cosine' or positive (p, q), got {time_schedule!r}")
+            raise ValueError(
+                f"time_schedule must be 'uniform', 'cosine' or finite positive (p, q), got {time_schedule!r}"
+            )
         self.atol = atol
         self.rtol = rtol
         self.sampler_type = sampler_type

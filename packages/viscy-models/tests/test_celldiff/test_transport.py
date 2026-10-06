@@ -137,9 +137,9 @@ def test_ode_solver_beta_schedule_spans_cosine_and_uniform():
     assert (gaps > 0).all() and gaps[0] < gaps[-1]
 
 
-@pytest.mark.parametrize("schedule", ["cos", (0.0, 0.5), (0.5,)])
+@pytest.mark.parametrize("schedule", ["cos", (0.0, 0.5), (0.5,), (0.5, float("nan")), (0.5, float("inf"))])
 def test_ode_solver_rejects_unknown_schedule(schedule):
-    """A misspelled schedule or a non-positive Beta shape raises instead of silently falling back to uniform."""
+    """A misspelled schedule or a non-positive or non-finite Beta shape raises instead of building a bad grid."""
     with pytest.raises(ValueError, match="time_schedule"):
         ODESolver(
             drift=lambda x, t, model: x,
