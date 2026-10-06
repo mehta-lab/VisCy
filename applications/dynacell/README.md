@@ -226,6 +226,23 @@ a bare invocation writes **and** submits.
   Download one model with
   `aws s3 cp --no-sign-request --recursive s3://dynacell/v1/models/ipsc/nucleus/vscyto3d/ ./vscyto3d_nucleus/`.
 
+## Citation
+
+If you use DynaCell (code, data, or trained checkpoints), please cite
+([CITATION.cff](CITATION.cff)):
+
+```bibtex
+@inproceedings{kalinin2026dynacell,
+  title     = {{DynaCell}: An Evaluation Framework for Dynamic {3D} Virtual Staining of Live Cells},
+  author    = {Kalinin, Alexandr A. and Zheng, Dihan and Theodoro, Taylla Milena and
+               Ivanov, Ivan and Hirata-Miyasaki, Eduardo and Lee, See-Chi and Liu, Aofei and
+               Varra, Sricharan Reddy and Chandler, Talon and Pradeep, Soorya and Liu, Chad and
+               Leonetti, Manuel D. and Arias, Carolina and Huang, Bo and Mehta, Shalin B.},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS 2026), Evaluations and Datasets Track},
+  year      = {2026}
+}
+```
+
 ## Navigation
 
 - Up: [VisCy monorepo](../../README.md)
