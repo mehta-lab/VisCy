@@ -55,6 +55,7 @@ virtual_staining/
         feature_extractor/dynaclr/        # DynaCLR checkpoint + encoder kwargs
     leaf/                                 # Hydra eval leaves (leaf=<path>)
       grouped/<bucket>/eval_grouped.yaml  # benchmark evals: one model load, N conditions
+      <org>/, instance_ap/, pix2pix_reeval/  # single-condition research leaves
 ```
 
 Leaves are grouped by **train set** inside each `<org>/<model>/` cell so
