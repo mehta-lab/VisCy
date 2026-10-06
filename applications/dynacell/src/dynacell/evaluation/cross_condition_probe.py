@@ -329,10 +329,10 @@ def run_for_group(
     """
     groups: dict[tuple[str, str, str], dict[str, Path]] = {}
     for d in eval_dirs:
-        key = _model_group_key(d)
-        if key is None:
+        membership = probe_group(d)
+        if membership is None:
             continue
-        cond = _detect_condition(d)  # key is not None -> a token is present
+        key, cond = membership
         by_condition = groups.setdefault(key, {})
         if cond in by_condition:
             raise ValueError(f"duplicate condition {cond!r} in group {key[1]!r}: {by_condition[cond]} and {d}")
