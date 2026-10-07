@@ -1,11 +1,13 @@
-"""Background low-pass of a training target, foreground kept at full resolution.
+"""Background low-pass of a training target, foreground interior kept unchanged.
 
 ``x' = w * x + (1 - w) * B`` with ``m = dilate(fg_mask, r)``,
 ``w = clamp(G_f(m), 0, 1)`` and the background estimate
-``B = G_lp(x * (1 - m)) / G_lp(1 - m)``: inside the dilated foreground the
-target is unchanged, in the background it is a Gaussian low-pass of the
-background pixels alone, and a Gaussian feather of the dilated mask blends the
-two without a seam.
+``B = G_lp(x * (1 - m)) / G_lp(1 - m)``: where the feather kernel lies inside
+``m`` the target is unchanged, where it misses ``m`` the target is a Gaussian
+low-pass of the background pixels alone, and in between the feather blends the
+two without a seam. The blend reaches the feather radius inside ``m``, so a
+feather radius above ``r`` also mixes a little ``B`` into the rim of the
+foreground itself.
 
 ``B`` is a normalized convolution: a plain ``G_lp(x)`` would bleed bright
 foreground into the background as a halo, while ``B`` averages background
