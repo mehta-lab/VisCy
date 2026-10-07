@@ -72,6 +72,14 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Track H background-target CELL-Diff-2D nucleus arms (2026-10-06), predicted from last.ckpt
+  # like the CELL-Diff-2D baselines: bglp = background low-pass sigma 2 (r2/f1), bgflat = flat
+  # per-patch background mean (r4/f2). The finished legs only; bglp A549 mock/denv/zikv and
+  # bgflat A549 denv are still predicting and go in a later wave. Generate with --wave wave2y.
+  wave2y:
+    nucleus:
+      - {model: celldiff_2d_bglp, leaves: [ipsc]}
+      - {model: celldiff_2d_bgflat, leaves: [ipsc, a549__mock, a549__zikv]}
   # FNet-3D vscyto3daug ER SAUNA-map-weighted Dice arm (fit 36933625, max_steps 200000,
   # --ckpt best epoch=80-step=177957), 2026-10-06: all four legs. Stage-matched to the wave2s
   # ER baselines (epoch 90 / 68) and segaux (epoch 86). Generate with --wave wave2x.
