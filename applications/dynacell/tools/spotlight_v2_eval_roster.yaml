@@ -72,6 +72,12 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # FNet-3D vscyto3daug ER soft-clDice arm (fit 36933630, max_steps 200000, --ckpt best
+  # epoch=90-step=199927), 2026-10-07: all four legs. Stage-matched to the wave2s ER baselines
+  # (epoch 90 / 68), segaux (86) and SAUNA (80). Generate with --wave wave3b.
+  wave3b:
+    er:
+      - fnet3d_vscyto3daug_segaux_cldice
   # Checkpoint-stage control for the FNet-3D vscyto3daug mito segaux_cldice arm (2026-10-07):
   # re-predicted from the retained epoch=68-step=179400 (its --ckpt best is epoch=38-step=101400;
   # the baselines used epoch 62 / 65). Stores and leaves are outside the generated tree
