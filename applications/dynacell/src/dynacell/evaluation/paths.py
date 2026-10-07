@@ -86,8 +86,8 @@ _HEK_ARMS: frozenset[str] = frozenset({"a549xy"})
 #
 # ``__bf`` marks a fit whose model INPUT is the raw ``Brightfield`` stack instead of
 # the ``Phase3D`` volume reconstructed from it — the brightfield-input ablation.
-# ``ipsc__bf`` and ``a549__bf`` are both live (8 fits: fnet3d_paper and celldiff ×
-# nucleus/ER × iPSC/A549). ``a549__bf__deconv`` remains a grammar-ready follow-up.
+# ``ipsc__bf`` and ``a549__bf`` are both live; the model set behind each is read from
+# disk, not tracked here. ``a549__bf__deconv`` remains a grammar-ready follow-up.
 _FORWARD_TRAIN_SETS: frozenset[str] = frozenset(
     {
         "ipsc",
