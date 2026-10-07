@@ -974,9 +974,9 @@ def test_cond_predict_reads_the_mask_source(tmp_path, tiny_hcs_zarr, monkeypatch
     seen: list[Tensor] = []
     original_generate = module.model.generate
 
-    def spy_generate(cond, num_steps):
+    def spy_generate(cond, num_steps, **kwargs):
         seen.append(cond.clone())
-        return original_generate(cond, num_steps=num_steps)
+        return original_generate(cond, num_steps=num_steps, **kwargs)
 
     monkeypatch.setattr(module.model, "generate", spy_generate)
     output_store = tmp_path / "predict_out.zarr"

@@ -29,8 +29,9 @@ Arms (``<baseline>_<suffix>``):
   its selectable checkpoints at ep <= 25 of 40, while its S arm will have all 40).
   Each model's ``_segaux`` arm is generated from the same baseline leaf in the same
   pass, so the arm and its v2 control share one recipe by construction. Also
-  ``fnet3d_vscyto3daug`` (Phase 15 Arm B, nucleus only): vanilla FNet fails out of
-  domain, so the FNet verdict on A549 rests on this recipe, retrained on today's code.
+  ``fnet3d_vscyto3daug`` (Phase 15 Arm B; nucleus, then ER and mito for the topology
+  arms below): vanilla FNet fails out of domain, so the FNet verdict on A549 rests on
+  this recipe, retrained on today's code.
 - UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
@@ -56,10 +57,12 @@ Arms (``<baseline>_<suffix>``):
   from the same-dim FNet ``_segaux`` store of the same test leg via
   ``CondMaskSource`` (``Nuclei_prediction``, thresholded per window at Otsu) and
   set no ``fg_mask_key``.
-- ``segaux_sauna`` / ``segaux_cldice`` -- Stage 2 #5 on ``fnet3d_vscyto3daug`` nucleus: the
-  ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice sums
-  weighted by the patch mask's SAUNA map, or mixed with soft-clDice. Each carries its own
-  calibrated ``seg_aux_weight``, since the change rescales the term's gradient.
+- ``segaux_sauna`` / ``segaux_cldice`` -- Stage 2 #5 on ``fnet3d_vscyto3daug`` nucleus, ER
+  and mito: the ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice
+  sums weighted by the patch mask's SAUNA map, or mixed with soft-clDice. Each carries its
+  own calibrated ``seg_aux_weight``, since the change rescales the term's gradient. The ER
+  and mito arms (and their ``segaux`` arm) train on masks from the eval's classical
+  binarizer, written by ``write_classical_fg_masks.py``.
 - ``bglp`` / ``bgflat`` -- Track H on ``celldiff_2d`` nucleus/membrane: data gains
   ``fg_mask_key: fg_mask`` and the model ``target_bg_lowpass: BackgroundLowPass`` with the
   arm's ``BG_TARGET_ARGS``, a training-only target transform that keeps the target inside
@@ -323,7 +326,9 @@ ARMS: tuple[Arm, ...] = (
     # rests on the families that already work there; their nucleus arms get a second draw.
     Arm("fcmae_vscyto3d_scratch", "segaux_seed1", ORGANELLES, a549=True),
     # pix2pix3d nucleus segaux on A549: Dice 0.863 -> 0.890, mAP 0.385 -> 0.483, PCC 0.708 -> 0.678.
-    Arm("pix2pix3d_unetvit", "segaux_seed1", ("nucleus",), a549=True),
+    # Membrane added 2026-10-07: its single draw is one of the few seg gains on both iPSC and
+    # A549 (final table, interior-only FG), so it gets the replicate the nucleus gate withheld.
+    Arm("pix2pix3d_unetvit", "segaux_seed1", ORGANELLES, a549=True),
     # Loss-weight sweep on the one cell whose effect held against both baseline draws
     # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
     Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
@@ -339,6 +344,8 @@ ARMS: tuple[Arm, ...] = (
     # baseline draws need no mask, so they train first; the arms are calibrated on their ckpt.
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("v2", "v2_seed1")),
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("segaux", *TOPOLOGY_ARGS)),
+    # Second segaux draw on the thin organelles (2026-10-07): their iPSC Dice gain rests on one run.
+    Arm("fnet3d_vscyto3daug", "segaux_seed1", THIN_ORGANELLES, a549=True),
     # Track H: CellDiff-2D trained on a background-low-passed target (H1; launched as H2).
     *(Arm("celldiff_2d", s, ORGANELLES, a549=True) for s in BG_TARGET_ARGS),
 )

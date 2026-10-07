@@ -5,7 +5,7 @@ computing) for any GPU-accelerated numerical work — image preprocessing
 before / after model inference, metric calculations, cropping/resizing,
 percentile clips, Gaussian filters, etc. Cubic is a hard runtime
 dependency of the eval extras (`applications/dynacell/pyproject.toml`
-pins `cubic @ git+…@v0.9.0a3`). Do not gate cubic imports behind `try/except`
+pins `cubic @ git+…@v0.9.0a4`). Do not gate cubic imports behind `try/except`
 or fall back to scipy/skimage paths.
 
 **The cubic version is part of the numeric contract, not just a dep.** Metric
@@ -17,7 +17,10 @@ values move across pins — measured 0.8.0a2 → 0.9.0a1: `Z_FSC_Resolution`
 - `dynacell.evaluation.provenance.REQUIRED_CUBIC_VERSION` is the single
   declared version; `provenance_test.py` pins it to every pyproject pin.
 - `check_cubic_pin()` runs at both eval entry points and **fails the run**
-  when the environment disagrees. Do not downgrade it to a warning.
+  for an unsupported runtime version. `CUBIC_RUNTIME_VERSIONS` explicitly
+  permits older environments; `require_cubic_workflows(target_name)` requires
+  the new workflow API only for ER and mitochondria. Do not downgrade either
+  gate to a warning.
 - `save_metrics` stamps `metrics_provenance.json` beside the CSVs, and
   `_final_metrics_cache_valid` refuses an unstamped or foreign-stamped cache.
   Unstamped means "written before the stamp existed", i.e. an unknown pin —
@@ -25,10 +28,11 @@ values move across pins — measured 0.8.0a2 → 0.9.0a1: `Z_FSC_Resolution`
   which treats an untagged entry as unconstrained.
 - A bump measured to move no value beyond a stated tolerance lists the old
   version under the new one in `CUBIC_VERSIONS_EQUIVALENT_TO` so its caches are still reused
-  (0.9.0a2 and 0.9.0a1 under 0.9.0a3). The map is keyed by the declared version, so the
-  next bump reuses nothing until someone measures an equivalence against it.
-  `check_cubic_pin` accepts those equivalent versions too, so evals queued on
-  the previous venv keep running across a measured-equivalent bump.
+  (0.9.0a3, 0.9.0a2 and 0.9.0a1 under 0.9.0a4). The map is keyed by the
+  declared version, so the next bump reuses nothing until someone measures
+  equivalence against it. This map controls cache reuse only; it grants no
+  runtime API capability. Measurement scope and tolerances are recorded beside
+  each entry in `provenance.py`.
 
 The GPU-resident Cellpose-SAM entry point is
 `cubic.segmentation.segment_cpsam` (single host→device upload, masks
@@ -243,10 +247,8 @@ compute win to offset the reloads.
 - **Predicts are the opposite** (cheap load, ~10 GB, GPU-light): `--parallel 2`
   is a confirmed win there (2-up on A40). See `applications/dynacell/CLAUDE.md`
   "Predict submission modes".
-- `submit_evaluation_batch.py` **cannot** drive cpdino grouped buckets: it emits
-  `uv run dynacell evaluate` through the shared `.venv` (broken for cpdino —
-  needs the `cpdino-eval` venv) and requires one `(organelle, model, train_set)`
-  per call, while a bucket spans many models.
+- Submit buckets with `tools/run_eval_direct.slurm`; restrict one to some of its
+  conditions with `only_conditions=[...]`.
 - **The real eval-side parallelism lever is bucket-level:** run independent
   grouped buckets on separate GPUs. When buckets share a GT cache
   (`sec61b`/`tomm20`, keyed by `(gene_cond, halfwidth)`), a warm-first `afterok`

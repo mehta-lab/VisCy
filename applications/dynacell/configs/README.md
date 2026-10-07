@@ -15,7 +15,8 @@ runnable benchmark leaves that drive every fit/predict/eval in the paper.
   [Quickstart](../README.md#quickstart).
 - **evaluations/** — legacy per-model shell scripts (`run_eval_*.sh`) that invoke `dynacell evaluate`
   directly, grouped by model (`celldiff/`, `fnet3d/`, `unetvit3d/`, `unext2/`, `vscyto3d/`). Predate the
-  composed `benchmarks/*/eval__*.yaml` leaves; kept for reference.
+  composed Hydra eval leaves under `benchmarks/virtual_staining/_internal/leaf/`; kept for
+  reference.
 - **movies/** — a small crop demo (`2024_11_21_A549_TOMM20_DENV_crop/`): predict configs that render a
   cropped A549 TOMM20/DENV time-lapse with iPSC- and joint-trained regression models.
 

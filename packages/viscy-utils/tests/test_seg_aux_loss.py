@@ -255,7 +255,7 @@ def test_squared_edt_capped_is_exact_below_the_cap(max_distance):
 
 @pytest.mark.parametrize("shape", [(2, 1, 5, 20, 20), (2, 1, 1, 20, 20), (2, 1, 24, 20)], ids=["3d", "3d-z1", "2d"])
 def test_soft_skeleton_matches_official_values_and_gradients(shape):
-    """Shifted-slice morphology + checkpointing reproduce jocpae/clDice soft_skel."""
+    """Max-pool morphology (F.max_pool{1,2,3}d) + checkpointing reproduce jocpae/clDice soft_skel."""
     img = torch.rand(shape, generator=torch.Generator().manual_seed(8))
     weights = torch.rand(img.shape, generator=torch.Generator().manual_seed(9))
     a = img.clone().requires_grad_(True)
@@ -442,6 +442,44 @@ def test_sauna_weighting_changes_dice_and_stays_finite():
     assert comps["n_valid"] == 2
     loss.backward()
     assert torch.isfinite(pred.grad).all()
+
+
+# A 1x7 row with a 3-voxel object, spacing 1. By hand: fg_dist = [0,0,1,2,1,0,0],
+# bg_dist = [2,1,0,0,0,1,2], fg_max = 2, so gt_b = (fg_dist - bg_dist) / 2. Both
+# max-pool windows are ceil(2) -> 3 voxels, which put fg_pool = 2 on every fg voxel
+# and bg_pool = 2 on every bg voxel, so gt_t = 1 everywhere and y~ = gt_b.
+_ROW_MASK = [0, 0, 1, 1, 1, 0, 0]
+_ROW_SIGNED = [-1.0, -0.5, 0.5, 1.0, 0.5, -0.5, -1.0]
+
+
+def test_sauna_weight_map_is_abs_of_hand_computed_map():
+    mask = torch.tensor(_ROW_MASK, dtype=torch.bool).reshape(1, 1, 7)
+    w = sauna_weight_map(mask, (1.0, 1.0))[0, 0]
+    torch.testing.assert_close(w, torch.tensor([abs(v) for v in _ROW_SIGNED]))
+    # Background next to the object is uncertain (y~ = -0.5) but still weighted.
+    assert w[1].item() == pytest.approx(0.5)
+
+
+def test_sauna_weighted_dice_matches_hand_computation():
+    target = np.array([0.0, 0.2, 2.0, 3.0, 1.8, 0.4, 0.1])
+    pred = np.array([0.5, 1.2, 1.1, 2.5, 0.8, 0.9, -0.3])
+    mask = np.array(_ROW_MASK, dtype=float)
+    w = np.abs(np.array(_ROW_SIGNED))
+    c, eps = 0.1, 1e-6
+    # tau: target quantile at 1 - 3/7 -> sorted position 3.43, 0.4 + 0.43 * (1.8 - 0.4) = 1.0.
+    tau = np.quantile(target, 1.0 - mask.mean())
+    # s: c * (median fg 2.0 - median bg 0.15) = 0.185.
+    s = c * (np.median(target[mask > 0]) - np.median(target[mask == 0]))
+    p = 1.0 / (1.0 + np.exp(-(pred - tau) / s))
+    want = 1.0 - 2.0 * (w * p * mask).sum() / ((w * p * p).sum() + (w * mask * mask).sum() + eps)
+
+    def as_input(a: np.ndarray) -> torch.Tensor:
+        return torch.tensor(a, dtype=torch.float32).reshape(1, 1, 1, 7)
+
+    loss_fn = SegAuxDice(c=c, eps=eps, weighting="sauna", spacing=(1.0, 1.0))
+    dice, valid = loss_fn.per_channel(as_input(pred), as_input(target), as_input(mask))
+    assert valid.item()
+    assert dice.item() == pytest.approx(want, rel=1e-5)
 
 
 # ---- clDice ----

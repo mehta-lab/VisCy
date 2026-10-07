@@ -7,11 +7,10 @@ Gaussian-blurred away from a chosen z), so the real
 extractor is then run for real (no mocks) and the written store is reopened and
 asserted against.
 
-Run (worktree, cpdino-eval env, PYTHONPATH shadowing)::
+Run from the repository root::
 
-    PYTHONPATH="$WT/packages/viscy-models/src:$WT/packages/viscy-utils/src:\
-$WT/packages/viscy-transforms/src:$WT/packages/viscy-data/src:$WT/applications/dynacell/src" \\
-        "$V/bin/python" -m pytest applications/dynacell/tools/extract_focus_slab_store_test.py -q
+    uv run --package dynacell --extra eval --extra eval_gpu \
+        pytest applications/dynacell/tools/extract_focus_slab_store_test.py -q
 """
 
 from __future__ import annotations

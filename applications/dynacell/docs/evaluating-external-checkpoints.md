@@ -61,9 +61,8 @@ dep of the eval pipeline — no CPU fallback.
   (`HF_HUB_CACHE` defaults to the shared project cache; override with
   `DYNACELL_SHARED_HF_CACHE`). You need a HF token with access, or set
   `compute_feature_metrics=false` for pixel-only.
-- **Instance-AP (`compute_instance_ap=true`) with the `cpdino` backend** needs a separate
-  `cpdino-eval` venv — the cpdino Cellpose-DINO stack doesn't co-install cleanly with the
-  main eval `.venv`. Pixel + feature metrics run in the `.venv` above; see §5.
+- **Instance-AP (`compute_instance_ap=true`) with the `cpdino` backend** runs in the same
+  `.venv`: the `eval` extra pins cellpose >= 4.2, which provides Cellpose-DINO.
 - GT feature caches and cell-segmentation stores for **both** test sets are already
   warmed and the manifests are repointed to them — nothing to precompute.
 
@@ -342,7 +341,7 @@ walk the campaign's on-disk prediction tree (and the walker fix isn't on `main` 
 |---|---|---|---|
 | **Pixel** (SSIM, PCC, spectral, FSC…) | pred + GT + spacing (auto) | default | repo `.venv` |
 | **Feature** (FID/KID/precision-recall + DINOv3/DynaCLR/CELL-DINO/MorphEm embeddings) | labeled cell-seg store (auto from manifest) | `compute_feature_metrics=true` | repo `.venv` + HF token for DINOv3 |
-| **Instance-AP** (whole-cell / nucleus mAP) | runs its own segmentation | `compute_instance_ap=true` + `segmentation.backend=cpdino` | needs the **`cpdino-eval`** venv (repo cubic can't run cpdino) |
+| **Instance-AP** (whole-cell / nucleus mAP) | runs its own segmentation | `compute_instance_ap=true` + `segmentation.backend=cpdino` | repo `.venv` |
 
 Notes:
 - Feature crops come from the **fixed** `cell_segmentation_path`, so they're independent

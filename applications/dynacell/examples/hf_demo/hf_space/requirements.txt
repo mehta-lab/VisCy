@@ -7,8 +7,8 @@ torch>=2.1
 huggingface_hub>=0.20
 iohub>=0.3.6
 cubic==0.9.0a1
-git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=packages/viscy-data
-git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=packages/viscy-models
-git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=packages/viscy-transforms
-git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=packages/viscy-utils
-git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=applications/dynacell
+git+https://github.com/mehta-lab/VisCy.git@84cc1ae7eaa3ec0d654d5ea7087c594588faf146#subdirectory=packages/viscy-data
+git+https://github.com/mehta-lab/VisCy.git@84cc1ae7eaa3ec0d654d5ea7087c594588faf146#subdirectory=packages/viscy-models
+git+https://github.com/mehta-lab/VisCy.git@84cc1ae7eaa3ec0d654d5ea7087c594588faf146#subdirectory=packages/viscy-transforms
+git+https://github.com/mehta-lab/VisCy.git@84cc1ae7eaa3ec0d654d5ea7087c594588faf146#subdirectory=packages/viscy-utils
+git+https://github.com/mehta-lab/VisCy.git@84cc1ae7eaa3ec0d654d5ea7087c594588faf146#subdirectory=applications/dynacell

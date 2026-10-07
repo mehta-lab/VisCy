@@ -1,6 +1,5 @@
 #!/bin/bash
-# Direct eval launcher for vscyto3d-ablations leaves that bypass the
-# submit_evaluation_job.py / submit_evaluation_batch.py helpers.
+# SLURM launcher for one eval leaf, single-condition or grouped.
 #
 # Usage:
 #   sbatch applications/dynacell/tools/run_eval_direct.slurm <leaf_path_no_ext> [extra_overrides...]
@@ -67,27 +66,14 @@ else
 fi
 cd "${REPO}"
 
-ml uv
-
-# ``segmentation.backend: cpdino`` is the eval.yaml default, and the cpdino stack
-# (cubic + cellpose 4.2.x) does not co-install with the workspace .venv, where
-# ``segmentation_cpdino`` dies on
-# ``ImportError: cannot import name 'segment_cellpose' from 'cubic.segmentation'``.
-# Route uv at the dedicated eval venv and read it read-only (``--no-sync``), the
-# same pattern as build_cpdino_seg_cleaned.slurm. Point DYNACELL_EVAL_VENV
-# elsewhere to use a different environment.
-#
-# The default MUST hold the cubic version pyproject declares. The older
-# ``cpdino-eval`` (cubic 0.8.0a2) was this default through 2026-07-29 even after
-# the 0.9.0a1 venv existed, so jobs that did not export DYNACELL_EVAL_VENV kept
-# silently producing 0.8.0a2 FSC/FRC/Spectral_PCC values — 62 of the 121
-# surviving eval logs. ``check_cubic_pin`` now fails such a run loudly, but the
-# default still has to be right. ``cpdino-eval-cubic090a3`` is the
-# ``cpdino-eval-cubic090a2`` freeze with only cubic changed; 0.9.0a2 and 0.9.0a1
-# are measured equivalent (``provenance.CUBIC_VERSIONS_EQUIVALENT_TO``), so their
-# caches stay reusable and jobs already queued on the 0.9.0a2 venv still run.
-export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval-cubic090a3}"
-export HF_HUB_CACHE="${HF_HUB_CACHE:-/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache}"
+# Use the uv-built project environment (``.venv`` at the repository root), the same
+# one ``dynacell predict`` jobs use. ``--package dynacell --extra eval --extra eval_gpu``
+# syncs the eval dependencies pinned in uv.lock (cubic, cellpose >= 4.2, CuPy, ...) without removing
+# anything else; ``--frozen`` keeps the job from re-resolving the lock. Set uv's own
+# UV_PROJECT_ENVIRONMENT to use a different environment.
+if ! command -v uv >/dev/null 2>&1 && command -v ml >/dev/null 2>&1; then
+  ml uv
+fi
 export PYTHONUNBUFFERED=1
 
 # Decide single vs grouped from leaf basename. Grouped leaves carry a
@@ -100,7 +86,7 @@ case "${LEAF_BASENAME}" in
 esac
 
 echo "[run_eval_direct] subcmd=${SUBCMD} leaf=${LEAF} overrides=${EXTRA_OVERRIDES[*]:-<none>}"
-echo "[run_eval_direct] venv=${UV_PROJECT_ENVIRONMENT}"
+echo "[run_eval_direct] venv=${UV_PROJECT_ENVIRONMENT:-${REPO}/.venv}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-uv run --no-sync dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"
+uv run --frozen --package dynacell --extra eval --extra eval_gpu dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"

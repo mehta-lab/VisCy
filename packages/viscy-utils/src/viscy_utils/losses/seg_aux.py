@@ -28,10 +28,14 @@ Two optional, orthogonal extensions (both off by default, which leaves the loss
 bit-identical to the plain soft Dice above):
 
 - ``weighting="sauna"`` weights every voxel's terms in both Dice sums by
-  ``|y~|``, SAUNA's combined boundary/thickness uncertainty map of the patch's
-  mask (:func:`~viscy_utils.losses.seg_aux_maps.sauna_weight_map`), which
-  down-weights the boundary of thick structures and keeps thin ones and deep
-  interiors/backgrounds at full weight.
+  ``|y~|``, the magnitude of SAUNA's combined boundary/thickness uncertainty map
+  of the patch's mask (:func:`~viscy_utils.losses.seg_aux_maps.sauna_weight_map`),
+  which down-weights the boundary of thick structures and keeps thin ones and
+  deep interiors/backgrounds at full weight. This is a SAUNA-map-weighted
+  binary soft Dice adapted from SAUNA's map, not SAUNA's loss: published SAUNA
+  (Oulu-IMEDS/SAUNA, ``SoftJaccardLoss``) regresses a tanh head toward the
+  signed ``y~`` with separate foreground (``relu(y~)``) and background
+  (``relu(-y~)``) soft-Jaccard terms.
 - ``topology="cldice"`` replaces the per-patch loss by
   ``(1 - alpha) * dice + alpha * (1 - clDice)`` with the soft-skeleton clDice.
 """

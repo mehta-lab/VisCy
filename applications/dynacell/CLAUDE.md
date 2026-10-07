@@ -220,19 +220,27 @@ re-loads models per condition).
 ## Focus-aware 2D projection (`evaluation/focus.py`)
 
 The 3D→2D reduction is focus-aware so projection isn't dominated by out-of-focus
-caps (A549 Z=48, in-focus band ~5 planes). Three knobs, all default-off:
+caps (A549 Z=48, in-focus band ~5 planes). Four knobs; the first two are on by
+default (since 35c0235b, 2026-06-16):
 
-- `feature_metrics.focus_slab.{enabled,halfwidth,channel_name}` — deep-feature
-  crops + per-cell similarity max-project over a `2*halfwidth+1` slab on the
-  in-focus plane (CP regionprops stay 3D). Folds `+focusslab_h{h}_{ch}_{sig}`
-  into each deep-feature `preprocess_version` so embedding caches auto-invalidate
-  (`{sig}` hashes the `focus.{na_det,lambda_ill,pixel_size}` params).
-- `segmentation.slice_selection=focus` — 2D instance seg picks the in-focus plane
-  (vs the old `frac=0.30`).
-- `precompute-gt build.focus=true` — writes `focus_slice` zattrs to a writable GT
-  store.
+- `feature_metrics.focus_slab.{enabled,halfwidth,channel_name}` (default on,
+  halfwidth 2, i.e. 5 planes) — deep-feature crops + per-cell similarity
+  max-project over a `2*halfwidth+1` slab on the phase in-focus plane (CP
+  regionprops stay 3D). Folds `+focusslab_h{h}_{ch}_{sig}` into each deep-feature
+  `preprocess_version` so embedding caches auto-invalidate (`{sig}` hashes the
+  `focus.{na_det,lambda_ill,pixel_size}` params).
+- `segmentation.slice_selection=focus` (default) — 2D instance seg picks the
+  in-focus plane (vs the old `frac=0.30`). `segmentation.focus_anchor` chooses it:
+  `nucleus_area` (default, widest GT nuclear cross-section) or `phase_midband`
+  (the phase estimator below).
+- `segmentation.semantic_focus_halfwidth` (default null = whole volume) — semantic
+  targets (ER, mito) segment the `2h+1` planes around that plane and score only
+  the focus plane of the mask; `h=1` is the 2D benchmark's slab3.
+- `precompute-gt build.focus=true` (default false) — writes `focus_slice` zattrs
+  to a writable GT store.
 
-**Plane source (precedence):** (1) precomputed `focus_slice` zattrs (iPSC `.zarr`
+**Phase plane source** (the slab and `focus_anchor=phase_midband`)
+**(precedence):** (1) precomputed `focus_slice` zattrs (iPSC `.zarr`
 fast path); (2) `io.gt_cache_dir/focus_planes/<channel>/<pos>.json`; (3) compute
 from the phase channel + persist. Compute-at-eval-time (3) is why focus works on
 the **read-only published A549 `.ozx`** — they carry no zattrs and `pack_ozx`
@@ -297,6 +305,31 @@ Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md` §11–§15 and
   MIND are off (`compute_microssim`, `feature_metrics.compute_{fid,prc,mind}`).
 - **A549 has no separate nuclei store**: `nuclei_gt_path` is the GT store itself, so lite membrane
   leaves omit it and the carve reads nuclei from the lite GT store.
+- **CELL-Diff runs a fast recipe on the lite** (`model_overlays/celldiff_predict_lite.yml`), so a lite
+  CELL-Diff prediction is a different sample, not a subset of the production one. It keeps
+  production's tile grid (512^2 tiles, YX overlap 256, iterative anchoring) and changes:
+  - Z overlap 4 -> 2;
+  - adaptive dopri5 (~56-66 velocity evaluations per tile) -> midpoint on a Beta(0.4, 0.3) time grid,
+    14 evaluations, packed toward the data end;
+  - bf16 + `torch.compile` of a channels-last copy of the net, with `cudnn.benchmark`.
+
+  One fit's whole lite test set: 1.43 h on an H100, against ~100 GPU-h per A549 condition in
+  production. With an organelle's three fits replaced, 8 of the 7984 pairs against other models
+  that the full benchmark resolves flip on the lite (2000-draw bootstrap), and 3 of 447 among the
+  CELL-Diff fits. Two are resolved the other way on the lite, both marginal on the full benchmark:
+  - mitochondria, A549 ZIKV, MorphEm median cosine, joint-trained CELL-Diff vs pix2pix3d (full z = 2.02);
+  - nucleus, A549 mock, DINOv3 median cosine, iPSC-trained CELL-Diff vs FNet3D-VSCyto3DAug (full z = 2.05).
+
+  Read CELL-Diff's A549 deep-feature cosines on the lite as slightly optimistic. Measured on the mitochondria pair:
+  Z overlap 4 keeps it (16 evaluations), while Z overlap 3, and 18 or 24 evaluations at Z overlap 2, do not.
+  Three shortcuts break ordering:
+  - 12 or fewer evaluations on a cosine grid flip deep-feature orderings of the A549-trained nucleus fit;
+  - a grid with a coarse last step (Beta(0.5, 0.7), last step 0.13) loses fine texture: A549 DynaCLR KID
+    moves ~20 between-FOV SD. High-pass error against dopri5 ranked the three measured grids in the order of
+    their deep-feature shifts; whole-tile error did not;
+  - full-field slabs instead of 512^2 tiles break the OOD membrane fit.
+
+  Evidence: `experiments/2026-10-01_celldiff-fast-inference/`.
 
 ## `experiments/` — investigations, ablations and checks (gitignored)
 

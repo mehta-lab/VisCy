@@ -1,4 +1,4 @@
-"""Feature-space similarity metrics backed by torch-fidelity.
+"""Feature-space similarity metrics backed by torch-fidelity and sample-space FID.
 
 Replaces the prior in-tree implementations
 (:func:`dynacell.evaluation.utils._frechet_distance`,
@@ -48,11 +48,13 @@ def _to_tensor(x: np.ndarray) -> torch.Tensor:
 
 
 def _fid(pred: np.ndarray, target: np.ndarray) -> float:
-    """Frechet distance via torch-fidelity's eigvals-based composition.
+    """Frechet distance, using sample-space SVD when both cohorts are smaller than d.
 
-    Mirrors the math at ``torch_fidelity.metric_fid.fid_statistics_to_metric``:
-    for symmetric PSD ``Σ₁, Σ₂``, ``Σᵢ √λᵢ(Σ₁·Σ₂) == Tr(sqrt(Σ₁·Σ₂))``.
-    Faster than ``scipy.linalg.sqrtm`` and avoids its convergence warnings.
+    For centered feature matrices ``A₁, A₂`` and sample covariance matrices
+    ``Σ₁, Σ₂``, ``Tr(sqrt(Σ₁·Σ₂))`` equals the nuclear norm of ``A₁·A₂.T``
+    divided by ``sqrt((n₁-1)(n₂-1))``. This avoids a feature-dimension covariance
+    eigendecomposition for small cohorts and accumulates in float64. When either
+    cohort reaches d, keep torch-fidelity's original eigvals composition.
 
     Returns ``nan`` for cohorts with fewer than 2 rows on either side —
     ``np.cov`` is undefined at N<2 and would produce a NaN covariance
@@ -60,6 +62,18 @@ def _fid(pred: np.ndarray, target: np.ndarray) -> float:
     """
     if pred.shape[0] < 2 or target.shape[0] < 2:
         return float("nan")
+    if max(pred.shape[0], target.shape[0]) < pred.shape[1]:
+        pred = pred.astype(np.float64)
+        target = target.astype(np.float64)
+        mean_pred, mean_target = pred.mean(axis=0), target.mean(axis=0)
+        centered_pred, centered_target = pred - mean_pred, target - mean_target
+        denom_pred, denom_target = pred.shape[0] - 1, target.shape[0] - 1
+        diff = mean_pred - mean_target
+        trace_pred = np.sum(centered_pred * centered_pred) / denom_pred
+        trace_target = np.sum(centered_target * centered_target) / denom_target
+        trace_covmean = np.linalg.svd(centered_pred @ centered_target.T, compute_uv=False).sum()
+        trace_covmean /= np.sqrt(denom_pred * denom_target)
+        return float(diff @ diff + trace_pred + trace_target - 2 * trace_covmean)
     stats_pred = fid_features_to_statistics(_to_tensor(pred))
     stats_target = fid_features_to_statistics(_to_tensor(target))
     out = fid_statistics_to_metric(stats_pred, stats_target, verbose=False)

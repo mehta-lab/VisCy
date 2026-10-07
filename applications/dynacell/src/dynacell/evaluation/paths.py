@@ -54,7 +54,6 @@ LITE_DATA_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell_lite")
 
 # Legacy default retained for callers still passing the old constant name.
 _DEFAULT_DATA_ROOT = DATA_ROOT
-DEFAULT_EVAL_RUN_ROOT = DATA_ROOT / "eval_runs"
 
 # ===========================================================================
 # Canonical vocabulary
@@ -87,8 +86,8 @@ _HEK_ARMS: frozenset[str] = frozenset({"a549xy"})
 #
 # ``__bf`` marks a fit whose model INPUT is the raw ``Brightfield`` stack instead of
 # the ``Phase3D`` volume reconstructed from it — the brightfield-input ablation.
-# ``ipsc__bf`` and ``a549__bf`` are both live (8 fits: fnet3d_paper and celldiff ×
-# nucleus/ER × iPSC/A549). ``a549__bf__deconv`` remains a grammar-ready follow-up.
+# ``ipsc__bf`` and ``a549__bf`` are both live; the model set behind each is read from
+# disk, not tracked here. ``a549__bf__deconv`` remains a grammar-ready follow-up.
 _FORWARD_TRAIN_SETS: frozenset[str] = frozenset(
     {
         "ipsc",
@@ -111,7 +110,7 @@ _LEGACY_TRAIN_SETS: frozenset[str] = _ABLATION_TRAIN_SETS | {_LEGACY_JOINT_DECON
 
 # Model code keys (open set — the display registry below is the closed subset with
 # known paper names; unknown-but-parseable keys can still form valid paths, but
-# paper_key() raises on them).
+# have no PAPER_KEY entry).
 _ABLATION_MODELS: frozenset[str] = frozenset(
     {
         "fcmae_vscyto3d_pretrained_randinit",
@@ -143,8 +142,6 @@ _CELLDIFF_ARM_MODELS: tuple[str, ...] = (
     "celldiff_2d_cjoint",
     "celldiff_2d_ccond",
     "celldiff_2d_seed1",
-    "celldiff_2d_bglp",
-    "celldiff_2d_bgflat",
     "celldiff_segaux",
     "celldiff_cjoint",
     "celldiff_ccond",
@@ -163,8 +160,7 @@ _PREDICT_ONLY_ARM_MODELS: frozenset[str] = frozenset({"pix2pix2d_unetvit_last"})
 # family as one "CELL-Diff" row (display collapse) — but the PATH always uses the
 # true model key (celldiff_r2, celldiff_r2_iterative, ...), so R1/R2 stay distinct
 # on disk. celldiff_r2 and unext2_timm_scratch are live PATH tokens now (the new
-# grammar puts the true model key in the path), so both MUST be present here or
-# paper_key() raises.
+# grammar puts the true model key in the path), so both MUST be present here.
 PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_scratch": "unext2",
     "fcmae_vscyto3d_pretrained": "vscyto3d",
@@ -306,15 +302,27 @@ PAPER_KEY: dict[str, str] = {
     "fnet3d_vscyto3daug_segaux_seed1": "fnet3d_vscyto3daug_segaux_seed1",
     "fnet3d_vscyto3daug_segaux_sauna": "fnet3d_vscyto3daug_segaux_sauna",
     "fnet3d_vscyto3daug_segaux_cldice": "fnet3d_vscyto3daug_segaux_cldice",
-    # Track H: CellDiff-2D trained on a target whose background is replaced by an estimate
-    # from background pixels (BackgroundLowPass): smoothed (`_bglp`) or flat (`_bgflat`).
-    "celldiff_2d_bglp": "celldiff_2d_bglp",
-    "celldiff_2d_bgflat": "celldiff_2d_bgflat",
     # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
     # histogram-matched per volume to its segaux arm's (spatial structure kept).
     "fnet3d_paper_histmatch": "fnet3d_histmatch",
     "pix2pix3d_unetvit_v2_histmatch": "pix2pix3d_v2_histmatch",
     "fcmae_vscyto3d_scratch_v2_histmatch": "unext2_v2_histmatch",
+    # Checkpoint-stage control: the nucleus vscyto3daug v2_seed1 baseline re-predicted from
+    # epoch=74-step=195000 instead of its best-val epoch=17, to separate seed variance from
+    # checkpoint stage in the baseline floor.
+    "fnet3d_vscyto3daug_v2_seed1_e74": "fnet3d_vscyto3daug_v2_seed1_e74",
+    # Checkpoint-stage control: the mito vscyto3daug segaux arm re-predicted from
+    # latest-epoch=76-step=200000 instead of its best-val epoch=30, closer to the baselines'
+    # epoch 62 / 65.
+    "fnet3d_vscyto3daug_segaux_e76": "fnet3d_vscyto3daug_segaux_e76",
+    # Track H background-target arms (CELL-Diff-2D nucleus): `_bglp` = background low-pass
+    # sigma 2 (r2/f1), `_bgflat` = flat per-patch background mean (r4/f2).
+    "celldiff_2d_bglp": "celldiff_2d_bglp",
+    "celldiff_2d_bgflat": "celldiff_2d_bgflat",
+    # Checkpoint-stage control: the mito vscyto3daug segaux_cldice arm re-predicted from its
+    # retained epoch=68-step=179400 instead of its best-val epoch=38, closer to the baselines'
+    # epoch 62 / 65.
+    "fnet3d_vscyto3daug_segaux_cldice_e68": "fnet3d_vscyto3daug_segaux_cldice_e68",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
@@ -425,19 +433,6 @@ _A549_GENE: dict[str, str] = {
 _HEK_GENE: dict[str, str] = {
     "membrane": "kras",
     "mito": "tomm70a",
-}
-
-# ===========================================================================
-# Map (c): canonical eval `target` group name
-# ===========================================================================
-
-# Base organelle -> eval-side Hydra `target` group name. ER/Mito disambiguate by
-# gene to match the target YAMLs under _internal/shared/eval/target/.
-ORGANELLE_EVAL_TARGET: dict[str, str] = {
-    "nucleus": "nucleus",
-    "membrane": "membrane",
-    "er": "er_sec61b",
-    "mito": "mito_tomm20",
 }
 
 # ===========================================================================
@@ -593,34 +588,8 @@ def _parse_leaf_suffix(leaf: str) -> tuple[str, str | None]:
 
 
 # ===========================================================================
-# Display helpers (retained public API)
+# Predict-config helpers
 # ===========================================================================
-
-
-def paper_key(code_model: str) -> str:
-    """Translate the code-side model key to its paper display name.
-
-    Raises ``ValueError`` for a model not in the display registry.
-    """
-    if code_model not in PAPER_KEY:
-        raise ValueError(f"unknown model key {code_model!r}; expected one of {sorted(PAPER_KEY)}")
-    return PAPER_KEY[code_model]
-
-
-def eval_predict_set_group(dataset_name: str) -> str:
-    """Return the eval-side Hydra ``predict_set`` group name for one leaf.
-
-    iPSC composes back to itself; A549 leaves carry the per-condition dataset slug
-    ``a549-mantis-<marker>-<cond>`` and the group name uses underscores.
-    """
-    if dataset_name == "aics-hipsc":
-        return "ipsc_confocal"
-    if dataset_name.startswith("a549-mantis-"):
-        return "a549_mantis_" + dataset_name.removeprefix("a549-mantis-").replace("-", "_")
-    raise ValueError(
-        f"cannot map dataset {dataset_name!r} to a predict_set group; "
-        f"expected 'aics-hipsc' or 'a549-mantis-<marker>-<cond>'"
-    )
 
 
 def extract_predict_output_store(composed: dict, leaf_path: Path) -> Path:

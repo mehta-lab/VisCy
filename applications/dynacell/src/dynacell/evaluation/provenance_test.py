@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from dynacell.evaluation import provenance
 from dynacell.evaluation.cache import prediction_sources_sha256_12
 from dynacell.evaluation.provenance import (
     CUBIC_VERSIONS_EQUIVALENT_TO,
@@ -68,6 +69,38 @@ def test_feature_less_run_ignores_the_cp_key(tmp_path):
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
 
 
+def test_foreground_recipe_is_stamped_only_when_on(tmp_path):
+    """No recipe writes the payload byte-for-byte as before; a recipe must match exactly to reuse."""
+    off, on = tmp_path / "off", tmp_path / "on"
+    off.mkdir()
+    on.mkdir()
+    write_metrics_provenance(off, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST)
+    legacy = json.dumps(
+        {
+            "versions": installed_versions(),
+            "cp_reference_sha256": None,
+            "cp_space_sha256": None,
+            "prediction_sources_sha256_12": _DIGEST,
+        },
+        indent=1,
+        sort_keys=True,
+    )
+    assert (off / PROVENANCE_FILENAME).read_text() == legacy + "\n"
+    recipe = {"source": "smooth_otsu", "smooth_sigma_um": 0.5, "feather_sigma_um": 0.5}
+    write_metrics_provenance(
+        on, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST, pixel_foreground=recipe
+    )
+    assert json.loads((on / PROVENANCE_FILENAME).read_text())["pixel_foreground"] == recipe
+    assert metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=recipe)
+    # A run without the columns needs nothing from the stamp: the extra columns are harmless.
+    assert metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES)
+    other = {**recipe, "smooth_sigma_um": 1.0}
+    assert not metrics_provenance_matches(on, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=other)
+    assert not metrics_provenance_matches(
+        off, cp_space_sha256=None, prediction_sources=_SOURCES, pixel_foreground=recipe
+    )
+
+
 def test_other_cp_reference_is_not_a_match(tmp_path):
     """CP values scored in another reference are not reusable after a rebuild."""
     write_metrics_provenance(tmp_path, cp_reference_sha256="ref-old", cp_space_sha256="old", prediction_digest=_DIGEST)
@@ -112,7 +145,9 @@ def test_foreign_cubic_version_is_not_a_match(tmp_path):
 @pytest.fixture
 def running_the_declared_pin(monkeypatch):
     """Report the declared cubic as installed, whatever the test venv holds."""
-    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: REQUIRED_CUBIC_VERSION)
+    # Pipeline fixtures reload evaluation modules. Patch the module these imported
+    # functions belong to, rather than a potentially newer sys.modules entry.
+    monkeypatch.setattr(provenance, "version", lambda _name: REQUIRED_CUBIC_VERSION)
 
 
 def test_equivalent_versions_exclude_the_declared_one():
@@ -144,15 +179,15 @@ def test_equivalent_cubic_version_keeps_the_cp_rules(tmp_path, running_the_decla
 
 def test_equivalence_only_applies_under_the_declared_pin(tmp_path, monkeypatch):
     """An environment off the pin gets no equivalence: only its own version matches."""
-    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: "0.8.0a2")
+    monkeypatch.setattr(provenance, "version", lambda _name: "0.8.0a2")
     _stamp_cubic(tmp_path, "0.9.0a1", cp_space_sha256=None)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
 
 
 def test_unmeasured_pin_has_no_equivalents(tmp_path, monkeypatch):
     """A newly declared pin with no measured entry reuses no older cache."""
-    monkeypatch.setattr("dynacell.evaluation.provenance.REQUIRED_CUBIC_VERSION", "0.9.0a99")
-    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: "0.9.0a99")
+    monkeypatch.setattr(provenance, "REQUIRED_CUBIC_VERSION", "0.9.0a99")
+    monkeypatch.setattr(provenance, "version", lambda _name: "0.9.0a99")
     _stamp_cubic(tmp_path, "0.9.0a1", cp_space_sha256=None)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
 
@@ -167,7 +202,7 @@ def test_check_cubic_pin_accepts_the_declared_version():
 def test_check_cubic_pin_accepts_an_equivalent_version(monkeypatch):
     """A venv on a measured-equivalent version keeps working across the bump."""
     equivalent = next(iter(CUBIC_VERSIONS_EQUIVALENT_TO[REQUIRED_CUBIC_VERSION]))
-    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: equivalent)
+    monkeypatch.setattr(provenance, "version", lambda _name: equivalent)
     check_cubic_pin()
 
 
@@ -175,12 +210,26 @@ def test_equivalent_environment_reuses_the_declared_pins_cache(tmp_path, monkeyp
     """Equivalence is symmetric: an equivalent venv reuses a cache the declared pin wrote."""
     _stamp_cubic(tmp_path, REQUIRED_CUBIC_VERSION, cp_space_sha256=None)
     equivalent = next(iter(CUBIC_VERSIONS_EQUIVALENT_TO[REQUIRED_CUBIC_VERSION]))
-    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: equivalent)
+    monkeypatch.setattr(provenance, "version", lambda _name: equivalent)
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES)
 
 
 def test_check_cubic_pin_rejects_a_mismatch(monkeypatch):
-    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: "0.8.0a2")
+    monkeypatch.setattr(provenance, "version", lambda _name: "0.8.0a2")
+    with pytest.raises(RuntimeError, match="not comparable across"):
+        check_cubic_pin()
+
+
+def test_runtime_versions_do_not_depend_on_cache_equivalence(monkeypatch):
+    monkeypatch.setattr(provenance, "CUBIC_VERSIONS_EQUIVALENT_TO", {})
+    monkeypatch.setattr(provenance, "version", lambda _name: "0.9.0a3")
+    check_cubic_pin()
+    monkeypatch.setattr(
+        provenance,
+        "CUBIC_VERSIONS_EQUIVALENT_TO",
+        {REQUIRED_CUBIC_VERSION: frozenset({"0.8.0a2"})},
+    )
+    monkeypatch.setattr(provenance, "version", lambda _name: "0.8.0a2")
     with pytest.raises(RuntimeError, match="not comparable across"):
         check_cubic_pin()
 
@@ -210,3 +259,44 @@ def test_prediction_sources_must_match_the_stamp_or_predate_the_sidecar(tmp_path
     assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=older)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=newer)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=blank)
+
+
+def test_fid_solver_is_stamped_only_when_requested(tmp_path):
+    """The FID implementation is auditable while FID-free stamps keep their payload."""
+    write_metrics_provenance(
+        tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST, compute_fid=True
+    )
+    payload = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
+    assert payload["fid_implementation"] == "sample-space-svd-v1"
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256=None, prediction_sources=_SOURCES, compute_fid=True)
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None, prediction_digest=_DIGEST)
+    assert "fid_implementation" not in json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
+
+
+@pytest.mark.parametrize("identity", [None, "torch-fidelity-eigvals-v1"])
+def test_measured_legacy_fid_solver_cache_is_reused(tmp_path, identity):
+    """Pre-change sidecars and explicitly identified legacy FID share the measured contract."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_digest=_DIGEST)
+    path = tmp_path / PROVENANCE_FILENAME
+    payload = json.loads(path.read_text())
+    if identity is not None:
+        payload["fid_implementation"] = identity
+    path.write_text(json.dumps(payload))
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256="abc", prediction_sources=_SOURCES, compute_fid=True)
+    assert not metrics_provenance_matches(
+        tmp_path, cp_space_sha256="other", prediction_sources=_SOURCES, compute_fid=True
+    )
+
+
+@pytest.mark.parametrize("identity", ["unknown-solver-v99", None, {"solver": "unknown"}])
+def test_unknown_fid_solver_is_rejected_only_when_fid_is_requested(tmp_path, identity):
+    """A foreign solver cannot silently certify FID, but an FID-free run reuses no FID value."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc", prediction_digest=_DIGEST)
+    path = tmp_path / PROVENANCE_FILENAME
+    payload = json.loads(path.read_text())
+    payload["fid_implementation"] = identity
+    path.write_text(json.dumps(payload))
+    assert not metrics_provenance_matches(
+        tmp_path, cp_space_sha256="abc", prediction_sources=_SOURCES, compute_fid=True
+    )
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256="abc", prediction_sources=_SOURCES, compute_fid=False)

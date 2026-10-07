@@ -48,7 +48,14 @@ segmentation:
   focus_anchor: nucleus_area
   focus_slab_halfwidth: 1
   focus_channel_name: Phase3D
-  nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
+  nuclei_channel_name: null  # GT nucleus channel; required for membrane with cpdino (nucleus carve) or cellpose_watershed (seeds)
+  # Semantic targets (ER, mitochondria, ...): null scores the masks over the whole volume
+  # (3D benchmark). An integer h segments the 2h+1 planes centered on the focus plane as
+  # one small volume and scores only the focus plane of the mask; h=1 is the 2D
+  # benchmark's slab3. The plane follows focus_anchor above (nucleus_area also needs
+  # nuclei_channel_name; use phase_midband for GT stores without nuclei, e.g. A549
+  # SEC61B/TOMM20). Not cached, and stamped in metrics_provenance.json.
+  semantic_focus_halfwidth: null
   # Cellpose-DINO (cpdino) params — the recommended instance backend for both nucleus
   # (direct) and whole-cell (membrane + nucleus carve). Faithful to the cpv4 validation:
   # the raw in-focus slice is passed to cellpose with normalize=true (its own percentile
@@ -98,7 +105,7 @@ io:
                           # pred_channel_name -> source_channel; pred_path defaults to the
                           # GT store (source + target share one store), so positions match.
   gt_channel_name: ???    # e.g. Structure / Membrane / Nuclei
-  nuclei_gt_path: null  # cellpose_watershed only: store holding the GT nuclei seed channel
+  nuclei_gt_path: null  # membrane with cpdino or cellpose_watershed: store holding the GT nuclei channel
                         # (segmentation.nuclei_channel_name). null = read from gt_path (iPSC
                         # cell.zarr). Set to a separate store when GT nuclei live apart from the
                         # GT membrane (A549: membrane in CAAX_*.ozx, nuclei in H2B_*.ozx);
@@ -127,6 +134,20 @@ pixel_metrics:
     tail_fraction: 0.2
     apodization: tukey
     nbins_low: 3
+  # Foreground-limited columns FG_PCC, FG_SI_SSIM, FG_SI_NRMSE, FG_SI_PSNR and FG_frac:
+  # the SI_* family (+ PCC) scored against a soft [0, 1] weight map built from the GT
+  # alone (metrics.foreground_weight), so every model is scored on the same region.
+  # smooth_otsu = Gaussian smooth -> Otsu -> Gaussian feather; otsu = raw Otsu
+  # (Spotlight v1's mask, for comparison). Sigmas are physical (um); null takes the
+  # target's default from metrics.FOREGROUND_SIGMAS_UM. Off by default: on adds the
+  # columns, and the recipe (+ FG code version and spacing) is stamped in
+  # metrics_provenance.json, so turning it on or changing it reruns the whole
+  # final-metrics pass instead of reusing a cache; turning it off reuses one.
+  foreground:
+    enabled: false
+    source: smooth_otsu   # smooth_otsu | otsu
+    smooth_sigma_um: null
+    feather_sigma_um: null
 
 feature_metrics:
   patch_size: 256

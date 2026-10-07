@@ -24,7 +24,6 @@ from generate_spotlight_v2_leaves import ARMS
 
 from dynacell.evaluation.paths import (
     MODELS_ROOT,
-    ORGANELLE_EVAL_TARGET,
     PAPER_KEY,
     CanonicalKey,
     canonical_model_name,
@@ -35,7 +34,6 @@ from dynacell.evaluation.paths import (
     key_from_prediction_store,
     metrics_repo_dir,
     normalize_legacy,
-    paper_key,
     pred_cache_dir,
     prediction_store,
     resolve_model,
@@ -727,7 +725,7 @@ def test_normalize_legacy_no_two_paths_collide_across_forms() -> None:
 
 def test_paper_key_retained_entries() -> None:
     # pix2pix3d + 5 ablation keys must not regress.
-    assert paper_key("pix2pix3d_unetvit") == "pix2pix3d"
+    assert PAPER_KEY["pix2pix3d_unetvit"] == "pix2pix3d"
     for m in (
         "fcmae_vscyto3d_pretrained_randinit",
         "fcmae_vscyto3d_pretrained_cytoland",
@@ -737,8 +735,8 @@ def test_paper_key_retained_entries() -> None:
     ):
         assert m in PAPER_KEY
     # Newly-added live path tokens.
-    assert paper_key("celldiff_r2") == "celldiff_r2"
-    assert paper_key("unext2_timm_scratch") == "unext2_timm_scratch"
+    assert PAPER_KEY["celldiff_r2"] == "celldiff_r2"
+    assert PAPER_KEY["unext2_timm_scratch"] == "unext2_timm_scratch"
 
 
 def test_paper_key_2d_track() -> None:
@@ -748,21 +746,14 @@ def test_paper_key_2d_track() -> None:
     onto ``vscyto3d`` (or the scratch pair onto ``unext2``) would silently merge the
     2D and 3D rows of the 2D-vs-3D comparison into one eval dir.
     """
-    assert paper_key("fcmae_vscyto2d_scratch") == "unext2_2d"
-    assert paper_key("fcmae_vscyto2d_pretrained") == "vscyto2d"
-    assert paper_key("fnet2d") == "fnet2d"
-    assert paper_key("fnet2d_voxelmatched") == "fnet2d_voxelmatched"
-    assert paper_key("fcmae_vscyto2d_scratch_samplematched") == "unext2_2d_samplematched"
-    assert paper_key("fcmae_vscyto3d_scratch") == "unext2"
-    assert paper_key("fcmae_vscyto3d_pretrained") == "vscyto3d"
-    assert paper_key("fnet3d_paper") == "fnet3d"
-
-
-def test_organelle_eval_target() -> None:
-    assert ORGANELLE_EVAL_TARGET["er"] == "er_sec61b"
-    assert ORGANELLE_EVAL_TARGET["mito"] == "mito_tomm20"
-    assert ORGANELLE_EVAL_TARGET["nucleus"] == "nucleus"
-    assert ORGANELLE_EVAL_TARGET["membrane"] == "membrane"
+    assert PAPER_KEY["fcmae_vscyto2d_scratch"] == "unext2_2d"
+    assert PAPER_KEY["fcmae_vscyto2d_pretrained"] == "vscyto2d"
+    assert PAPER_KEY["fnet2d"] == "fnet2d"
+    assert PAPER_KEY["fnet2d_voxelmatched"] == "fnet2d_voxelmatched"
+    assert PAPER_KEY["fcmae_vscyto2d_scratch_samplematched"] == "unext2_2d_samplematched"
+    assert PAPER_KEY["fcmae_vscyto3d_scratch"] == "unext2"
+    assert PAPER_KEY["fcmae_vscyto3d_pretrained"] == "vscyto3d"
+    assert PAPER_KEY["fnet3d_paper"] == "fnet3d"
 
 
 # ---------------------------------------------------------------------------

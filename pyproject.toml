@@ -100,7 +100,7 @@ lint.pydocstyle.convention = "numpy"
 minversion = "9.0"
 testpaths = [ "packages/*/tests", "applications/*/tests" ]
 addopts = [ "-ra", "-q", "--import-mode=importlib", "-m", "not slow" ]
-pythonpath = [ "applications/dynacell/tools" ]
+pythonpath = [ "applications/dynacell/tools", "applications/dynacell/examples/hf_demo" ]
 # Set as an ini option, NOT as --strict-markers in addopts. pytest >= 9 backs the
 # flag with this ini option and only honours the flag from the command line — in
 # addopts it parses (config.option.strict_markers reads True) but never enforces,

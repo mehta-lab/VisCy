@@ -16,6 +16,14 @@ are keyed by ``(gene_cond, focus_slab.halfwidth)``; these leaves inherit the
 ``eval.yaml`` halfwidth exactly like every canonical nucleus/membrane bucket, so
 they read the same key rather than flipping it.
 
+ER and mito buckets are built by the same :func:`build_leaf_yaml` as the canonical
+``er_*`` / ``mitochondria_*`` grouped leaves, so they score exactly like them:
+the default semantic (Dice) masks, no ``segmentation`` override and no instance
+AP, GT from the per-organelle iPSC stores (``SEC61B.zarr`` / ``TOMM20.zarr``) and
+the A549 ``sec61b`` / ``tomm20`` test sets. Roster keys are the on-disk
+organelle tokens (``er``, ``mito``); mito's eval ``target_name`` is
+``mitochondria``, as in the canonical leaves.
+
 Every pred-side artifact is force-recomputed (masks, instances, CP and all deep
 features) plus ``final_metrics``. The generator predates the per-position
 prediction sources the eval caches now record, and forcing keeps these waves
@@ -58,6 +66,7 @@ from pathlib import Path
 
 import yaml
 from generate_grouped_eval_configs import (
+    _CANONICAL_ORG_TO_INTERNAL,
     _HYDRA_HEADER,
     _LEAF_OUT_ROOT,
     _MANIFEST_ROOT,
@@ -74,7 +83,8 @@ DEFAULT_ROSTER = Path(__file__).resolve().parent / "spotlight_v2_eval_roster.yam
 BUCKET_PREFIX = "spotlight_v2_"
 TRAIN_SET = "ipsc"
 _TRAIN_BUCKET = "ipsc_trained"
-ORGANELLES: frozenset[str] = frozenset({"nucleus", "membrane"})
+# On-disk organelle tokens (the roster keys and prediction-store dirs).
+ORGANELLES: frozenset[str] = frozenset({"nucleus", "membrane", "er", "mito"})
 LEAVES: tuple[str, ...] = ("ipsc", "a549__mock", "a549__denv", "a549__zikv")
 _GATE_WORKERS = 16
 
@@ -230,12 +240,17 @@ def gt_test_store(parsed: ParsedZarr) -> Path:
     return Path(manifest["targets"][ref["target"]]["stores"]["test"])
 
 
+def target_name(organelle: str) -> str:
+    """Return the eval ``target_name`` for a roster organelle (``mito`` -> ``mitochondria``)."""
+    return _CANONICAL_ORG_TO_INTERNAL.get(organelle, organelle)
+
+
 def parsed_row(organelle: str, model: str, leaf: str, pred_path: Path) -> ParsedZarr:
     """Build the generator's :class:`ParsedZarr` for one roster row."""
     test_set, condition = split_leaf(leaf)
     return ParsedZarr(
         pred_path=pred_path,
-        organelle=organelle,
+        organelle=target_name(organelle),
         model=model,
         variant=None,
         train_set=_TRAIN_BUCKET,
@@ -253,7 +268,7 @@ def build_buckets(rows: list[tuple[str, str, str, str, Path]], v2_root: Path = V
         grouped.setdefault(name, (organelle, []))[1].append(parsed_row(organelle, model, leaf, pred_path))
     buckets: dict[str, tuple[dict, int]] = {}
     for name, (organelle, members) in sorted(grouped.items()):
-        body = build_leaf_yaml(organelle, _TRAIN_BUCKET, members, dynacell_root=v2_root)
+        body = build_leaf_yaml(target_name(organelle), _TRAIN_BUCKET, members, dynacell_root=v2_root)
         # Replace, never mutate: build_leaf_yaml shallow-copies the generator's
         # module-level overlay, so this dict is shared with every other leaf.
         body["force_recompute"] = dict(PRED_FORCE)

@@ -16,10 +16,10 @@ predictions), so one run per ``(plate, condition)`` serves every organelle. The
 v3->cpdino switch intentionally shifts every downstream A549 feature/whole-cell-AP
 metric to match the eval instance-seg backend.
 
-Run in the cpdino-eval venv (cubic + cellpose-DINO)::
+Run from the repository root (the eval extra provides cubic + cellpose-DINO)::
 
-    UV_PROJECT_ENVIRONMENT=/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval \
-        uv run --no-sync python applications/dynacell/tools/build_cpdino_seg_cleaned.py \
+    uv run --package dynacell --extra eval --extra eval_gpu \
+        python applications/dynacell/tools/build_cpdino_seg_cleaned.py \
         --vs-store /hpc/projects/.../a549/mantis/test/SEC61B_mock_vs.zarr
 """
 
