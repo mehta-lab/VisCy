@@ -72,6 +72,11 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Track H bgflat A549 denv leg (predict 37004626 COMPLETED 2026-10-07 13:01), the last bgflat
+  # leg after wave2y. bglp A549 mock/denv/zikv are still predicting. Generate with --wave wave3c.
+  wave3c:
+    nucleus:
+      - {model: celldiff_2d_bgflat, leaves: [a549__denv]}
   # FNet-3D vscyto3daug ER soft-clDice arm (fit 36933630, max_steps 200000, --ckpt best
   # epoch=90-step=199927), 2026-10-07: all four legs. Stage-matched to the wave2s ER baselines
   # (epoch 90 / 68), segaux (86) and SAUNA (80). Generate with --wave wave3b.
