@@ -220,19 +220,27 @@ re-loads models per condition).
 ## Focus-aware 2D projection (`evaluation/focus.py`)
 
 The 3D→2D reduction is focus-aware so projection isn't dominated by out-of-focus
-caps (A549 Z=48, in-focus band ~5 planes). Three knobs, all default-off:
+caps (A549 Z=48, in-focus band ~5 planes). Four knobs; the first two are on by
+default (since 35c0235b, 2026-06-16):
 
-- `feature_metrics.focus_slab.{enabled,halfwidth,channel_name}` — deep-feature
-  crops + per-cell similarity max-project over a `2*halfwidth+1` slab on the
-  in-focus plane (CP regionprops stay 3D). Folds `+focusslab_h{h}_{ch}_{sig}`
-  into each deep-feature `preprocess_version` so embedding caches auto-invalidate
-  (`{sig}` hashes the `focus.{na_det,lambda_ill,pixel_size}` params).
-- `segmentation.slice_selection=focus` — 2D instance seg picks the in-focus plane
-  (vs the old `frac=0.30`).
-- `precompute-gt build.focus=true` — writes `focus_slice` zattrs to a writable GT
-  store.
+- `feature_metrics.focus_slab.{enabled,halfwidth,channel_name}` (default on,
+  halfwidth 2, i.e. 5 planes) — deep-feature crops + per-cell similarity
+  max-project over a `2*halfwidth+1` slab on the phase in-focus plane (CP
+  regionprops stay 3D). Folds `+focusslab_h{h}_{ch}_{sig}` into each deep-feature
+  `preprocess_version` so embedding caches auto-invalidate (`{sig}` hashes the
+  `focus.{na_det,lambda_ill,pixel_size}` params).
+- `segmentation.slice_selection=focus` (default) — 2D instance seg picks the
+  in-focus plane (vs the old `frac=0.30`). `segmentation.focus_anchor` chooses it:
+  `nucleus_area` (default, widest GT nuclear cross-section) or `phase_midband`
+  (the phase estimator below).
+- `segmentation.semantic_focus_halfwidth` (default null = whole volume) — semantic
+  targets (ER, mito) segment the `2h+1` planes around that plane and score only
+  the focus plane of the mask; `h=1` is the 2D benchmark's slab3.
+- `precompute-gt build.focus=true` (default false) — writes `focus_slice` zattrs
+  to a writable GT store.
 
-**Plane source (precedence):** (1) precomputed `focus_slice` zattrs (iPSC `.zarr`
+**Phase plane source** (the slab and `focus_anchor=phase_midband`)
+**(precedence):** (1) precomputed `focus_slice` zattrs (iPSC `.zarr`
 fast path); (2) `io.gt_cache_dir/focus_planes/<channel>/<pos>.json`; (3) compute
 from the phase channel + persist. Compute-at-eval-time (3) is why focus works on
 the **read-only published A549 `.ozx`** — they carry no zattrs and `pack_ozx`

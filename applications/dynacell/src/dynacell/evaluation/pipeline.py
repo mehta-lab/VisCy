@@ -707,10 +707,11 @@ def _process_one_fov(
 
     T = predict.shape[0]
 
-    # In-focus slab for the 2D deep-feature crops + per-cell similarity (off by
-    # default). Computed once from the GT phase focus plane (focus_slice zattrs,
-    # written by precompute-gt build.focus) and shared with the prediction
-    # (slice-by-slice); None per t means full-stack projection. Does not touch CP.
+    # In-focus slab for the 2D deep-feature crops + per-cell similarity (on by
+    # default, feature_metrics.focus_slab). Computed once from the GT phase focus
+    # plane (focus_slice zattrs, written by precompute-gt build.focus) and shared
+    # with the prediction (slice-by-slice); None per t means full-stack
+    # projection. Does not touch CP.
     slab_cfg = read_focus_slab_config(config)
     if slab_cfg is not None:
         fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
