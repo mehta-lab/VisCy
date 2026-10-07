@@ -318,7 +318,7 @@ PAPER_KEY: dict[str, str] = {
     # epoch 62 / 65.
     "fnet3d_vscyto3daug_segaux_e76": "fnet3d_vscyto3daug_segaux_e76",
     # Track H background-target arms (CELL-Diff-2D nucleus): `_bglp` = background low-pass
-    # sigma 2 (r2/f1), `_bgflat` = flat per-patch background mean (r4/f2).
+    # sigma 2 (r2/f1), `_bgflat` = flat per-plane background mean (r4/f2).
     "celldiff_2d_bglp": "celldiff_2d_bglp",
     "celldiff_2d_bgflat": "celldiff_2d_bgflat",
     # Checkpoint-stage control: the mito vscyto3daug segaux_cldice arm re-predicted from its
