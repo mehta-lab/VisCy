@@ -11,6 +11,8 @@ from generate_spotlight_v2_leaves import (
     ARMS,
     BASELINES,
     BENCHMARKS,
+    BG_TARGET_ARGS,
+    ORGANELLES,
     POOL,
     SEED_SOURCES,
     SEG_AUX_WEIGHTS,
@@ -23,10 +25,13 @@ from generate_spotlight_v2_leaves import (
     build_leaves,
     changed_keys,
 )
+from jsonargparse import ArgumentParser
+from lightning.pytorch import LightningModule
 
 from dynacell._compose_hook import _dynacell_ref_resolver
 from dynacell.evaluation.paths import PAPER_KEY, canonical_model_name
 from viscy_utils.compose import load_composed_config
+from viscy_utils.losses import BackgroundLowPass
 
 
 def _suffix(leaf_dir_name: str) -> str:
@@ -46,11 +51,11 @@ def test_committed_leaves_match_the_generator(leaves: dict) -> None:
 
 
 def test_leaf_counts_per_arm(leaves: dict) -> None:
-    """Count 77 fits and 310 predicts per arm (fit+predict).
+    """Count 81 fits and 326 predicts per arm (fit+predict).
 
     segaux 19+76, segauxself 8+32, seed1 9+36, v2 7+28, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
     l1segaux 1+4, l1seed1 1+4, segaux_seed1 10+40, v2_seed1 7+28,
-    segaux_halfw 1+4, segaux_doublew 1+4, segaux_sauna 3+12, segaux_cldice 3+12.
+    segaux_halfw 1+4, segaux_doublew 1+4, segaux_sauna 3+12, segaux_cldice 3+12, bglp 2+8, bgflat 2+8.
 
     The jointsteps and safecrop probes are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
@@ -74,6 +79,8 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "segaux_doublew": 1,
         "segaux_sauna": 3,
         "segaux_cldice": 3,
+        "bglp": 2,
+        "bgflat": 2,
     }
     assert predicts == {
         "segaux": 76,
@@ -94,6 +101,8 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "segaux_doublew": 4,
         "segaux_sauna": 12,
         "segaux_cldice": 12,
+        "bglp": 8,
+        "bgflat": 8,
     }
 
 
@@ -265,3 +274,28 @@ def test_weight_sweep_arms_differ_from_the_segaux_arm_by_the_weight_only(leaves:
             w_src = src["model"]["init_args"].pop("seg_aux_weight")
             assert w_arm == pytest.approx(w_src * WEIGHT_SCALES[arm.suffix])
             assert changed_keys(src, arm_leaf) == _FIT_RENAMES
+
+
+@pytest.mark.parametrize("organelle", ORGANELLES)
+@pytest.mark.parametrize("suffix", list(BG_TARGET_ARGS))
+def test_bg_target_arms_compose_and_instantiate_with_only_the_target_op_added(suffix: str, organelle: str) -> None:
+    """Composed, each Track H fit is celldiff_2d + fg_mask_key + target_bg_lowpass; its model builds."""
+    load = lambda model: load_composed_config(  # noqa: E731
+        BENCHMARKS / organelle / model / POOL / "train.yml", resolver=_dynacell_ref_resolver
+    )
+    base, arm = load("celldiff_2d"), load(f"celldiff_2d_{suffix}")
+    renames, _ = allowed_diff(Arm("celldiff_2d", suffix, (organelle,), a549=False), "fit")
+    changed = changed_keys(base, arm) - renames
+    op_key = "model.init_args.target_bg_lowpass"
+    assert {op_key if k.startswith(op_key + ".") else k for k in changed} == {"data.init_args.fg_mask_key", op_key}
+    assert arm["data"]["init_args"]["fg_mask_key"] == "fg_mask"
+    # LightningModule as the base, as LightningCLI does: test_lazy_init evicts dynacell.* from
+    # sys.modules, so a DynacellFlowMatching bound at import can differ from the one jsonargparse imports.
+    parser = ArgumentParser()
+    parser.add_subclass_arguments(LightningModule, "model")
+    module = parser.instantiate(parser.parse_object({"model": arm["model"]})).model
+    assert f"{type(module).__module__}.{type(module).__qualname__}" == "dynacell.engine.DynacellFlowMatching"
+    op = module.target_bg_lowpass
+    assert isinstance(op, BackgroundLowPass)
+    assert {k: getattr(op, k) for k in BG_TARGET_ARGS[suffix]} == BG_TARGET_ARGS[suffix]
+    assert (op.sigma_lp_z, op.sigma_feather_z, op.dilate_radius_z) == (0.0, 0.0, 0)

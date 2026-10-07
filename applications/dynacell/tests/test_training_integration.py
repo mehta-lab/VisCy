@@ -20,7 +20,7 @@ from dynacell.mask_conditioning import CondMaskSource, MaskCorruption, encode_ma
 from viscy_data.hcs import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 from viscy_utils.compose import load_composed_config
-from viscy_utils.losses import MixedLoss, SegAuxDice, SpotlightLoss
+from viscy_utils.losses import BackgroundLowPass, MixedLoss, SegAuxDice, SpotlightLoss
 from viscy_utils.meta_utils import generate_fg_masks
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
@@ -1068,6 +1068,117 @@ def test_cond_mask_source_otsu_refuses_a_constant_window(tmp_path):
 def test_cond_mask_source_rejects_unknown_threshold_string(tmp_path):
     with pytest.raises(ValueError, match="float or 'otsu'"):
         CondMaskSource(data_path=str(tmp_path), channel="Nuclei_prediction", threshold="triangle")
+
+
+# ---- CellDiff background low-pass target (Spotlight v2 Track H) ----
+
+BG_LOWPASS_TEST_ARGS = {"sigma_lp": 2.0, "sigma_feather": 1.0, "dilate_radius": 2}
+
+
+def _bg_lowpass_batch(shape: tuple[int, ...]) -> dict:
+    """Synthetic batch whose mask leaves a background for the op to change."""
+    target = torch.randn(shape)
+    mask = torch.zeros(shape)
+    mask[..., 8:20, 8:20] = 1.0
+    return {"source": torch.randn(shape), "target": target, "fg_mask": mask}
+
+
+@pytest.mark.parametrize("sigma_lp", [BG_LOWPASS_TEST_ARGS["sigma_lp"], None], ids=["smooth", "flat"])
+@pytest.mark.parametrize("dim", list(MASK_MODE_DIMS))
+@pytest.mark.parametrize("seg_aux", [False, True], ids=["plain", "seg_aux"])
+def test_flow_matching_bg_lowpass_fast_dev_run(tmp_path, tiny_hcs_zarr, dim, seg_aux, sigma_lp):
+    """The target op trains and validates on real fg_mask output: 2D/3D, smooth/flat, with and without seg_aux."""
+    generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"])
+    net_config, z_window_size = MASK_MODE_DIMS[dim]
+    seed_everything(42)
+    aux = {"seg_aux": SegAuxDice(), "seg_aux_weight": 0.5, "seg_aux_t0": 1.0} if seg_aux else {}
+    module = DynacellFlowMatching(
+        net_config=net_config,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        compute_validation_loss=True,
+        num_log_steps=2,
+        log_batches_per_epoch=1,
+        target_bg_lowpass=BackgroundLowPass(**{**BG_LOWPASS_TEST_ARGS, "sigma_lp": sigma_lp}),
+        **aux,
+    )
+    trainer = _cpu_trainer(tmp_path, fast_dev_run=True)
+    trainer.fit(module, datamodule=_masked_datamodule(tiny_hcs_zarr, z_window_size))
+    assert trainer.state.status == "finished"
+    keys = ["loss/train", "loss/validate"]
+    if seg_aux:
+        keys += ["loss/base_train", "loss/dice_train", "loss/validate_dice"]
+    _assert_finite_metrics(trainer.callback_metrics, keys)
+
+
+@pytest.mark.parametrize("seg_aux", [False, True], ids=["plain", "seg_aux"])
+def test_flow_matching_bg_lowpass_trains_on_the_transformed_target(seg_aux):
+    """The training loss is the baseline's objective on op(target, fg_mask), with or without seg_aux."""
+    op = BackgroundLowPass(**BG_LOWPASS_TEST_ARGS)
+    aux = {"seg_aux": SegAuxDice(), "seg_aux_weight": 0.5, "seg_aux_t0": 1.0} if seg_aux else {}
+    seed_everything(0)
+    module = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        target_bg_lowpass=op,
+        **aux,
+    )
+    batch = _bg_lowpass_batch((2, 1, 8, 32, 32))
+    smoothed = op(batch["target"], batch["fg_mask"])
+    assert not torch.allclose(smoothed, batch["target"])
+    torch.manual_seed(5)
+    loss = module.training_step(batch, 99)
+    torch.manual_seed(5)
+    if seg_aux:
+        base, comps = module.model(batch["source"], smoothed, batch["fg_mask"])
+        expected = base + 0.5 * comps["dice"]
+    else:
+        expected = module.model(batch["source"], smoothed)
+    assert torch.equal(loss, expected)
+    # The batch is not modified in place: validation and logging see the raw target.
+    assert not torch.equal(batch["target"], smoothed)
+
+
+def test_flow_matching_bg_lowpass_off_is_bit_identical_with_fg_mask_in_the_batch():
+    """target_bg_lowpass=None leaves a batch that carries fg_mask on the baseline loss, unmasked."""
+    seed_everything(0)
+    module = DynacellFlowMatching(net_config=CELLDIFF_TEST_NET_CONFIG, transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG)
+    assert module.target_bg_lowpass is None
+    batch = _bg_lowpass_batch((2, 1, 8, 32, 32))
+    torch.manual_seed(5)
+    loss = module.training_step(batch, 99)
+    torch.manual_seed(5)
+    assert torch.equal(loss, module.model(batch["source"], batch["target"]))
+
+
+def test_flow_matching_bg_lowpass_validate_stays_raw(tiny_hcs_zarr):
+    """``loss/validate`` scores the raw target: same weights and seed give the baseline's value."""
+    generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"])
+    kwargs = {
+        "net_config": CELLDIFF_TEST_NET_CONFIG,
+        "transport_config": CELLDIFF_TEST_TRANSPORT_CONFIG,
+        "compute_validation_loss": True,
+    }
+    seed_everything(0)
+    baseline = DynacellFlowMatching(**kwargs)
+    arm = DynacellFlowMatching(**kwargs, target_bg_lowpass=BackgroundLowPass(**BG_LOWPASS_TEST_ARGS))
+    arm.load_state_dict(baseline.state_dict())
+    seed_everything(7)
+    base_metrics = _cpu_trainer().validate(baseline, datamodule=_masked_datamodule(tiny_hcs_zarr, 8))[0]
+    seed_everything(7)
+    arm_metrics = _cpu_trainer().validate(arm, datamodule=_masked_datamodule(tiny_hcs_zarr, 8))[0]
+    assert arm_metrics["loss/validate"] == base_metrics["loss/validate"]
+
+
+def test_flow_matching_bg_lowpass_requires_fg_mask():
+    module = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        target_bg_lowpass=BackgroundLowPass(**BG_LOWPASS_TEST_ARGS),
+    )
+    batch = _bg_lowpass_batch((2, 1, 8, 32, 32))
+    del batch["fg_mask"]
+    with pytest.raises(KeyError, match="target_bg_lowpass"):
+        module.training_step(batch, 0)
 
 
 # ---- Predict integration tests (CPU) ----

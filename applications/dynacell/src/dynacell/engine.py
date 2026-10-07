@@ -38,7 +38,7 @@ from viscy_models.gan import (
 )
 from viscy_models.unet.fcmae import FullyConvolutionalMAE
 from viscy_utils.log_images import detach_sample, log_image_grid
-from viscy_utils.losses import SegAuxDice
+from viscy_utils.losses import BackgroundLowPass, SegAuxDice
 from viscy_utils.optimizers import configure_adamw_scheduler
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -125,8 +125,9 @@ def _require_fg_mask(batch: Sample) -> Tensor:
     """Return the batch's ``fg_mask`` or raise naming the missing config."""
     if "fg_mask" not in batch:
         raise KeyError(
-            "seg_aux or mask_mode is set but the batch has no 'fg_mask'. Set fg_mask_key on the "
-            "datamodule (the store needs a generate_fg_masks array) or drop seg_aux / mask_mode."
+            "seg_aux, mask_mode or target_bg_lowpass is set but the batch has no 'fg_mask'. Set fg_mask_key "
+            "on the datamodule (the store needs a generate_fg_masks array) or drop seg_aux / mask_mode / "
+            "target_bg_lowpass."
         )
     return batch["fg_mask"]
 
@@ -1038,6 +1039,19 @@ class DynacellFlowMatching(LightningModule):
     cond_mask_source : CondMaskSource or None
         C-cond predict-time mask source; required to predict with
         ``mask_mode="cond"``.
+    target_bg_lowpass : BackgroundLowPass or None
+        Training-only target transform (Spotlight v2 Track H): the training
+        step replaces ``target`` by ``target_bg_lowpass(target, fg_mask)``,
+        which keeps the target inside the dilated, feathered foreground and
+        replaces the background by a smooth (or flat) estimate from background
+        pixels only, so the flow is not asked to generate background noise or
+        illumination that phase cannot predict. The background stays
+        supervised, toward that estimate. It runs after normalization and
+        the GPU augmentations; every training-loss term (``seg_aux``, C-joint,
+        C-cond) and the logged training samples see the transformed target.
+        Validation, its logged samples and prediction see the raw target, so
+        ``loss/validate`` keeps the baseline's criterion. Every training batch
+        must carry ``fg_mask``.
     """
 
     def __init__(
@@ -1067,6 +1081,7 @@ class DynacellFlowMatching(LightningModule):
         mask_dice_weight: float = 0.0,
         mask_corruption: MaskCorruption | None = None,
         cond_mask_source: CondMaskSource | None = None,
+        target_bg_lowpass: BackgroundLowPass | None = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(
@@ -1082,6 +1097,7 @@ class DynacellFlowMatching(LightningModule):
                 "seg_aux",
                 "mask_corruption",
                 "cond_mask_source",
+                "target_bg_lowpass",
             ]
         )
         if seg_aux is None and seg_aux_weight != 0.0:
@@ -1104,6 +1120,7 @@ class DynacellFlowMatching(LightningModule):
         self.mask_dice_weight = mask_dice_weight
         self.mask_corruption = mask_corruption
         self.cond_mask_source = cond_mask_source
+        self.target_bg_lowpass = target_bg_lowpass
         self.lr = lr
         self.schedule = schedule
         self.warmup_steps = warmup_steps
@@ -1142,6 +1159,9 @@ class DynacellFlowMatching(LightningModule):
             Scalar flow-matching loss.
         """
         phase: Tensor = batch["source"]
+        if self.target_bg_lowpass is not None:
+            with torch.no_grad():
+                batch = {**batch, "target": self.target_bg_lowpass(batch["target"], _require_fg_mask(batch))}
         target: Tensor = batch["target"]
         loss, _, components = self._flow_losses(batch, corrupt=True)
         self.log(
