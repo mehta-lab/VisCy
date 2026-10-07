@@ -315,6 +315,10 @@ PAPER_KEY: dict[str, str] = {
     # latest-epoch=76-step=200000 instead of its best-val epoch=30, closer to the baselines'
     # epoch 62 / 65.
     "fnet3d_vscyto3daug_segaux_e76": "fnet3d_vscyto3daug_segaux_e76",
+    # Track H background-target arms (CELL-Diff-2D nucleus): `_bglp` = background low-pass
+    # sigma 2 (r2/f1), `_bgflat` = flat per-patch background mean (r4/f2).
+    "celldiff_2d_bglp": "celldiff_2d_bglp",
+    "celldiff_2d_bgflat": "celldiff_2d_bgflat",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
