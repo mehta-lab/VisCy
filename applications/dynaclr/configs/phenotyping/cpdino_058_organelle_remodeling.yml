@@ -1,0 +1,267 @@
+# CP-DINO 0.58 um recipe of the April 2026_04_10_A549_TOMM20_ZIKV 03_full_pilot,
+# for the organelle_remodeling rollout. Launch per-FOV arrays with
+# tools/submit_phenotyping_arrays.py; inputs resolve from the collection.
+segmentation:
+  checkpoint: cpdino
+  expected_backbone: dino_vitl
+  target_pixel_size_um: 0.58
+  flow_threshold: 0.4
+  cellprob_threshold: 0.0
+  min_size: 15
+  batch_size: 8
+  normalize_percentiles: [1.0, 99.0]
+selection:
+  fovs: []
+  times: []
+  annotation_enriched: false
+track_label_mode: auto
+track_id_stride: 1000000
+phase_alignment_rtol: 0.0
+phase_alignment_atol: 0.0
+annotations: []
+candidate_thresholds: {}
+max_overlays: 0
+datasets:
+  2026_04_14_A549_SEC61B_DENV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+  2026_04_28_A549_SEC61B_DENV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+  2026_03_24_A549_SEC61_ZIKV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL17
+          role: viral
+  2026_04_08_A549_G3BP1_ZIKV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: G3BP1
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL17
+          role: viral
+  2026_04_21_A549_G3BP1_DENV:
+    source: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_21_A549_G3BP1_DENV/4-assemble/2026_04_21_G3BP1_DENV.zarr
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: G3BP1
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+  2026_04_30_A549_TOMM20_DENV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: TOMM20
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+  2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+          wells: [A/2, B/2]
+        - name: raw GFP EX488 EM525-45
+          marker: TOMM20
+          role: organelle
+          wells: [A/3, B/3]
+        - name: raw GFP EX488 EM525-45
+          marker: G3BP1
+          role: organelle
+          wells: [A/4, B/4]
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL17
+          role: viral
+          wells: [A/2, A/3, A/4, B/2, B/3, B/4]
+  2026_03_26_A549_CAAX_H2B_DENV_ZIKV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw mCherry EX561 EM600-37
+          marker: CAAX
+          role: organelle
+        - name: raw Cy5 EX639 EM698-70
+          marker: H2B
+          role: organelle
+  2026_08_11_A549_SEC61B_DENV:
+    source: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_08_11_A549_SEC61B_DENV/4-assemble/2026_08_11_A549_SEC61B_DENV_1.zarr
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+  2026_08_19_A549_PCNA_DENV_ZIKV:
+    source: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_08_19_A549_PCNA_DENV_ZIKV/4-assemble/2026_08_19_A549_PCNA_DENV_ZIKV_1.zarr
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: PCNA
+          role: organelle
+          wells: [B/2, B/3, B/4]
+  2026_09_22_A549_PCNA_DENV_ZIKV:
+    source: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_09_22_A549_PCNA_DENV_ZIKV/4-assemble/2026_09_22_A549_PCNA_DENV_ZIKV_1.zarr
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: PCNA
+          role: organelle
+          wells: [C/2, C/3, C/4]
+  2026_09_25_A549_PCNA_DENV_ZIKV:
+    source: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_09_25_A549_PCNA_DENV_ZIKV/4-assemble/2026_09_25_A549_PCNA_DENV_ZIKV_1.zarr
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: PCNA
+          role: organelle
+          wells: [C/2, C/3, C/4]
+  2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: G3BP1
+          role: organelle
+          wells: [C/1, C/2]
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL17
+          role: viral
+          wells: [C/1, C/2]
+  2024_11_07_A549_SEC61_DENV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+  2025_01_24_A549_G3BP1_DENV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: G3BP1
+          role: organelle
+          wells: [B/1, B/2, B/3, C/2]
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+          wells: [B/3, C/2]
+  2025_01_28_A549_G3BP1_ZIKV_DENV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: G3BP1
+          role: organelle
+          wells: [B/4, C/4]
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL40
+          role: viral
+          wells: [B/4, C/4]
+  2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+          wells: [A/1, A/2]
+        - name: raw GFP EX488 EM525-45
+          marker: TOMM20
+          role: organelle
+          wells: [B/1, B/2]
+        - name: raw GFP EX488 EM525-45
+          marker: G3BP1
+          role: organelle
+          wells: [C/1, C/2]
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL17
+          role: viral
+          wells: [A/1, A/2, B/1, B/2, C/1, C/2]
+  2025_08_26_A549_SEC61_TOMM20_ZIKV:
+    channels:
+      membrane: membrane_prediction
+      nuclei: nuclei_prediction
+      focus: Phase3D
+      fluorescence:
+        - name: raw GFP EX488 EM525-45
+          marker: SEC61B
+          role: organelle
+          wells: [A/1, B/1]
+        - name: raw mCherry EX561 EM600-37
+          marker: pAL17
+          role: viral
+          wells: [A/1, B/1]

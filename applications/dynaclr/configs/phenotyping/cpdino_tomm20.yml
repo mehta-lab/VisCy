@@ -1,0 +1,44 @@
+dataset: 2026_04_10_A549_TOMM20_ZIKV
+source: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_10_A549_TOMM20_ZIKV/4-assemble/2026_04_10_A549_TOMM20_ZIKV.zarr
+focus_source: /hpc/projects/organelle_phenotyping/datasets/2026_04_10_A549_TOMM20_ZIKV/2026_04_10_A549_TOMM20_ZIKV.zarr
+tracks: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_10_A549_TOMM20_ZIKV/5-track/2026_04_10_A549_TOMM20_ZIKV.zarr
+output: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_10_A549_TOMM20_ZIKV/2-phenotyping/segmentations_membrane/00_cpdino_baseline
+channels:
+  membrane: membrane_prediction
+  nuclei: nuclei_prediction
+  focus: Phase3D
+  fluorescence:
+    - name: raw GFP EX488 EM525-45
+      marker: TOMM20
+      role: organelle
+    - name: raw mCherry EX561 EM600-37
+      marker: pAL17
+      role: viral
+segmentation:
+  checkpoint: cpdino
+  expected_backbone: dino_vitl
+  target_pixel_size_um: null  # faithful native raw-grayscale CP-DINO recipe
+  flow_threshold: 0.4
+  cellprob_threshold: 0.0
+  min_size: 15
+  batch_size: 8
+  normalize_percentiles: [1.0, 99.0]
+# Full-dataset recipe; restrict preview with --fov and --time.
+selection:
+  fovs: []
+  times: []
+  annotation_enriched: false
+track_label_mode: auto
+track_id_stride: 1000000
+phase_alignment_rtol: 0.0
+phase_alignment_atol: 0.0
+annotations:
+  - path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_10_A549_TOMM20_ZIKV/2-phenotyping/analysis/cell_cycle_vs_infection/viewer_anndata/2026_04_10_A549_TOMM20_ZIKV.zarr
+    dataset: 2026_04_10_A549_TOMM20_ZIKV
+    confidence: confident
+  - path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_10_A549_TOMM20_ZIKV/2-phenotyping/analysis/cell_cycle_vs_infection/viewer_anndata/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV.zarr
+    dataset: 2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV
+    confidence: uncertain
+# Diagnostic only; no eligibility threshold is active.
+candidate_thresholds: {}
+max_overlays: 24
