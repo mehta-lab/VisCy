@@ -668,6 +668,7 @@ def _process_one_fov(
         read_focus_compute_config,
         read_focus_slab_config,
         resolve_focus_instance_planes,
+        segment_focus_slabs,
         slab_mip,
     )
     from dynacell.evaluation.instance_metrics import instance_average_precision
@@ -733,6 +734,7 @@ def _process_one_fov(
     # Segmentation settings are read off ``cache_ctx``, which ``init_cache_context``
     # already resolved from this same config — no second OmegaConf.select pass.
     instance_mode = bool(getattr(config, "compute_instance_ap", False))
+    semantic_focus = _semantic_focus_settings(config)
     backend = cache_ctx.backend
     gt_cells = pred_cells = None
     gt_mask_stack = pred_mask_stack = None
@@ -845,6 +847,30 @@ def _process_one_fov(
                 gt_cells = fov_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
             with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 pred_cells = fov_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
+    elif semantic_focus is not None:
+        # Focus-plane semantic masks (2D benchmark): segment the slab around the GT focus
+        # plane, keep its focus plane. Not cached -- a 3-plane slab costs milliseconds on
+        # GPU, and the whole-volume mask cache must not hold 2D masks.
+        nucleus_vol = _gt_nuclei() if semantic_focus["focus_anchor"] == "nucleus_area" else None
+        focus_z = resolve_focus_instance_planes(
+            config, t_count=T, pos_gt=pos_gt, pos_name=pos_name_pred, nucleus_vol=nucleus_vol
+        )
+
+        def _segment(vol: np.ndarray) -> np.ndarray:
+            return segment(
+                vol,
+                config.target_name,
+                seg_model=seg_model,
+                backend=backend,
+                spacing_zyx=tuple(cache_ctx.spacing),
+                use_gpu=use_gpu,
+            )
+
+        # (T, 1, Y, X): the 2D instance-label shape, so segmentation_results.zarr stays 5D.
+        with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            gt_mask_stack = segment_focus_slabs(target, focus_z, semantic_focus["halfwidth"], _segment)[:, None]
+        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            pred_mask_stack = segment_focus_slabs(predict, focus_z, semantic_focus["halfwidth"], _segment)[:, None]
     else:
         with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
@@ -1263,6 +1289,55 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
         if float(value) < 0:
             raise ValueError(f"pixel_metrics.foreground.{key} must be >= 0; got {value!r}")
         settings[key] = float(value)
+    return settings
+
+
+def _semantic_focus_settings(config: DictConfig) -> dict[str, Any] | None:
+    """Resolve ``segmentation.semantic_focus_halfwidth`` into the focus-plane mask recipe, or ``None`` when off.
+
+    Off (null, the default) scores the semantic masks (ER, mitochondria, ...) over the
+    whole volume. An integer ``h`` segments the ``2*h + 1`` planes centered on each
+    timepoint's focus plane as one small volume and scores only the focus plane of the
+    mask (``h=1`` is the 2D benchmark's slab3). The plane is chosen by
+    ``segmentation.focus_anchor``, the same resolver the 2D instance planes use. The
+    dict is also the ``semantic_focus`` provenance stamp, so it records every setting
+    that moves the plane.
+
+    Raises
+    ------
+    ValueError
+        If the halfwidth is negative, ``compute_instance_ap`` is on (instance targets
+        choose their plane with ``segmentation.slice_selection``), the anchor is
+        unknown, or ``nucleus_area`` has no ``segmentation.nuclei_channel_name``.
+    """
+    from dynacell.evaluation.focus import read_focus_compute_config
+
+    halfwidth = OmegaConf.select(config, "segmentation.semantic_focus_halfwidth", default=None)
+    if halfwidth is None:
+        return None
+    if bool(OmegaConf.select(config, "compute_instance_ap", default=False)):
+        raise ValueError(
+            "segmentation.semantic_focus_halfwidth applies to semantic masks; instance targets "
+            "choose their plane with segmentation.slice_selection"
+        )
+    if int(halfwidth) < 0:
+        raise ValueError(f"segmentation.semantic_focus_halfwidth must be >= 0; got {halfwidth!r}")
+    anchor = str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area"))
+    settings: dict[str, Any] = {"halfwidth": int(halfwidth), "focus_anchor": anchor}
+    if anchor == "nucleus_area":
+        nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+        if nuclei_channel is None:
+            raise ValueError(
+                "segmentation.focus_anchor='nucleus_area' needs segmentation.nuclei_channel_name "
+                "(the GT nuclei channel) for semantic_focus_halfwidth; use 'phase_midband' for stores without one"
+            )
+        settings["nuclei_channel_name"] = str(nuclei_channel)
+    elif anchor == "phase_midband":
+        channel = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
+        settings["focus_channel_name"] = channel
+        settings.update(read_focus_compute_config(config, channel_name=channel).estimator_params)
+    else:
+        raise ValueError(f"segmentation.focus_anchor must be 'nucleus_area' or 'phase_midband', got {anchor!r}")
     return settings
 
 
@@ -2048,6 +2123,7 @@ def save_metrics(
         prediction_digest=prediction_digest,
         pixel_foreground=_foreground_stamp(config),
         compute_fid=config.compute_feature_metrics and _feature_metric_flags(config)["compute_fid"],
+        semantic_focus=_semantic_focus_settings(config),
     )
 
 
@@ -2076,6 +2152,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # Resolved before every early return: both entrypoints call this gate before any
     # model load, so an invalid recipe fails here rather than after the load.
     foreground = _foreground_stamp(config)
+    semantic_focus = _semantic_focus_settings(config)
     if _forces_final_metrics(config):
         return False
     save_dir = Path(config.save.save_dir)
@@ -2108,6 +2185,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         prediction_sources=sources,
         pixel_foreground=foreground,
         compute_fid=config.compute_feature_metrics and _feature_metric_flags(config)["compute_fid"],
+        semantic_focus=semantic_focus,
     ):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()

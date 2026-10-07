@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -200,6 +201,24 @@ def slab_mip(vol_tzyx: np.ndarray, z_idx: list[int], halfwidth: int) -> np.ndarr
     return np.stack(
         [vol_tzyx[t, focus_slab_from_plane(z_idx[t], z_total, halfwidth)].max(axis=0) for t in range(len(z_idx))]
     )
+
+
+def segment_focus_slabs(
+    vol_tzyx: np.ndarray, z_idx: list[int], halfwidth: int, segment_fn: Callable[[np.ndarray], np.ndarray]
+) -> np.ndarray:
+    """Segment the in-focus slab of each timepoint and keep its focus plane.
+
+    The semantic counterpart of :func:`slab_mip`: ``segment_fn`` sees the
+    ``2*halfwidth + 1`` planes around ``z_idx[t]`` as a small volume (clipped at the
+    stack caps), so a 3D segmenter keeps its z context, and only the focus plane of
+    its mask is returned. Returns a ``(T, Y, X)`` bool stack.
+    """
+    z_total = vol_tzyx.shape[1]
+    planes = []
+    for t, z in enumerate(z_idx):
+        slab = focus_slab_from_plane(z, z_total, halfwidth)
+        planes.append(np.asarray(segment_fn(vol_tzyx[t, slab]))[z - slab.start].astype(bool))
+    return np.stack(planes)
 
 
 def nucleus_area_plane(

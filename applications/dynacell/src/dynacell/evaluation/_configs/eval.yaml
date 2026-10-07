@@ -49,6 +49,13 @@ segmentation:
   focus_slab_halfwidth: 1
   focus_channel_name: Phase3D
   nuclei_channel_name: null  # GT nucleus channel; required for membrane with cpdino (nucleus carve) or cellpose_watershed (seeds)
+  # Semantic targets (ER, mitochondria, ...): null scores the masks over the whole volume
+  # (3D benchmark). An integer h segments the 2h+1 planes centered on the focus plane as
+  # one small volume and scores only the focus plane of the mask; h=1 is the 2D
+  # benchmark's slab3. The plane follows focus_anchor above (nucleus_area also needs
+  # nuclei_channel_name; use phase_midband for GT stores without nuclei, e.g. A549
+  # SEC61B/TOMM20). Not cached, and stamped in metrics_provenance.json.
+  semantic_focus_halfwidth: null
   # Cellpose-DINO (cpdino) params — the recommended instance backend for both nucleus
   # (direct) and whole-cell (membrane + nucleus carve). Faithful to the cpv4 validation:
   # the raw in-focus slice is passed to cellpose with normalize=true (its own percentile
