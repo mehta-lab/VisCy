@@ -471,7 +471,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
     gr.Markdown("### 3.&nbsp; Generative model: CELL-Diff")
     with gr.Row():
         with gr.Column(scale=1):
-            gen_steps = gr.Slider(10, 100, step=10, value=50, label="ODE steps")
+            gen_steps = gr.Slider(8, 24, step=1, value=8, label="ODE time points")
             gen_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
             gen_z = gr.Slider(12, 19, step=1, value=16, label="Z slice")
             gr.Markdown("_CELL-Diff inference requires 8 input slices._")
