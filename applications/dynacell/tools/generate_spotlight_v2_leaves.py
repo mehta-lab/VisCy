@@ -306,7 +306,9 @@ ARMS: tuple[Arm, ...] = (
     # rests on the families that already work there; their nucleus arms get a second draw.
     Arm("fcmae_vscyto3d_scratch", "segaux_seed1", ORGANELLES, a549=True),
     # pix2pix3d nucleus segaux on A549: Dice 0.863 -> 0.890, mAP 0.385 -> 0.483, PCC 0.708 -> 0.678.
-    Arm("pix2pix3d_unetvit", "segaux_seed1", ("nucleus",), a549=True),
+    # Membrane added 2026-10-07: its single draw is one of the few seg gains on both iPSC and
+    # A549 (final table, interior-only FG), so it gets the replicate the nucleus gate withheld.
+    Arm("pix2pix3d_unetvit", "segaux_seed1", ORGANELLES, a549=True),
     # Loss-weight sweep on the one cell whose effect held against both baseline draws
     # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
     Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
@@ -322,6 +324,8 @@ ARMS: tuple[Arm, ...] = (
     # baseline draws need no mask, so they train first; the arms are calibrated on their ckpt.
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("v2", "v2_seed1")),
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("segaux", *TOPOLOGY_ARGS)),
+    # Second segaux draw on the thin organelles (2026-10-07): their iPSC Dice gain rests on one run.
+    Arm("fnet3d_vscyto3daug", "segaux_seed1", THIN_ORGANELLES, a549=True),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
 SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
