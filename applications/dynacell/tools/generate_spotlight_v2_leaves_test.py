@@ -293,7 +293,7 @@ def test_bg_target_arms_compose_and_instantiate_with_only_the_target_op_added(su
     # sys.modules, so a DynacellFlowMatching bound at import can differ from the one jsonargparse imports.
     parser = ArgumentParser()
     parser.add_subclass_arguments(LightningModule, "model")
-    module = parser.instantiate_classes(parser.parse_object({"model": arm["model"]})).model
+    module = parser.instantiate(parser.parse_object({"model": arm["model"]})).model
     assert f"{type(module).__module__}.{type(module).__qualname__}" == "dynacell.engine.DynacellFlowMatching"
     op = module.target_bg_lowpass
     assert isinstance(op, BackgroundLowPass)
