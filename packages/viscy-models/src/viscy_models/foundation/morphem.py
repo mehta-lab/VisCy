@@ -44,8 +44,8 @@ class MorphEmModel(nn.Module):
         import transformers
         from transformers import AutoModel
 
-        # transformers 5.x compatibility shim. MorphEm's
-        # trust_remote_code VisionTransformer (authored against transformers 4.x)
+        # transformers 5.x compatibility shim. MorphEm's trust_remote_code
+        # VisionTransformer (authored against transformers 4.x)
         # never sets `all_tied_weights_keys`, which 5.x's meta-device loader
         # (_move_missing_keys_from_meta_to_device) requires -> AttributeError on load.
         # Provide a no-tie class-level default; models whose tie_weights() runs set
