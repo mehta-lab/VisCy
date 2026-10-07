@@ -72,6 +72,12 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # FNet-3D vscyto3daug mito SAUNA-map-weighted Dice arm (fit 36933658, max_steps 200000,
+  # --ckpt best epoch=66-step=174200), 2026-10-07: all four legs. Stage-matched to the wave2s +
+  # wave2v mito baselines (epoch 62 / 65). Generate with --wave wave2z.
+  wave2z:
+    mito:
+      - fnet3d_vscyto3daug_segaux_sauna
   # Track H background-target CELL-Diff-2D nucleus arms (2026-10-06), predicted from last.ckpt
   # like the CELL-Diff-2D baselines: bglp = background low-pass sigma 2 (r2/f1), bgflat = flat
   # per-patch background mean (r4/f2). The finished legs only; bglp A549 mock/denv/zikv and
