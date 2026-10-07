@@ -72,6 +72,25 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Checkpoint-stage control for the FNet-3D vscyto3daug mito segaux_cldice arm (2026-10-07):
+  # re-predicted from the retained epoch=68-step=179400 (its --ckpt best is epoch=38-step=101400;
+  # the baselines used epoch 62 / 65). Stores and leaves are outside the generated tree
+  # (experiments/2026-09-24_spotlight-v2/e68_mito_cldice_control/). Read against wave2s + wave2v.
+  # Generate with --wave ctrl4.
+  ctrl4:
+    mito:
+      - model: fnet3d_vscyto3daug_segaux_cldice_e68
+        pred_paths:
+          ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_cldice_e68/ipsc/ipsc/prediction.zarr
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_cldice_e68/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_cldice_e68/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_cldice_e68/ipsc/a549__zikv/prediction.zarr
+  # FNet-3D vscyto3daug mito soft-clDice arm (fit 36933666, max_steps 200000, --ckpt best
+  # epoch=38-step=101400), 2026-10-07: all four legs. Read against the wave2s + wave2v mito
+  # baselines; stage control in ctrl4. Generate with --wave wave3a.
+  wave3a:
+    mito:
+      - fnet3d_vscyto3daug_segaux_cldice
   # FNet-3D vscyto3daug mito SAUNA-map-weighted Dice arm (fit 36933658, max_steps 200000,
   # --ckpt best epoch=66-step=174200), 2026-10-07: all four legs. Stage-matched to the wave2s +
   # wave2v mito baselines (epoch 62 / 65). Generate with --wave wave2z.

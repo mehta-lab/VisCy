@@ -319,6 +319,10 @@ PAPER_KEY: dict[str, str] = {
     # sigma 2 (r2/f1), `_bgflat` = flat per-patch background mean (r4/f2).
     "celldiff_2d_bglp": "celldiff_2d_bglp",
     "celldiff_2d_bgflat": "celldiff_2d_bgflat",
+    # Checkpoint-stage control: the mito vscyto3daug segaux_cldice arm re-predicted from its
+    # retained epoch=68-step=179400 instead of its best-val epoch=38, closer to the baselines'
+    # epoch 62 / 65.
+    "fnet3d_vscyto3daug_segaux_cldice_e68": "fnet3d_vscyto3daug_segaux_cldice_e68",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
