@@ -142,6 +142,8 @@ _CELLDIFF_ARM_MODELS: tuple[str, ...] = (
     "celldiff_2d_cjoint",
     "celldiff_2d_ccond",
     "celldiff_2d_seed1",
+    "celldiff_2d_bglp",
+    "celldiff_2d_bgflat",
     "celldiff_segaux",
     "celldiff_cjoint",
     "celldiff_ccond",
