@@ -16,7 +16,8 @@
 # after the minimum, so `last.ckpt` is the wrong pin here as on the phase arm.
 # Not directly comparable to the phase baseline's 0.776 (epoch 28): that
 # run's checkpoint writes halted hours before it ended, so its retained best is a
-# floor, not its true minimum.#
+# floor, not its true minimum.
+#
 # A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side
 # `nucleus` target_id from targets/nucleus.yml so the resolver finds it.
 

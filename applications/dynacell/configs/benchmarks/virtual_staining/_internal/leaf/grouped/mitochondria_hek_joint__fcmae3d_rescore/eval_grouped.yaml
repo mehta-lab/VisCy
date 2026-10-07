@@ -32,4 +32,3 @@ conditions:
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy
-# No-model floor, last — see the membrane sibling.
