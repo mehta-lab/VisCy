@@ -72,6 +72,11 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Track H bglp A549 legs (predicts 37004614/20/22 COMPLETED 2026-10-07), the last Track H
+  # stores. Generate with --wave wave3d.
+  wave3d:
+    nucleus:
+      - {model: celldiff_2d_bglp, leaves: [a549__mock, a549__denv, a549__zikv]}
   # Track H bgflat A549 denv leg (predict 37004626 COMPLETED 2026-10-07 13:01), the last bgflat
   # leg after wave2y. bglp A549 mock/denv/zikv are still predicting. Generate with --wave wave3c.
   wave3c:
