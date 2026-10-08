@@ -11,6 +11,7 @@ Invoked as ``dynacell precompute-gt ...`` via the CLI router in
 
 from __future__ import annotations
 
+import json
 from contextlib import ExitStack
 from pathlib import Path
 from typing import get_args
@@ -25,8 +26,13 @@ from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.cache import FeatureKind
 from dynacell.evaluation.focus import (
     build_focus_slabs,
+    focus_plane_stack,
+    focus_slab_from_plane,
+    gt_nucleus_volume,
+    read_focus2d_config,
     read_focus_compute_config,
     read_focus_slab_config,
+    resolve_focus2d_planes,
     resolve_focus_instance_planes,
     slab_mip,
     write_focus_slice_metadata,
@@ -160,6 +166,12 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     apply_thread_budget(runtime.threads_per_worker)
 
     build = config.build
+    focus2d = read_focus2d_config(config)
+    focus_planes_out = OmegaConf.select(config, "build.focus_planes", default=None)
+    if focus_planes_out is not None and focus2d is None:
+        raise ValueError("build.focus_planes writes the 2D benchmark's predict planes; set focus2d.halfwidth")
+    if focus2d is not None and build.masks:
+        raise ValueError("focus2d scores semantic masks on the focus slab and never caches them; set build.masks=false")
     if build.masks:
         require_cubic_workflows(config.target_name)
     build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino or build.morphem)
@@ -231,7 +243,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
         # A separate store (A549 H2B_*.ozx) is opened here; when io.nuclei_gt_path is null
         # or equals io.gt_path (iPSC cell.zarr), _build_gt_instances reads it from pos_gt.
         nuclei_plate = None
-        if build_instances and config.target_name == "membrane":
+        if (build_instances and config.target_name == "membrane") or focus2d is not None:
             nuclei_gt_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
             if nuclei_gt_path is not None and str(nuclei_gt_path) != str(gt_path):
                 nuclei_plate = aux_stack.enter_context(open_ome_zarr(nuclei_gt_path, mode="r"))
@@ -252,6 +264,8 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
         # hand-written branches.
         deep_extractors = {k: getattr(models, k) for k in _DEEP_KINDS if build[k]}
 
+        plane_lists: dict[str, list[list[int]]] = {}
+
         flush_threshold = int(OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256))
         batcher = (
             DeepFeatureBatcher(cache_ctx, deep_extractors, flush_threshold=flush_threshold)
@@ -270,14 +284,37 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
             gt_channel_index = pos_gt.get_channel_index(config.io.gt_channel_name)
             target = np.asarray(pos_gt.data[:, gt_channel_index])
             cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
-            z_slabs = _focus_slabs(config, pos_gt, pos_name_gt, target.shape[0])
+            # focus2d: the eval's own plane and slab (resolve_focus2d_planes), so the cache
+            # and the predict plane file hold exactly what the 2D eval reads.
+            focus_z = None
+            if focus2d is not None:
+                pos_nuclei = nuclei_plate[pos_name_gt] if nuclei_plate is not None else None
+                focus_z = resolve_focus2d_planes(
+                    config,
+                    t_count=target.shape[0],
+                    pos_gt=pos_gt,
+                    pos_name=pos_name_gt,
+                    nucleus_vol=lambda: gt_nucleus_volume(config, pos_gt=pos_gt, pos_nuclei=pos_nuclei, target=target),
+                )
+                z_slabs = [focus_slab_from_plane(z, target.shape[1], focus2d["halfwidth"]) for z in focus_z]
+                plane_lists[pos_name_gt] = [list(range(slab.start, slab.stop)) for slab in z_slabs]
+            else:
+                z_slabs = _focus_slabs(config, pos_gt, pos_name_gt, target.shape[0])
 
             if build.masks:
                 fov_masks(cache_ctx, pos_name_gt, target, seg_model)
             if build_instances:
                 _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name_gt, target, nuclei_plate)
             if build.cp:
-                fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
+                if focus_z is None:
+                    fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
+                else:
+                    fov_cp_features(
+                        cache_ctx,
+                        pos_name_gt,
+                        focus_plane_stack(target, focus_z),
+                        focus_plane_stack(cell_segmentation, focus_z),
+                    )
 
             # Deep features stream in-loop via the batcher — no second
             # plate read. The batcher's pending_kinds_per_t reflects
@@ -297,6 +334,17 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
         if batcher is not None:
             batcher.drain()
             flush_manifest(cache_ctx)
+
+    if focus_planes_out is not None:
+        # The predict plane file (viscy_data read_z_planes): the focus2d slab per position
+        # and timepoint, for HCSDataModule.predict_z_planes of a 2D model on this store.
+        out = Path(focus_planes_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"gt_path": str(gt_path), "focus2d": focus2d, "positions": plane_lists}
+        tmp = out.with_suffix(out.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=1) + "\n")
+        tmp.replace(out)
+        print(f"Wrote focus2d predict planes for {len(plane_lists)} positions to {out}")
 
 
 @hydra.main(version_base="1.2", config_path="_configs", config_name="precompute")

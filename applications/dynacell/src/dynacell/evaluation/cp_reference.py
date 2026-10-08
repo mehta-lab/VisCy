@@ -1059,7 +1059,9 @@ def resolve_cp_reference_path(config: DictConfig) -> Path:
         return Path(override).resolve()
     if config.target_name not in MASK_FIT_DATASETS:
         raise ValueError(f"no CP reference for target {config.target_name!r}; expected {sorted(MASK_FIT_DATASETS)}")
-    return cp_reference_path(config.target_name)
+    return cp_reference_path(
+        config.target_name, focus2d_halfwidth=OmegaConf.select(config, "focus2d.halfwidth", default=None)
+    )
 
 
 def eval_cp_space(config: DictConfig) -> DatasetCPSpace:

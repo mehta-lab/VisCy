@@ -24,6 +24,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from cubic.skimage import filters as _cubic_filters
@@ -219,6 +220,110 @@ def segment_focus_slabs(
         slab = focus_slab_from_plane(z, z_total, halfwidth)
         planes.append(np.asarray(segment_fn(vol_tzyx[t, slab]))[z - slab.start].astype(bool))
     return np.stack(planes)
+
+
+def focus_plane_stack(vol_tzyx: np.ndarray, z_idx: list[int]) -> np.ndarray:
+    """Return each timepoint's focus plane as a ``(T, 1, Y, X)`` stack (one-plane volumes)."""
+    return np.stack([vol_tzyx[t, z : z + 1] for t, z in enumerate(z_idx)])
+
+
+def read_focus2d_config(config: DictConfig) -> dict[str, Any] | None:
+    """Resolve ``focus2d.halfwidth`` into the 2D-benchmark recipe, or ``None`` for the 3D benchmark.
+
+    Off (null, the default) scores every metric over the full volume. An integer ``h``
+    scores the in-focus plane of each timepoint instead: pixel metrics, MicroMS3IM and
+    CP features on the plane itself; deep features and per-cell similarity on the
+    ``2*h + 1`` slab around it; semantic masks by segmenting that slab and keeping its
+    plane; instance masks on the slab MIP (``segmentation.slice_selection=focus``). The
+    plane is chosen by ``segmentation.focus_anchor``, from the GT only, and a
+    plane-restricted prediction store (``HCSDataModule.predict_z_planes``) has to hold
+    that slab. The dict is also the ``focus2d`` provenance stamp and cache identity, so
+    it records every setting that moves the plane.
+
+    Raises
+    ------
+    ValueError
+        If the halfwidth is negative, the anchor is unknown, ``nucleus_area`` has no
+        nucleus source (the nucleus target itself, else
+        ``segmentation.nuclei_channel_name``), or an instance target is not configured
+        for the same 2D slab (``dimension=2d``, ``slice_selection=focus``,
+        ``focus_slab_halfwidth`` equal to ``h``).
+    """
+    halfwidth = OmegaConf.select(config, "focus2d.halfwidth", default=None)
+    if halfwidth is None:
+        return None
+    halfwidth = int(halfwidth)
+    if halfwidth < 0:
+        raise ValueError(f"focus2d.halfwidth must be >= 0; got {halfwidth!r}")
+    if bool(OmegaConf.select(config, "compute_instance_ap", default=False)):
+        geometry = {
+            "segmentation.dimension": OmegaConf.select(config, "segmentation.dimension", default="2d"),
+            "segmentation.slice_selection": OmegaConf.select(config, "segmentation.slice_selection", default="frac"),
+            "segmentation.focus_slab_halfwidth": int(
+                OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)
+            ),
+        }
+        if geometry != {
+            "segmentation.dimension": "2d",
+            "segmentation.slice_selection": "focus",
+            "segmentation.focus_slab_halfwidth": halfwidth,
+        }:
+            raise ValueError(
+                f"focus2d.halfwidth={halfwidth} scores instance targets on the same slab: set "
+                f"segmentation.dimension=2d, slice_selection=focus, focus_slab_halfwidth={halfwidth}; got {geometry}"
+            )
+    anchor = str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area"))
+    settings: dict[str, Any] = {"halfwidth": halfwidth, "focus_anchor": anchor}
+    if anchor == "nucleus_area":
+        if config.target_name != "nucleus":
+            nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+            if nuclei_channel is None:
+                raise ValueError(
+                    "segmentation.focus_anchor='nucleus_area' needs segmentation.nuclei_channel_name (the GT "
+                    "nuclei channel) for focus2d; use 'phase_midband' for stores without one"
+                )
+            settings["nuclei_channel_name"] = str(nuclei_channel)
+    elif anchor == "phase_midband":
+        channel = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
+        settings["focus_channel_name"] = channel
+        settings.update(read_focus_compute_config(config, channel_name=channel).estimator_params)
+    else:
+        raise ValueError(f"segmentation.focus_anchor must be 'nucleus_area' or 'phase_midband', got {anchor!r}")
+    return settings
+
+
+def resolve_focus2d_planes(
+    config: DictConfig, *, t_count: int, pos_gt, pos_name: str, nucleus_vol: Callable[[], np.ndarray]
+) -> list[int]:
+    """Per-timepoint focus plane of the 2D benchmark (``focus2d``), from the GT only.
+
+    ``nucleus_vol`` returns the GT nucleus volume ``(T, Z, Y, X)`` -- the target itself
+    for the nucleus target, else the ``segmentation.nuclei_channel_name`` channel -- and
+    is called only for the ``nucleus_area`` anchor. Shared by the eval, its MicroMS3IM
+    calibration and the predict plane file (``precompute-gt build.focus_planes``), so
+    the planes a 2D model predicts are the planes the eval scores.
+    """
+    anchor = str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area"))
+    return resolve_focus_instance_planes(
+        config,
+        t_count=t_count,
+        pos_gt=pos_gt,
+        pos_name=pos_name,
+        nucleus_vol=nucleus_vol() if anchor == "nucleus_area" else None,
+    )
+
+
+def gt_nucleus_volume(config: DictConfig, *, pos_gt, pos_nuclei, target: np.ndarray) -> np.ndarray:
+    """The GT nucleus volume the ``nucleus_area`` anchor reads: the target, or the nuclei channel.
+
+    ``pos_nuclei`` is the separate GT-nuclei position (``io.nuclei_gt_path``) when the
+    nuclei live in another store, else ``None`` (read from ``pos_gt``).
+    """
+    if config.target_name == "nucleus":
+        return target
+    source = pos_nuclei if pos_nuclei is not None else pos_gt
+    channel = str(OmegaConf.select(config, "segmentation.nuclei_channel_name"))
+    return np.asarray(source.data[:, source.get_channel_index(channel)])
 
 
 def nucleus_area_plane(
