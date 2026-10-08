@@ -1,7 +1,7 @@
 # FNet2D predict: membrane (MEMB) trained on joint_ipsc_confocal_a549_mantis, tested on iPSC confocal.
 # In-focus 2D track (Phase F). The 2D checkpoint predicts over the FULL-Z 3D test
 # store with z_window_size=1 (fnet2d_predict overlay), emitting one window per
-# z-plane -> a full-Z prediction store the existing focus-aware eval consumes
+# z-plane -> a full-extent prediction store the existing focus-aware eval consumes
 # unchanged. Source normalization (Phase3D fov_statistics mean/std) reproduces the
 # fnet2d fit overlay exactly; a mismatch here would silently degrade predictions.
 # Best val-loss checkpoint: epoch=369-step=197210-loss=0.707.ckpt (loss/validate=0.707).
@@ -27,6 +27,11 @@ model:
 
 data:
   init_args:
+    # 2D benchmark (focus2d.halfwidth=1): predict only the 3-plane focus slab of each
+    # FOV/timepoint listed in this plane file (precompute-gt build.focus_planes, resolved
+    # exactly as the focus2d eval resolves it); every other plane of the full-extent store
+    # stays empty. Set null to predict every plane (output_store prediction.zarr).
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/membrane/ipsc__h1.json
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
@@ -40,7 +45,7 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet2d/joint/ipsc/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet2d/joint/ipsc/prediction_focus2d_h1.zarr
 
 launcher:
   job_name: FNet2D_PRED_MEMB_JOINTTR

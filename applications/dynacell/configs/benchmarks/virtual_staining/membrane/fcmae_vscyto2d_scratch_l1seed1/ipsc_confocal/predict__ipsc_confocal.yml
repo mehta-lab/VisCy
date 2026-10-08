@@ -23,6 +23,7 @@ model:
     ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fcmae_vscyto2d_scratch_l1seed1/checkpoints/last.ckpt
 data:
   init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/membrane/ipsc__h1.json
     normalizations:
     - class_path: viscy_transforms.NormalizeSampled
       init_args:
@@ -36,7 +37,7 @@ trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
     init_args:
-      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch_l1seed1/ipsc/ipsc/prediction.zarr
+      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch_l1seed1/ipsc/ipsc/prediction_focus2d_h1.zarr
 launcher:
   job_name: FCMAE2D_Scratch_PRED_MEMB_ON_IPSC_l1seed1
   run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch_l1seed1/ipsc/ipsc

@@ -25,6 +25,7 @@ model:
     ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fnet2d_seed1/checkpoints/last.ckpt
 data:
   init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/nucleus/a549__mock__h1.json
     normalizations:
     - class_path: viscy_transforms.NormalizeSampled
       init_args:
@@ -38,7 +39,7 @@ trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
     init_args:
-      output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_seed1/ipsc/a549__mock/prediction.zarr
+      output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_seed1/ipsc/a549__mock/prediction_focus2d_h1.zarr
 launcher:
   job_name: FNet2D_PRED_NUCL_MOCK_seed1
   run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_seed1/ipsc/a549__mock

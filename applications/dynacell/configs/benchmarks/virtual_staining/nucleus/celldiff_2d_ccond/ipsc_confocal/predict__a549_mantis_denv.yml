@@ -29,11 +29,12 @@ model:
     cond_mask_source:
       class_path: dynacell.mask_conditioning.CondMaskSource
       init_args:
-        data_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_segaux/ipsc/a549__denv/prediction.zarr
+        data_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_segaux/ipsc/a549__denv/prediction_focus2d_h1.zarr
         channel: Nuclei_prediction
         threshold: otsu
 data:
   init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/nucleus/a549__denv__h1.json
     normalizations:
     - class_path: viscy_transforms.MinMaxSampled
       init_args:
@@ -45,7 +46,7 @@ trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
     init_args:
-      output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d_ccond/ipsc/a549__denv/prediction.zarr
+      output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d_ccond/ipsc/a549__denv/prediction_focus2d_h1.zarr
 launcher:
   job_name: CELLDiff2D_PRED_NUCL_ON_A549_DENV_ccond
   run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d_ccond/ipsc/a549__denv

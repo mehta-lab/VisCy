@@ -38,6 +38,11 @@ model:
 
 data:
   init_args:
+    # 2D benchmark (focus2d.halfwidth=1): predict only the 3-plane focus slab of each
+    # FOV/timepoint listed in this plane file (precompute-gt build.focus_planes, resolved
+    # exactly as the focus2d eval resolves it); every other plane of the full-extent store
+    # stays empty. Set null to predict every plane (output_store prediction.zarr).
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/nucleus/a549__mock__h1.json
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
@@ -51,7 +56,7 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__mock/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__mock/prediction_focus2d_h1.zarr
 
 launcher:
   job_name: FCMAE2D_Pretrained_PRED_JOINT_NUCL_ON_A549_MOCK

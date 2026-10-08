@@ -25,6 +25,7 @@ model:
     ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/celldiff_2d_seed1/checkpoints/last.ckpt
 data:
   init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/membrane/a549__denv__h1.json
     normalizations:
     - class_path: viscy_transforms.MinMaxSampled
       init_args:
@@ -36,7 +37,7 @@ trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
     init_args:
-      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_2d_seed1/ipsc/a549__denv/prediction.zarr
+      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_2d_seed1/ipsc/a549__denv/prediction_focus2d_h1.zarr
 launcher:
   job_name: CELLDiff2D_PRED_MEMB_ON_A549_DENV_seed1
   run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_2d_seed1/ipsc/a549__denv
