@@ -34,6 +34,7 @@ import yaml
 from iohub.ngff import open_ome_zarr
 
 from dynacell._compose_hook import _dynacell_ref_resolver
+from viscy_data.sliding_window import read_z_planes
 from viscy_utils.compose import deep_merge, load_composed_config
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
@@ -695,9 +696,7 @@ def submit(argv: list[str] | None = None) -> int:
                 checkpoint_path=model_init["ckpt_path"],
                 settings_sha256_12=writer_init["settings_sha256_12"],
                 z_planes_sha256_12=(
-                    # The plane file's positions (viscy_data.sliding_window.read_z_planes reads
-                    # the same key); read directly so the launcher stays free of torch.
-                    z_planes_sha256_12(json.loads(Path(data_init["predict_z_planes"]).read_text())["positions"])
+                    z_planes_sha256_12(read_z_planes(data_init["predict_z_planes"]))
                     if data_init.get("predict_z_planes")
                     else None
                 ),
