@@ -734,14 +734,14 @@ def _process_one_fov(
         """GT nucleus volume ``(T, Z, Y, X)``, read from zarr at most once per FOV.
 
         Both the ``nucleus_area`` focus anchor and the whole-cell seed/carve paths
-        consume it. Comes from a separate store (``pos_nuclei``) when the GT nuclei
-        live apart from the GT membrane (A549: membrane in ``CAAX_*.ozx``, nuclei in
-        ``H2B_*.ozx``), else from the GT plate (iPSC ``cell.zarr``).
+        consume it. The nucleus target is its own nucleus volume; otherwise it comes
+        from a separate store (``pos_nuclei``) when the GT nuclei live apart from the
+        GT membrane (A549: membrane in ``CAAX_*.ozx``, nuclei in ``H2B_*.ozx``), else
+        from the GT plate (iPSC ``cell.zarr``).
         """
         nonlocal gt_nuclei_vol
         if gt_nuclei_vol is None:
-            source = pos_nuclei if pos_nuclei is not None else pos_gt
-            gt_nuclei_vol = np.asarray(source.data[:, source.get_channel_index(cache_ctx.nuclei_channel_name)])
+            gt_nuclei_vol = gt_nucleus_volume(config, pos_gt=pos_gt, pos_nuclei=pos_nuclei, target=target)
         return gt_nuclei_vol
 
     # 2D benchmark (focus2d): one in-focus plane per timepoint, resolved once from the GT
@@ -756,7 +756,7 @@ def _process_one_fov(
             t_count=T,
             pos_gt=pos_gt,
             pos_name=pos_name_pred,
-            nucleus_vol=lambda: target if config.target_name == "nucleus" else _gt_nuclei(),
+            nucleus_vol=_gt_nuclei,
         )
         z_total = target.shape[1]
         focus_slabs = [focus_slab_from_plane(z, z_total, focus2d["halfwidth"]) for z in focus_z]
@@ -830,7 +830,7 @@ def _process_one_fov(
                 # nuclear foreground area (widest cross-section) — robust to the phase-midband
                 # edge artifacts on confocal iPSC. See focus.resolve_focus_instance_planes.
                 if cache_ctx.focus_anchor == "nucleus_area":
-                    nucleus_vol = target if config.target_name == "nucleus" else _gt_nuclei()
+                    nucleus_vol = _gt_nuclei()
                 else:
                     nucleus_vol = None
                 z_idx = resolve_focus_instance_planes(
