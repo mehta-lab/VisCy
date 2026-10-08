@@ -81,7 +81,7 @@ _LEAVES_ROOT = Path(__file__).resolve().parents[1] / "configs/benchmarks/virtual
 
 Ref = tuple[str, str]
 
-#: The settings that place the focus2d plane, merged per dataset from the leaves.
+#: The segmentation settings that place the focus2d plane, merged per dataset from the leaves.
 _FOCUS2D_SEGMENTATION_KEYS = ("focus_anchor", "nuclei_channel_name", "focus_channel_name")
 
 
@@ -134,6 +134,10 @@ def leaf_dataset_refs(
                     "focus2d": {"halfwidth": focus2d_halfwidth},
                     "segmentation": {k: segmentation[k] for k in _FOCUS2D_SEGMENTATION_KEYS if k in segmentation},
                 }
+                # The phase_midband estimator params also place the plane (read_focus2d_config).
+                focus = {**(doc.get("focus") or {}), **(cond.get("focus") or {})}
+                if focus:
+                    overrides["focus"] = focus
             if refs.setdefault(ref, overrides) != overrides:
                 raise ValueError(f"{leaf}: {ref[0]} is placed by {overrides}, another leaf by {refs[ref]}")
     if not refs:
