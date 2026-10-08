@@ -12,7 +12,6 @@ isolation and the provenance stamp.
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +25,6 @@ from scipy.ndimage import gaussian_filter
 from dynacell.evaluation.cache import prediction_sources, prediction_sources_sha256_12
 from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
-from viscy_utils.prediction_metadata import record_z_planes
 
 from ._eval_fixtures import build_eval_config, live_pipeline_module
 
@@ -128,21 +126,6 @@ def _rows_by_key(rows: list[dict]) -> dict[tuple[str, int], dict]:
     return {(row["FOV"], row["Timepoint"]): row for row in rows}
 
 
-def _plane_store(src: Path, dst: Path, planes: dict[str, list[list[int]]]) -> Path:
-    """Copy ``src`` as a plane-restricted predict would leave it: other planes zero, planes recorded."""
-    shutil.copytree(src, dst)
-    with open_ome_zarr(dst, mode="r+") as plate:
-        for name, per_t in planes.items():
-            position = plate[name]
-            data = np.asarray(position["0"][:])
-            for t, keep in enumerate(per_t):
-                drop = [z for z in range(D) if z not in keep]
-                data[t, :, drop] = 0
-            position["0"][:] = data
-            record_z_planes(position, ["prediction"], per_t)
-    return dst
-
-
 @pytest.mark.parametrize(("anchor", "planes"), ANCHORS, ids=[a for a, _ in ANCHORS])
 def test_masks_and_pixel_metrics_score_the_focus_plane(stores, anchor, planes):
     """Mask rows are the focus plane of a segmented slab; pixel rows are 2D metrics on that plane."""
@@ -178,24 +161,6 @@ def test_masks_and_pixel_metrics_score_the_focus_plane(stores, anchor, planes):
     pixel_3d, mask_3d = _rows_by_key(pixel_3d), _rows_by_key(mask_3d)
     assert all(pixel_3d[key]["SI_SSIM"] != pixel[key]["SI_SSIM"] for key in pixel)
     assert any(mask_3d[key]["Dice"] != mask[key]["Dice"] for key in mask)
-
-
-def test_a_plane_restricted_prediction_scores_like_the_full_one(stores, tmp_path):
-    """Zeroing every plane outside the slab changes no focus2d row; the full-volume eval refuses it."""
-    gt_path, pred_path, config = stores
-    slabs = {name: [_slab(z) for z in NUCLEUS_PLANES[name]] for name in POSITIONS}
-    slab_store = _plane_store(pred_path, tmp_path / "slab.zarr", slabs)
-
-    full = live_pipeline_module().evaluate_predictions(config("full", **_focus_kwargs("nucleus_area")))
-    cut = live_pipeline_module().evaluate_predictions(config("cut", pred=slab_store, **_focus_kwargs("nucleus_area")))
-    for full_rows, cut_rows in zip(full[:2], cut[:2], strict=True):
-        assert _rows_by_key(full_rows) == _rows_by_key(cut_rows)
-
-    with pytest.raises(ValueError, match="plane-restricted predict"):
-        live_pipeline_module().evaluate_predictions(config("cut3d", pred=slab_store))
-    # The phase anchor scores other planes than the store holds: refused, not scored on zeros.
-    with pytest.raises(ValueError, match="resolve the focus plane differently"):
-        live_pipeline_module().evaluate_predictions(config("anchor", pred=slab_store, **_focus_kwargs("phase_midband")))
 
 
 def test_cp_and_deep_features_read_the_plane_and_its_slab(stores):
@@ -373,7 +338,7 @@ class _SourceModule(LightningModule):
 
 
 def test_precompute_plane_file_drives_a_predict_the_eval_accepts(stores, tmp_path):
-    """precompute-gt writes the eval's slabs; a predict restricted to them is scored like the full store."""
+    """precompute-gt writes the eval's slabs; a predict restricted to them scores like the full store, and only so."""
     from dynacell.evaluation.precompute_cli import precompute_gt_artifacts
 
     gt_path, _, config = stores
@@ -410,12 +375,25 @@ def test_precompute_plane_file_drives_a_predict_the_eval_accepts(stores, tmp_pat
 
     full = predict(tmp_path / "full_pred.zarr", None)
     cut = predict(tmp_path / "cut_pred.zarr", planes_file)
-    rows = []
-    for name, store in (("full", full), ("cut", cut)):
-        cfg = config(f"eval_{name}", pred=store, **_focus_kwargs("nucleus_area"))
+
+    def eval_config(name: str, store: Path, **overrides):
+        cfg = config(name, pred=store, **overrides)
         cfg.io.pred_channel_name = "Nuclei_prediction"
-        rows.append(live_pipeline_module().evaluate_predictions(cfg)[:2])
+        return cfg
+
+    rows = [
+        live_pipeline_module().evaluate_predictions(
+            eval_config(f"eval_{name}", store, **_focus_kwargs("nucleus_area"))
+        )[:2]
+        for name, store in (("full", full), ("cut", cut))
+    ]
     for full_rows, cut_rows in zip(*rows, strict=True):
         assert _rows_by_key(full_rows) == _rows_by_key(cut_rows)
     # The prediction is the target itself, so the plane metrics are perfect.
     assert all(row["Dice"] == 1.0 for row in rows[1][1])
+
+    with pytest.raises(ValueError, match="plane-restricted predict"):
+        live_pipeline_module().evaluate_predictions(eval_config("cut3d", cut))
+    # The phase anchor scores other planes than the store holds: refused, not scored on zeros.
+    with pytest.raises(ValueError, match="resolve the focus plane differently"):
+        live_pipeline_module().evaluate_predictions(eval_config("anchor", cut, **_focus_kwargs("phase_midband")))
