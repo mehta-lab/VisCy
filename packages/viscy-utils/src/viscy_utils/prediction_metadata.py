@@ -178,6 +178,11 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, memoize: bool = True) -> st
     return digest[:12]
 
 
+def _canonical_planes(per_t: Sequence[Sequence[int]]) -> list[list[int]]:
+    """Sorted, de-duplicated ``int`` planes of each timepoint."""
+    return [sorted({int(z) for z in planes}) for planes in per_t]
+
+
 def z_planes_sha256_12(z_planes: Mapping[str, Sequence[Sequence[int]]]) -> str:
     """Content hash of a plane selection, independent of key order and plane order.
 
@@ -191,7 +196,7 @@ def z_planes_sha256_12(z_planes: Mapping[str, Sequence[Sequence[int]]]) -> str:
     str
         First 12 hex digits of the SHA-256 of the canonical JSON.
     """
-    canonical = {name: [sorted({int(z) for z in planes}) for planes in per_t] for name, per_t in z_planes.items()}
+    canonical = {name: _canonical_planes(per_t) for name, per_t in z_planes.items()}
     return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -424,7 +429,7 @@ def record_z_planes(position: Position, channels: Iterable[str], planes: Sequenc
         if planes is None:
             recorded.pop(channel, None)
         else:
-            recorded[channel] = [sorted({int(z) for z in per_t}) for per_t in planes]
+            recorded[channel] = _canonical_planes(planes)
     if recorded:
         position.zattrs[PREDICTED_Z_PLANES_KEY] = recorded
     elif PREDICTED_Z_PLANES_KEY in position.zattrs:
