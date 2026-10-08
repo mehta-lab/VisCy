@@ -33,7 +33,13 @@ from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
 )
-from dynacell.evaluation.focus import gt_nucleus_volume, read_focus2d_config, resolve_focus2d_planes
+from dynacell.evaluation.focus import (
+    focus_plane_stack,
+    focus_slab_from_plane,
+    gt_nucleus_volume,
+    read_focus2d_config,
+    resolve_focus2d_planes,
+)
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
     FOREGROUND_COLUMNS,
@@ -166,10 +172,8 @@ def _fov_pred_features_per_t(
     projection; ``None`` = full stack. ``cp_planes`` (``focus2d``) restricts CP
     regionprops to one plane per timepoint; ``None`` = the full 3D volume.
     """
-    from dynacell.evaluation.focus import focus_plane_stack
-
-    cp_image = predict if cp_planes is None else focus_plane_stack(predict, cp_planes)
-    cp_cells = cell_segmentation if cp_planes is None else focus_plane_stack(cell_segmentation, cp_planes)
+    cp_image = focus_plane_stack(predict, cp_planes)
+    cp_cells = focus_plane_stack(cell_segmentation, cp_planes)
     if pred_cache_ctx.enabled:
         return {
             "cp": fov_cp_features(pred_cache_ctx, pos_name, cp_image, cp_cells),
@@ -682,8 +686,6 @@ def _process_one_fov(
     """
     from dynacell.evaluation.focus import (
         build_focus_slabs,
-        focus_plane_stack,
-        focus_slab_from_plane,
         read_focus_compute_config,
         read_focus_slab_config,
         resolve_focus_instance_planes,
@@ -942,8 +944,8 @@ def _process_one_fov(
     pred_per_t = None
     if config.compute_feature_metrics:
         # focus2d: CP regionprops on the focus plane, as (T, 1, Y, X) one-plane volumes.
-        cp_target = target if focus_z is None else focus_plane_stack(target, focus_z)
-        cp_cells = cell_segmentation if focus_z is None else focus_plane_stack(cell_segmentation, focus_z)
+        cp_target = focus_plane_stack(target, focus_z)
+        cp_cells = focus_plane_stack(cell_segmentation, focus_z)
         with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, cp_target, cp_cells)
         with region_timer("deep_gt_dinov3", pos_name_pred), gpu_serialization_lock(gate=use_gpu):

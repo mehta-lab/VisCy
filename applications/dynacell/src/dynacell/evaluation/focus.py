@@ -222,9 +222,12 @@ def segment_focus_slabs(
     return np.stack(planes)
 
 
-def focus_plane_stack(vol_tzyx: np.ndarray, z_idx: list[int]) -> np.ndarray:
-    """Return each timepoint's focus plane as a ``(T, 1, Y, X)`` stack (one-plane volumes)."""
-    return np.stack([vol_tzyx[t, z : z + 1] for t, z in enumerate(z_idx)])
+def focus_plane_stack(vol_tzyx: np.ndarray, z_idx: list[int] | None) -> np.ndarray:
+    """Return each timepoint's focus plane as a ``(T, 1, Y, X)`` stack (one-plane volumes).
+
+    ``z_idx=None`` (the 3D benchmark) returns ``vol_tzyx`` unchanged.
+    """
+    return vol_tzyx if z_idx is None else slab_mip(vol_tzyx, z_idx, 0)[:, None]
 
 
 def read_focus2d_config(config: DictConfig) -> dict[str, Any] | None:

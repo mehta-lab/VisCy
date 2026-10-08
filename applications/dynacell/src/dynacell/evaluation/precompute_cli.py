@@ -306,15 +306,12 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
             if build_instances:
                 _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name_gt, target, nuclei_plate)
             if build.cp:
-                if focus_z is None:
-                    fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
-                else:
-                    fov_cp_features(
-                        cache_ctx,
-                        pos_name_gt,
-                        focus_plane_stack(target, focus_z),
-                        focus_plane_stack(cell_segmentation, focus_z),
-                    )
+                fov_cp_features(
+                    cache_ctx,
+                    pos_name_gt,
+                    focus_plane_stack(target, focus_z),
+                    focus_plane_stack(cell_segmentation, focus_z),
+                )
 
             # Deep features stream in-loop via the batcher — no second
             # plate read. The batcher's pending_kinds_per_t reflects
