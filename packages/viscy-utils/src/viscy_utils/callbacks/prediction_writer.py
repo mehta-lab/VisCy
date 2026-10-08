@@ -285,8 +285,8 @@ class HCSPredictionWriter(BasePredictionWriter):
             written = np.zeros((array.frames, array.slices - dm.z_window_size + 1), dtype=bool)
             if self._z_planes is not None:
                 written[:] = True
-                for t, planes in enumerate(self._z_planes[self._position_name(array.path)]):
-                    written[t, sorted(set(planes))] = False
+                for t, planes in enumerate(self._z_planes[array.path.rsplit("/", 1)[0]]):
+                    written[t, list(planes)] = False
             self._written_windows[f"/{array.path}"] = written
         run_positions = {array.path.rsplit("/", 1)[0] for array in window_arrays}
         if os.path.exists(self.output_store):
@@ -498,16 +498,12 @@ class HCSPredictionWriter(BasePredictionWriter):
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
         if written.all():
-            position = self.plate[img_name.rsplit("/", 1)[0]]
-            planes = None if self._z_planes is None else self._z_planes[self._position_name(img_name)]
+            name = img_name.strip("/").rsplit("/", 1)[0]
+            position = self.plate[name]
+            planes = None if self._z_planes is None else self._z_planes[name]
             record_z_planes(position, self._prediction_channels, planes)
             marker = completion_marker(self._source_shapes[img_name], self._run)
             mark_complete(position, self._prediction_channels, marker)
-
-    @staticmethod
-    def _position_name(array_path: str) -> str:
-        """Plate-relative position name (``"A/1/0"``) of an array path such as ``"/A/1/0/0"``."""
-        return array_path.strip("/").rsplit("/", 1)[0]
 
     def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
         """Return whether the existing output array outruns this run's source in T or Z.
