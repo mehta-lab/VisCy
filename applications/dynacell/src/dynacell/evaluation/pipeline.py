@@ -762,10 +762,10 @@ def _process_one_fov(
         focus_slabs = [focus_slab_from_plane(z, z_total, focus2d["halfwidth"]) for z in focus_z]
         if recorded_planes is not None:
             uncovered = {
-                t: sorted(set(range(slab.start, slab.stop)) - set(recorded_planes[t]))
+                t: missing
                 for t, slab in enumerate(focus_slabs)
+                if (missing := sorted(set(range(slab.start, slab.stop)) - set(recorded_planes[t])))
             }
-            uncovered = {t: zs for t, zs in uncovered.items() if zs}
             if uncovered:
                 raise ValueError(
                     f"{pos_name_pred}: the prediction holds only planes {recorded_planes} but focus2d scores "
