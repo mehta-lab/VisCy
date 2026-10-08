@@ -20,7 +20,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from viscy_data.schemas import FOVRecord
 
@@ -78,7 +78,9 @@ class ExperimentEntry(BaseModel):
     data_path : str
         Path to the HCS OME-Zarr store.
     tracks_path : str
-        Root directory for per-FOV tracking CSVs.
+        Root holding per-FOV tracks (``<row>/<col>/<fov>/tracks.geff`` or one
+        ``*.csv`` per FOV). Defaults to ``data_path``, i.e. tracks stored
+        inside the image plate FOVs.
     channels : list[ChannelEntry]
         Channels to include, each with zarr name + marker.
     channel_names : list[str]
@@ -110,7 +112,7 @@ class ExperimentEntry(BaseModel):
 
     name: str
     data_path: str
-    tracks_path: str
+    tracks_path: str = ""
     channels: list[ChannelEntry] = []
     channel_names: list[str] = []
     perturbation_wells: dict[str, list[str]] = {}
@@ -125,8 +127,16 @@ class ExperimentEntry(BaseModel):
     moi: float = 0.0
     exclude_fovs: list[str] = []
 
+    @field_validator("tracks_path", mode="before")
+    @classmethod
+    def _none_tracks_path(cls, value: str | None) -> str:
+        return "" if value is None else value
+
     @model_validator(mode="after")
     def _normalize(self) -> ExperimentEntry:
+        # Tracks stored inside the image plate unless a separate root is given
+        if not self.tracks_path:
+            self.tracks_path = self.data_path
         # Derive channel_names from channels if not set
         if not self.channel_names and self.channels:
             self.channel_names = [ch.name for ch in self.channels]
@@ -205,7 +215,7 @@ def _resolve_datasets_root(data: dict) -> None:
     root = root.rstrip("/")
     for exp in data.get("experiments", []):
         for key in ("data_path", "tracks_path"):
-            val = exp.get(key, "")
+            val = exp.get(key) or ""
             if _DATASETS_ROOT_VAR in val:
                 exp[key] = val.replace(_DATASETS_ROOT_VAR, root)
 
@@ -219,7 +229,7 @@ def _unresolve_datasets_root(data: dict, datasets_root: str) -> None:
     root = datasets_root.rstrip("/")
     for exp in data.get("experiments", []):
         for key in ("data_path", "tracks_path"):
-            val = exp.get(key, "")
+            val = exp.get(key) or ""
             if val.startswith(root + "/"):
                 exp[key] = _DATASETS_ROOT_VAR + val[len(root) :]
 

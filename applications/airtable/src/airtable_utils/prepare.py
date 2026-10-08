@@ -11,6 +11,8 @@ import yaml
 from iohub import open_ome_zarr
 from pydantic import BaseModel, Field
 
+from viscy_data.tracks import GEFF_TRACKS_NAME
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -128,6 +130,26 @@ def resolve_nfs_paths(dataset_name: str, nfs_root: Path) -> dict[str, Path]:
     if not zarr_path.exists():
         raise FileNotFoundError(f"NFS zarr not found: {zarr_path}")
     return {"zarr": zarr_path, "tracking": tracking_path}
+
+
+def has_in_plate_tracks(zarr_path: Path) -> bool:
+    """Return whether any FOV of an HCS plate stores its tracks in-plate.
+
+    ``biahub track`` writes ``<plate>/<row>/<col>/<fov>/tracks.geff`` (plus a
+    tracks CSV) into the plate itself; older datasets keep tracks in a separate
+    tracking zarr instead.
+
+    Parameters
+    ----------
+    zarr_path : Path
+        Path to the HCS plate root.
+
+    Returns
+    -------
+    bool
+        True if at least one FOV has a ``tracks.geff`` group.
+    """
+    return next(Path(zarr_path).glob(f"*/*/*/{GEFF_TRACKS_NAME}"), None) is not None
 
 
 def resolve_vast_paths(dataset_name: str, vast_root: Path) -> dict[str, Path]:
@@ -438,16 +460,23 @@ def generate_sbatch_override_file(overrides: dict[str, str]) -> str:
 def generate_concatenate_script(
     crop_concat_path: Path,
     vast_zarr_path: Path,
-    nfs_tracking_path: Path,
-    vast_tracking_path: Path,
+    nfs_tracking_path: Path | None,
+    vast_tracking_path: Path | None,
     conda_env: str,
     sbatch_override_path: Path | None = None,
+    nfs_zarr_path: Path | None = None,
 ) -> str:
-    """Generate a bash script for biahub concatenate + tracking copy.
+    """Generate a bash script for biahub concatenate + tracks copy.
 
     This is NOT a SLURM script. ``biahub concatenate`` submits its own
     SLURM jobs internally via submitit. The ``-m`` flag makes it block
-    until those jobs complete. After concatenation, tracking is rsynced.
+    until those jobs complete. After concatenation, tracks are copied:
+
+    * in-plate tracks (``nfs_zarr_path`` set): each FOV's ``tracks.geff`` and
+      ``tracks_*.csv`` are copied from the NFS plate into the same FOV of the
+      VAST plate, so ``tracks_path`` can stay unset (defaults to ``data_path``);
+    * otherwise the separate tracking zarr is rsynced, if
+      ``nfs_tracking_path`` is given.
 
     Parameters
     ----------
@@ -455,14 +484,18 @@ def generate_concatenate_script(
         Path to the generated crop_concat.yml.
     vast_zarr_path : Path
         Target zarr output path.
-    nfs_tracking_path : Path
-        Source tracking zarr on NFS.
-    vast_tracking_path : Path
-        Target tracking zarr on VAST.
+    nfs_tracking_path : Path or None
+        Source tracking zarr on NFS (legacy layout). Ignored when
+        ``nfs_zarr_path`` is set.
+    vast_tracking_path : Path or None
+        Target tracking zarr on VAST (legacy layout).
     conda_env : str
         Conda environment name for biahub.
     sbatch_override_path : Path or None
         Path to sbatch override file for biahub's internal SLURM jobs.
+    nfs_zarr_path : Path or None
+        Source plate on NFS whose FOVs hold the tracks (see
+        :func:`has_in_plate_tracks`). None for the legacy layout.
 
     Returns
     -------
@@ -481,22 +514,48 @@ def generate_concatenate_script(
         cmd_parts.append(f'-sb "{sbatch_override_path}"')
     biahub_cmd = " ".join(cmd_parts)
 
-    return dedent(f"""\
+    script = dedent(f"""\
         #!/bin/bash
         set -euo pipefail
 
         echo "=== Step 1: biahub concatenate (submits SLURM jobs via submitit) ==="
         {biahub_cmd}
         echo "Concatenation complete."
-
-        echo "=== Step 2: Copy tracking zarr ==="
-        if [ -d "{nfs_tracking_path}" ]; then
-            rsync -a --copy-links "{nfs_tracking_path}/" "{vast_tracking_path}/"
-            echo "Tracking copy complete."
-        else
-            echo "WARNING: NFS tracking zarr not found at {nfs_tracking_path}, skipping."
-        fi
     """)
+
+    if nfs_zarr_path is not None:
+        # biahub concatenate copies image arrays only; carry each FOV's tracks over.
+        script += dedent(f"""\
+
+            echo "=== Step 2: Copy in-plate tracks ({GEFF_TRACKS_NAME} + tracks CSV) ==="
+            src_root="{nfs_zarr_path}"
+            dst_root="{vast_zarr_path}"
+            n_copied=0
+            for src_fov in "$src_root"/*/*/*/; do
+                [ -d "${{src_fov}}{GEFF_TRACKS_NAME}" ] || continue
+                fov_rel="${{src_fov#"$src_root"/}}"
+                dst_fov="$dst_root/$fov_rel"
+                if [ ! -d "$dst_fov" ]; then
+                    echo "WARNING: $fov_rel not in $dst_root, skipping its tracks."
+                    continue
+                fi
+                rsync -a --include='{GEFF_TRACKS_NAME}/***' --include='tracks_*.csv' --exclude='*' "$src_fov" "$dst_fov"
+                n_copied=$((n_copied + 1))
+            done
+            echo "Copied tracks for $n_copied FOVs."
+        """)
+    elif nfs_tracking_path is not None and vast_tracking_path is not None:
+        script += dedent(f"""\
+
+            echo "=== Step 2: Copy tracking zarr ==="
+            if [ -d "{nfs_tracking_path}" ]; then
+                rsync -a --copy-links "{nfs_tracking_path}/" "{vast_tracking_path}/"
+                echo "Tracking copy complete."
+            else
+                echo "WARNING: NFS tracking zarr not found at {nfs_tracking_path}, skipping."
+            fi
+        """)
+    return script
 
 
 def generate_qc_slurm(
@@ -619,7 +678,12 @@ def check_dataset_status(dataset_name: str, nfs_root: Path, vast_root: Path) -> 
 
     nfs_exists = nfs_zarr.exists()
     vast_zarr_exists = vast["zarr"].exists()
-    vast_tracking_exists = vast["tracking"].exists()
+    if vast["tracking"].exists():
+        tracking = "yes"
+    elif vast_zarr_exists and has_in_plate_tracks(vast["zarr"]):
+        tracking = "in-plate"
+    else:
+        tracking = "no"
 
     zarr_fmt: str = "-"
     ome_ver: str = "-"
@@ -637,7 +701,7 @@ def check_dataset_status(dataset_name: str, nfs_root: Path, vast_root: Path) -> 
         "vast_zarr": "yes" if vast_zarr_exists else "no",
         "zarr_version": zarr_fmt,
         "ome_version": ome_ver,
-        "tracking": "yes" if vast_tracking_exists else "no",
+        "tracking": tracking,
         "preprocessed": preprocessed,
     }
 

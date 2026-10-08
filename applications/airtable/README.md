@@ -125,7 +125,16 @@ The `prepare` CLI automates the full pipeline to rechunk and preprocess a datase
 2. Discover positions and channels from the NFS zarr
 3. Generate `crop_concat.yml` for `biahub concatenate` (zarr v3 with sharding)
 4. Generate `qc_config.yml` for focus-slice QC
-5. Generate and submit SLURM jobs (concatenation + tracking copy, then QC + preprocessing)
+5. Generate and submit SLURM jobs (concatenation + tracks copy, then QC + preprocessing)
+
+Tracks are copied according to where the NFS dataset keeps them:
+
+- **In-plate** (datasets tracked with current `biahub track`): each FOV's `tracks.geff`
+  and `tracks_<row>_<col>_<fov>.csv` are copied into the same FOV of the VAST zarr.
+  No `tracking.zarr` is created and `tracks_path` can stay empty in Airtable
+  (it defaults to `data_path`).
+- **Separate tracking zarr** (older datasets): `1-preprocess/label-free/3-track/<name>_cropped.zarr`
+  is rsynced to `tracking.zarr`, as before.
 
 ### Usage
 
@@ -152,10 +161,10 @@ uv run --package airtable-utils \
 ```
 /hpc/projects/organelle_phenotyping/datasets/{dataset_name}/
   {dataset_name}.zarr       # zarr v3 rechunked (OME-Zarr 0.5)
-  tracking.zarr              # copied from NFS
+  tracking.zarr              # copied from NFS (older datasets only; newer ones keep tracks.geff in the FOVs)
   crop_concat.yml            # generated config for biahub
   qc_config.yml              # generated config for QC
-  01_concatenate.sh          # bash: biahub concatenate (submits SLURM via submitit) + tracking copy
+  01_concatenate.sh          # bash: biahub concatenate (submits SLURM via submitit) + tracks copy
   02_qc_preprocess.sh        # SLURM: QC + preprocess (parallel, GPU)
 ```
 
@@ -248,6 +257,7 @@ registry = db.get_marker_registry()
 
 # Register positions programmatically
 from pathlib import Path
+
 positions = list(Path("/path/to/dataset.zarr").glob("*/*/*"))
 result = register_fovs(positions, db=db)
 print(f"created={len(result.created)} updated={len(result.updated)}")
