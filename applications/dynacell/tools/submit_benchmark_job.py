@@ -44,6 +44,7 @@ from viscy_utils.prediction_metadata import (
     same_marker,
     started_marker,
     tzyx_shape,
+    z_planes_sha256_12,
 )
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -693,6 +694,13 @@ def submit(argv: list[str] | None = None) -> int:
                 z_reduction=str(writer_init.get("z_reduction", "blend")),
                 checkpoint_path=model_init["ckpt_path"],
                 settings_sha256_12=writer_init["settings_sha256_12"],
+                z_planes_sha256_12=(
+                    # The plane file's positions (viscy_data.sliding_window.read_z_planes reads
+                    # the same key); read directly so the launcher stays free of torch.
+                    z_planes_sha256_12(json.loads(Path(data_init["predict_z_planes"]).read_text())["positions"])
+                    if data_init.get("predict_z_planes")
+                    else None
+                ),
             )
             survey = _survey_prediction_store(output_store, data_path, pred_channels, run)
             if survey.oversized:

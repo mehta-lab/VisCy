@@ -1,6 +1,7 @@
 """Tests for prediction writer blending utilities."""
 
 import hashlib
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,14 +13,18 @@ from lightning.pytorch import LightningModule, Trainer
 from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in
 from viscy_utils.prediction_metadata import (
+    PREDICTED_Z_PLANES_KEY,
     PREDICTION_COMPLETE_KEY,
     completion_marker,
     mark_complete,
     mark_started,
+    predicted_z_planes,
     prediction_complete,
     prediction_run,
+    record_z_planes,
     same_run,
     started_marker,
+    z_planes_sha256_12,
 )
 
 Z_SIZE = 16
@@ -378,6 +383,135 @@ def test_writer_refuses_multi_device_predict(tmp_path):
     with pytest.raises(NotImplementedError, match="single device"):
         writer.on_predict_start(SimpleNamespace(world_size=2), None)
     assert not (tmp_path / "pred.zarr").exists()
+
+
+class _SourcePlusOneModule(LightningModule):
+    """Predict ``source + 1``, so every written plane names the source plane it came from."""
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
+        return batch["source"] + 1.0
+
+
+#: Per-timepoint planes for two FOVs of a (T=2, Z=7) source; caps and an interior slab.
+SLAB_PLANES = {"0/0/0": [[0, 1], [3, 4, 5]], "0/0/1": [[5, 6], [2, 3, 4]]}
+
+
+def _write_stamped_source(path) -> None:
+    """Two FOVs of ``(2, 2, 7, 8, 8)`` whose Phase3D plane ``(t, z)`` holds ``100 * t + z + 1``."""
+    stamp = (100 * np.arange(2)[:, None] + np.arange(7)[None, :] + 1).astype(np.float32)
+    with open_ome_zarr(path, layout="hcs", mode="w-", channel_names=["Phase3D", "Nuclei"]) as plate:
+        for fov in SLAB_PLANES:
+            data = np.zeros((2, 2, 7, 8, 8), np.float32)
+            data[:, 0] = stamp[:, :, None, None]
+            plate.create_position(*fov.split("/")).create_image("0", data)
+
+
+def _predict_planes(source, output, planes_file=None) -> HCSDataModule:
+    data_module = HCSDataModule(
+        data_path=str(source),
+        source_channel=["Phase3D"],
+        target_channel=["Nuclei"],
+        z_window_size=1,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[8, 8],
+        normalizations=[],
+        augmentations=[],
+        predict_z_planes=planes_file,
+    )
+    Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_progress_bar=False,
+        callbacks=[HCSPredictionWriter(str(output), overwrite=True)],
+    ).predict(_SourcePlusOneModule(), datamodule=data_module, return_predictions=False)
+    return data_module
+
+
+def test_plane_restricted_predict_writes_only_the_listed_planes(tmp_path):
+    """Listed planes equal a full predict's; the rest stay at the fill value; the store keeps the full extent."""
+    source = tmp_path / "source.zarr"
+    _write_stamped_source(source)
+    planes_file = tmp_path / "planes.json"
+    planes_file.write_text(json.dumps({"positions": SLAB_PLANES, "focus_anchor": "test"}))
+
+    full, slab = tmp_path / "full.zarr", tmp_path / "slab.zarr"
+    _predict_planes(source, full)
+    data_module = _predict_planes(source, slab, planes_file)
+    assert len(data_module.predict_dataset) == sum(len(p) for per_t in SLAB_PLANES.values() for p in per_t)
+
+    with open_ome_zarr(full, mode="r") as full_plate, open_ome_zarr(slab, mode="r") as slab_plate:
+        for fov, per_t in SLAB_PLANES.items():
+            full_arr = np.asarray(full_plate[fov]["0"][:, 0])
+            slab_arr = np.asarray(slab_plate[fov]["0"][:, 0])
+            assert slab_arr.shape == full_arr.shape == (2, 7, 8, 8)
+            for t, planes in enumerate(per_t):
+                others = [z for z in range(7) if z not in planes]
+                np.testing.assert_array_equal(slab_arr[t, planes], full_arr[t, planes])
+                assert (slab_arr[t, others] == 0).all()
+                # Discriminates: the full store holds a prediction on those planes.
+                assert (full_arr[t, others] > 0).all()
+            position = slab_plate[fov]
+            assert predicted_z_planes(position, "Nuclei_prediction") == per_t
+            marker = position.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"]
+            assert marker["z_planes_sha256_12"] == z_planes_sha256_12(SLAB_PLANES)
+            assert marker["source_shape"] == [2, 7, 8, 8]
+            assert PREDICTED_Z_PLANES_KEY not in full_plate[fov].zattrs
+            assert "z_planes_sha256_12" not in full_plate[fov].zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"]
+
+
+def test_full_predict_over_a_plane_store_clears_the_recorded_planes(tmp_path):
+    """Re-predicting every plane into a plane-restricted store drops its plane record."""
+    source = tmp_path / "source.zarr"
+    _write_stamped_source(source)
+    planes_file = tmp_path / "planes.json"
+    planes_file.write_text(json.dumps({"positions": SLAB_PLANES}))
+    output = tmp_path / "pred.zarr"
+    _predict_planes(source, output, planes_file)
+    _predict_planes(source, output)
+    with open_ome_zarr(output, mode="r") as plate:
+        for fov in SLAB_PLANES:
+            assert predicted_z_planes(plate[fov], "Nuclei_prediction") is None
+            assert (np.asarray(plate[fov]["0"][:, 0]) > 0).all()
+
+
+def test_record_z_planes_keeps_other_channels(tmp_path):
+    with open_ome_zarr(tmp_path / "p.zarr", layout="hcs", mode="w-", channel_names=["A", "B"]) as plate:
+        position = plate.create_position("0", "0", "0")
+        record_z_planes(position, ["A", "B"], [[3, 2, 2]])
+        record_z_planes(position, ["A"], None)
+        assert predicted_z_planes(position, "A") is None
+        assert predicted_z_planes(position, "B") == [[2, 3]]
+        record_z_planes(position, ["B"], None)
+        assert PREDICTED_Z_PLANES_KEY not in position.zattrs
+
+
+@pytest.mark.parametrize(
+    ("planes", "match"),
+    [
+        ({"0/0/0": [[0]]}, "timepoints"),
+        ({"0/0/0": [[0], [7]], "0/0/1": [[0], [0]]}, "outside"),
+        ({"0/0/0": [[0], [0]]}, "no entry"),
+    ],
+)
+def test_plane_file_must_cover_every_position_and_timepoint(tmp_path, planes, match):
+    source = tmp_path / "source.zarr"
+    _write_stamped_source(source)
+    planes_file = tmp_path / "planes.json"
+    planes_file.write_text(json.dumps({"positions": planes}))
+    with pytest.raises((ValueError, KeyError), match=match):
+        _predict_planes(source, tmp_path / "pred.zarr", planes_file)
+
+
+def test_plane_restriction_needs_single_plane_windows(tmp_path):
+    source = tmp_path / "source.zarr"
+    _write_stamped_source(source)
+    planes_file = tmp_path / "planes.json"
+    planes_file.write_text(json.dumps({"positions": SLAB_PLANES}))
+    data_module = _ones_data_module(source)
+    data_module.predict_z_planes = planes_file
+    with pytest.raises(ValueError, match="z_window_size=1"):
+        data_module.setup("predict")
 
 
 def test_writer_rejects_unknown_z_reduction():
