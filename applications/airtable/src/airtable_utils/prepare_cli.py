@@ -23,6 +23,7 @@ from airtable_utils.prepare import (
     generate_qc_config,
     generate_qc_slurm,
     generate_sbatch_override_file,
+    has_in_plate_tracks,
     resolve_nfs_paths,
     resolve_vast_paths,
     write_yaml,
@@ -162,13 +163,18 @@ def run(dataset_name: str, config_path: str, dry_run: bool, force: bool) -> None
         sbatch_override_path.write_text(sbatch_content)
         click.echo(f"  Wrote: {sbatch_override_path}")
 
+    # New datasets carry tracks inside the plate (<fov>/tracks.geff); copy those
+    # into the VAST plate. Older datasets have a separate tracking zarr.
+    in_plate_tracks = has_in_plate_tracks(nfs["zarr"])
+    click.echo(f"  Tracks: {'in-plate (tracks.geff)' if in_plate_tracks else nfs['tracking']}")
     concat_script = generate_concatenate_script(
         crop_concat_path=crop_concat_path,
         vast_zarr_path=vast["zarr"],
-        nfs_tracking_path=nfs["tracking"],
-        vast_tracking_path=vast["tracking"],
+        nfs_tracking_path=None if in_plate_tracks else nfs["tracking"],
+        vast_tracking_path=None if in_plate_tracks else vast["tracking"],
         conda_env=cfg.concatenate.conda_env,
         sbatch_override_path=sbatch_override_path,
+        nfs_zarr_path=nfs["zarr"] if in_plate_tracks else None,
     )
     concat_script_path = vast["output_dir"] / "01_concatenate.sh"
     concat_script_path.write_text(concat_script)

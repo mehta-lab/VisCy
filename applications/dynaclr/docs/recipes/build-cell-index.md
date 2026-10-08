@@ -5,13 +5,43 @@
 Pre-build a **cell index parquet** once, then point the training config at it.
 The parquet contains one row per cell observation per timepoint with all
 metadata already computed (lineage, conditions, HPI). Training startup drops
-from minutes (opening every zarr + reading every CSV) to a single
+from minutes (opening every zarr + reading every FOV's tracks) to a single
 `read_parquet` call.
 
 ## Prerequisites
 
 - DynaCLR installed (`uv pip install -e applications/dynaclr`)
 - A collection YAML (see `train-multi-experiment.md` Step 1)
+- Per-FOV tracks for every experiment (see "Where tracks are read from" below)
+
+## Where tracks are read from
+
+Each experiment's `tracks_path` is a root holding one directory per FOV,
+`<tracks_path>/<row>/<col>/<fov>/`. In that directory DynaCLR reads:
+
+1. `tracks.geff` if present — the GEFF track graph written by `biahub track`
+   (needs the `geff` package, installed with DynaCLR via `viscy-data[tracks]`);
+2. otherwise exactly one `*.csv` (the ultrack tracks table).
+
+Both give the same table: `track_id, t, [z], y, x, id, parent_track_id, parent_id`.
+
+`tracks_path` is optional and defaults to `data_path`. Datasets tracked with
+current `biahub track` store the tracks inside the image plate
+(`<plate>/<row>/<col>/<fov>/tracks.geff`), so omit `tracks_path`:
+
+```yaml
+experiments:
+  - name: 2026_10_01_A549_H2B_CAAX
+    data_path: ${datasets_root}/2026_10_01_A549_H2B_CAAX/2026_10_01_A549_H2B_CAAX.zarr
+    # tracks_path defaults to data_path (tracks.geff inside each FOV)
+```
+
+Older datasets keep their tracks in a separate tracking zarr; keep setting
+`tracks_path` for those:
+
+```yaml
+    tracks_path: ${datasets_root}/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+```
 
 ## Step 1: Build the parquet
 
@@ -70,7 +100,7 @@ data:
 
 ```
 Without parquet (slow — minutes):
-  collection.yml → open every zarr → read every tracking CSV
+  collection.yml → open every zarr → read every FOV's tracks (GEFF or CSV)
                → reconstruct lineage → enrich metadata
 
 With parquet (fast — seconds):

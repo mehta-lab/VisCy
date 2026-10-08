@@ -27,7 +27,8 @@ class FOVRecord(BaseModel):
     data_path : str or None
         Path to the HCS OME-Zarr store.
     tracks_path : str or None
-        Root directory for per-FOV tracking CSVs.
+        Root holding per-FOV tracks. None means tracks are stored inside
+        the image plate FOVs (``data_path``).
     channel_names : list[str]
         Ordered channel names present in the zarr store.
     time_interval_min : float or None
