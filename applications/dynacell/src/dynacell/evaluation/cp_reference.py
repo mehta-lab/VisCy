@@ -70,6 +70,7 @@ from dynacell.evaluation.feature_select import (
     DEFAULT_UNIQUE_CUT,
     select_gt_features,
 )
+from dynacell.evaluation.focus import read_focus2d_config
 from dynacell.evaluation.metrics import CP_FEATURE_VERSION, active_cp_feature_names, round_device_dependent_cp_columns
 from dynacell.evaluation.paths import cp_reference_path
 from dynacell.evaluation.pipeline_cache import cached_cp_feature_names, cp_recipe_identity
@@ -1059,9 +1060,8 @@ def resolve_cp_reference_path(config: DictConfig) -> Path:
         return Path(override).resolve()
     if config.target_name not in MASK_FIT_DATASETS:
         raise ValueError(f"no CP reference for target {config.target_name!r}; expected {sorted(MASK_FIT_DATASETS)}")
-    return cp_reference_path(
-        config.target_name, focus2d_halfwidth=OmegaConf.select(config, "focus2d.halfwidth", default=None)
-    )
+    focus2d = read_focus2d_config(config)
+    return cp_reference_path(config.target_name, focus2d_halfwidth=None if focus2d is None else focus2d["halfwidth"])
 
 
 def eval_cp_space(config: DictConfig) -> DatasetCPSpace:
