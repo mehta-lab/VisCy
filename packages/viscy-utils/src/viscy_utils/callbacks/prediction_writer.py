@@ -300,6 +300,7 @@ class HCSPredictionWriter(BasePredictionWriter):
                 overwritten: list[str] = []
                 mixed: list[str] = []
                 oversized: list[str] = []
+                foreign: list[str] = []
                 channel_orders: set[tuple[str, ...]] = set()
                 for name, pos in positions.items():
                     existing = set(pos.channel_names)
@@ -325,6 +326,10 @@ class HCSPredictionWriter(BasePredictionWriter):
                         overwritten.append(name)
                         if self._outruns_source(pos, name, dm.array_key):
                             oversized.append(name)
+                        # A plane-restricted run rewrites only its planes; any other run's
+                        # voxels would survive beside them (overwrite rewrites in place).
+                        if self._z_planes is not None and self._cannot_share(pos, prediction_channel):
+                            foreign.append(name)
                     elif self._cannot_share(pos, prediction_channel):
                         mixed.append(name)
                 if oversized:
@@ -334,6 +339,13 @@ class HCSPredictionWriter(BasePredictionWriter):
                         f"slices than their source (e.g. {oversized[:3]}); arrays only grow, so the stale "
                         "planes would survive every rewrite yet the FOVs would be marked complete. "
                         "Predict into a new output store."
+                    )
+                if foreign:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(foreign)} FOVs in '{self.output_store}' hold {prediction_channel} from another "
+                        f"run (e.g. {foreign[:3]}); a plane-restricted predict writes only its planes, so the "
+                        "other run's planes would survive beside them. Remove the store or predict into a new one."
                     )
                 if mixed:
                     self.plate.close()
@@ -534,7 +546,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         Parameters
         ----------
         position : Position
-            Existing output position outside this run.
+            Existing output position outside this run (or, for a plane-restricted
+            run, inside it).
         channels : list of str
             This run's prediction channels.
 

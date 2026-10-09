@@ -475,6 +475,21 @@ def test_full_predict_over_a_plane_store_clears_the_recorded_planes(tmp_path):
             assert (np.asarray(plate[fov]["0"][:, 0]) > 0).all()
 
 
+def test_plane_restricted_predict_refuses_another_runs_store(tmp_path):
+    """A slab predict into a full-Z store would leave the full run's planes around the slab."""
+    source = tmp_path / "source.zarr"
+    _write_stamped_source(source)
+    planes_file = tmp_path / "planes.json"
+    planes_file.write_text(json.dumps({"positions": SLAB_PLANES}))
+    output = tmp_path / "pred.zarr"
+    _predict_planes(source, output)
+    with pytest.raises(ValueError, match="from another run"):
+        _predict_planes(source, output, planes_file)
+    # Discriminates: the same plane run into a fresh store, and its own rerun, pass.
+    _predict_planes(source, tmp_path / "slab.zarr", planes_file)
+    _predict_planes(source, tmp_path / "slab.zarr", planes_file)
+
+
 def test_record_z_planes_keeps_other_channels(tmp_path):
     with open_ome_zarr(tmp_path / "p.zarr", layout="hcs", mode="w-", channel_names=["A", "B"]) as plate:
         position = plate.create_position("0", "0", "0")
