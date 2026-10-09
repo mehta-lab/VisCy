@@ -72,6 +72,12 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the UNeXt2-3D NUCLEUS segaux arm (fit 37027791, epoch 199/200, --ckpt best
+  # epoch=75), 2026-10-09: all four legs. Stage-matched to the baselines (v2 e81, v2_seed1 e88).
+  # Generate with --wave wave3e.
+  wave3e:
+    nucleus:
+      - fcmae_vscyto3d_scratch_segaux_seed1
   # Track H bglp A549 legs (predicts 37004614/20/22 COMPLETED 2026-10-07), the last Track H
   # stores. Generate with --wave wave3d.
   wave3d:
