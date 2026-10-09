@@ -748,7 +748,6 @@ def _process_one_fov(
     # and routed to every metric below. A plane-restricted prediction store holds only
     # the slab it was predicted on, so check it covers ours instead of scoring zeros.
     focus2d = read_focus2d_config(config)
-    recorded_planes = predicted_z_planes(pos_pred, io_config.pred_channel_name)
     focus_z: list[int] | None = None
     if focus2d is not None:
         focus_z = resolve_focus2d_planes(
@@ -760,6 +759,7 @@ def _process_one_fov(
         )
         z_total = target.shape[1]
         focus_slabs = [focus_slab_from_plane(z, z_total, focus2d["halfwidth"]) for z in focus_z]
+        recorded_planes = predicted_z_planes(pos_pred, io_config.pred_channel_name)
         if recorded_planes is not None:
             uncovered = {
                 t: missing
@@ -772,11 +772,6 @@ def _process_one_fov(
                     f"{[list(range(s.start, s.stop)) for s in focus_slabs]} (missing {uncovered}); the predict "
                     "plane file and this eval resolve the focus plane differently"
                 )
-    elif recorded_planes is not None:
-        raise ValueError(
-            f"{pos_name_pred}: the prediction holds only planes {recorded_planes} (a plane-restricted predict); "
-            "score it with focus2d.halfwidth, not over the full volume"
-        )
 
     # In-focus slab for the 2D deep-feature crops + per-cell similarity (on by
     # default, feature_metrics.focus_slab). Computed once from the GT phase focus
@@ -1672,6 +1667,18 @@ def evaluate_predictions(
                 pred_positions = [(n, p) for n, p in pred_positions if _keep(n)]
                 gt_positions = [(n, p) for n, p in gt_positions if _keep(n)]
                 seg_positions = [(n, p) for n, p in seg_positions if _keep(n)]
+
+            # A plane-restricted prediction (HCSDataModule.predict_z_planes) holds zeros off
+            # its slab; refuse a full-volume eval of it before MicroMS3IM fits on those zeros.
+            if read_focus2d_config(config) is None:
+                restricted = [
+                    n for n, p in pred_positions if predicted_z_planes(p, io_config.pred_channel_name) is not None
+                ]
+                if restricted:
+                    raise ValueError(
+                        f"{len(restricted)} FOVs of the prediction hold only some planes (a plane-restricted "
+                        f"predict, e.g. {restricted[:3]}); score it with focus2d.halfwidth, not over the full volume"
+                    )
 
             # Position-count alignment.
             #
