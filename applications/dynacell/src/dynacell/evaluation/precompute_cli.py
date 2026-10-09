@@ -170,6 +170,9 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     focus_planes_out = OmegaConf.select(config, "build.focus_planes", default=None)
     if focus_planes_out is not None and focus2d is None:
         raise ValueError("build.focus_planes writes the 2D benchmark's predict planes; set focus2d.halfwidth")
+    if focus_planes_out is not None and getattr(config, "limit_positions", None) is not None:
+        # A predict needs every position's planes; a truncated file would replace the full one.
+        raise ValueError("build.focus_planes covers every position of the store; unset limit_positions")
     if focus2d is not None and build.masks:
         raise ValueError("focus2d scores semantic masks on the focus slab and never caches them; set build.masks=false")
     if build.masks:

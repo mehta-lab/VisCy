@@ -358,6 +358,9 @@ def test_precompute_plane_file_drives_a_predict_the_eval_accepts(stores, tmp_pat
         },
     )
     pre.build.focus_planes = str(planes_file)
+    with pytest.raises(ValueError, match="unset limit_positions"):
+        precompute_gt_artifacts(OmegaConf.merge(pre, {"limit_positions": 1}))
+    assert not planes_file.exists()
     precompute_gt_artifacts(pre)
     payload = json.loads(planes_file.read_text())
     assert payload["positions"] == {name: [_slab(z) for z in NUCLEUS_PLANES[name]] for name in POSITIONS}
