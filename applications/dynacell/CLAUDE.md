@@ -247,7 +247,9 @@ default (since 35c0235b, 2026-06-16):
   every position/timepoint as the plane file a 2D model predicts with
   (`HCSDataModule.predict_z_planes`): the predict then skips every other plane, and
   the writer records the planes so the eval refuses a store that lacks its slab (and
-  a full-volume eval of such a store).
+  a full-volume eval of such a store). The 2D predict leaves keep `prediction.zarr`;
+  the writer refuses a slab predict into a store another run wrote (its planes would
+  survive around the slab), so remove a full-Z store before re-predicting it.
 - `precompute-gt build.focus=true` (default false) — writes `focus_slice` zattrs
   to a writable GT store.
 

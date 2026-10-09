@@ -39,7 +39,7 @@ trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
     init_args:
-      output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit_segaux/ipsc/a549__zikv/prediction_focus2d_h1.zarr
+      output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit_segaux/ipsc/a549__zikv/prediction.zarr
 launcher:
   job_name: pix2pix2D_PRED_NUCL_ON_A549_ZIKV_segaux
   run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit_segaux/ipsc/a549__zikv

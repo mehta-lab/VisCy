@@ -35,7 +35,7 @@ trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
     init_args:
-      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_2d_segaux/ipsc/ipsc/prediction_focus2d_h1.zarr
+      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_2d_segaux/ipsc/ipsc/prediction.zarr
 launcher:
   job_name: CELLDiff2D_PRED_MEMB_ON_IPSC_segaux
   run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_2d_segaux/ipsc/ipsc

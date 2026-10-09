@@ -35,7 +35,9 @@ data:
     # 2D benchmark (focus2d.halfwidth=1): predict only the 3-plane focus slab of each
     # FOV/timepoint listed in this plane file (precompute-gt build.focus_planes, resolved
     # exactly as the focus2d eval resolves it); every other plane of the full-extent store
-    # stays empty. Set null to predict every plane (output_store prediction.zarr).
+    # stays empty, so only a focus2d eval reads the store. Set null to predict every plane.
+    # Remove a full-Z store here before a slab predict: the writer refuses to keep its
+    # old planes around the slab.
     predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/mito/a549__zikv__h1.json
     normalizations:
       - class_path: viscy_transforms.MinMaxSampled
@@ -48,7 +50,7 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/celldiff_2d/a549/a549__zikv/prediction_focus2d_h1.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/celldiff_2d/a549/a549__zikv/prediction.zarr
 
 launcher:
   job_name: CELLDiff2D_PRED_A549_TOMM20_ON_A549_ZIKV

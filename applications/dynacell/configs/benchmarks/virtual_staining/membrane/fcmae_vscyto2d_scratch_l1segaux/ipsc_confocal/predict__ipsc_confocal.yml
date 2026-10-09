@@ -37,7 +37,7 @@ trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
     init_args:
-      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch_l1segaux/ipsc/ipsc/prediction_focus2d_h1.zarr
+      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch_l1segaux/ipsc/ipsc/prediction.zarr
 launcher:
   job_name: FCMAE2D_Scratch_PRED_MEMB_ON_IPSC_l1segaux
   run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch_l1segaux/ipsc/ipsc
