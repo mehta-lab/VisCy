@@ -25,6 +25,7 @@ model:
     ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/pix2pix2d_unetvit/checkpoints/last.ckpt
 data:
   init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/membrane/a549__zikv__h1.json
     normalizations:
     - class_path: viscy_transforms.NormalizeSampled
       init_args:

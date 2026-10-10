@@ -23,6 +23,7 @@ model:
     ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/celldiff_2d_seed1/checkpoints/last.ckpt
 data:
   init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/membrane/ipsc__h1.json
     normalizations:
     - class_path: viscy_transforms.MinMaxSampled
       init_args:

@@ -2,6 +2,7 @@
 
 import json
 from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass, field, fields
@@ -31,6 +32,13 @@ from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_co
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
+)
+from dynacell.evaluation.focus import (
+    focus_plane_stack,
+    focus_slab_from_plane,
+    gt_nucleus_volume,
+    read_focus2d_config,
+    resolve_focus2d_planes,
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
@@ -87,6 +95,7 @@ from dynacell.evaluation.runtime import (
 )
 from dynacell.evaluation.segmentation import require_cubic_workflows
 from dynacell.evaluation.utils import plot_metrics
+from viscy_utils.prediction_metadata import predicted_z_planes
 
 
 def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[slice | None]] | None:
@@ -152,6 +161,7 @@ def _fov_pred_features_per_t(
     patch_size: int,
     spacing,
     z_slabs: list[slice | None] | None = None,
+    cp_planes: list[int] | None = None,
 ) -> dict[str, list[np.ndarray] | None]:
     """Return per-backbone per-t prediction features.
 
@@ -159,11 +169,14 @@ def _fov_pred_features_per_t(
     per-timepoint, sharing one set of 2-D crops across all deep backbones
     to avoid redundant max-projection + crop construction per backbone.
     ``z_slabs`` (GT-derived per-timepoint in-focus slabs) restricts the crop
-    projection; ``None`` = full stack.
+    projection; ``None`` = full stack. ``cp_planes`` (``focus2d``) restricts CP
+    regionprops to one plane per timepoint; ``None`` = the full 3D volume.
     """
+    cp_image = focus_plane_stack(predict, cp_planes)
+    cp_cells = focus_plane_stack(cell_segmentation, cp_planes)
     if pred_cache_ctx.enabled:
         return {
-            "cp": fov_cp_features(pred_cache_ctx, pos_name, predict, cell_segmentation),
+            "cp": fov_cp_features(pred_cache_ctx, pos_name, cp_image, cp_cells),
             "dinov3": fov_deep_features(
                 pred_cache_ctx,
                 pos_name,
@@ -222,8 +235,8 @@ def _fov_pred_features_per_t(
     for t in range(t_count):
         cp.append(
             cp_regionprops(
-                predict[t],
-                cell_segmentation[t],
+                cp_image[t],
+                cp_cells[t],
                 spacing,
                 norm=pred_cache_ctx.cp_norm,
                 glcm_cfg=pred_cache_ctx.cp_glcm,
@@ -474,6 +487,7 @@ def _calibrate_microssim(
     max_pairs: int,
     seed: int,
     cache_reads: bool,
+    focus_planes: Callable[[str, Any, np.ndarray], list[int]] | None = None,
 ) -> tuple[Any, dict[str, tuple[np.ndarray, np.ndarray]]]:
     """Fit MicroMS3IM once per leaf on a random subsample of (FOV, t) volumes.
 
@@ -510,6 +524,11 @@ def _calibrate_microssim(
         Worth ~1 GB host RAM per 12 cached FOVs. Process-mode workers
         can't see the parent's cache and silently re-read; pass
         ``cache_reads=True`` only when ``runtime.executor=serial``.
+    focus_planes : callable or None
+        ``focus2d``: ``(pos_name, pos_gt, target_TDHW) -> per-t plane`` restricts each
+        sampled pair to its focus plane, the only plane the 2D benchmark scores. A
+        plane-restricted prediction holds zeros elsewhere, and zero planes in the pool
+        corrupt alpha. ``None`` fits on the full volumes.
 
     Returns
     -------
@@ -560,9 +579,11 @@ def _calibrate_microssim(
         gt_ci = pos_gt.get_channel_index(io_config.gt_channel_name)
         predict = np.asarray(pos_pred.data[:, pred_ci])  # (T, D, H, W)
         target = np.asarray(pos_gt.data[:, gt_ci])
+        planes = focus_planes(pos_name, pos_gt, target) if focus_planes is not None else None
         for t_idx in t_indices:
-            all_predictions.append(predict[t_idx])  # (D, H, W)
-            all_targets.append(target[t_idx])
+            z = slice(None) if planes is None else slice(planes[t_idx], planes[t_idx] + 1)
+            all_predictions.append(predict[t_idx, z])  # (D, H, W), or (1, H, W) under focus2d
+            all_targets.append(target[t_idx, z])
         if cache_reads:
             read_cache[pos_name] = (predict, target)
 
@@ -707,15 +728,62 @@ def _process_one_fov(
 
     T = predict.shape[0]
 
+    gt_nuclei_vol: np.ndarray | None = None
+
+    def _gt_nuclei() -> np.ndarray:
+        """GT nucleus volume ``(T, Z, Y, X)``, read from zarr at most once per FOV.
+
+        Both the ``nucleus_area`` focus anchor and the whole-cell seed/carve paths
+        consume it. The nucleus target is its own nucleus volume; otherwise it comes
+        from a separate store (``pos_nuclei``) when the GT nuclei live apart from the
+        GT membrane (A549: membrane in ``CAAX_*.ozx``, nuclei in ``H2B_*.ozx``), else
+        from the GT plate (iPSC ``cell.zarr``).
+        """
+        nonlocal gt_nuclei_vol
+        if gt_nuclei_vol is None:
+            gt_nuclei_vol = gt_nucleus_volume(config, pos_gt=pos_gt, pos_nuclei=pos_nuclei, target=target)
+        return gt_nuclei_vol
+
+    # 2D benchmark (focus2d): one in-focus plane per timepoint, resolved once from the GT
+    # and routed to every metric below. A plane-restricted prediction store holds only
+    # the slab it was predicted on, so check it covers ours instead of scoring zeros.
+    focus2d = read_focus2d_config(config)
+    focus_z: list[int] | None = None
+    if focus2d is not None:
+        focus_z = resolve_focus2d_planes(
+            config,
+            t_count=T,
+            pos_gt=pos_gt,
+            pos_name=pos_name_pred,
+            nucleus_vol=_gt_nuclei,
+        )
+        z_total = target.shape[1]
+        focus_slabs = [focus_slab_from_plane(z, z_total, focus2d["halfwidth"]) for z in focus_z]
+        recorded_planes = predicted_z_planes(pos_pred, io_config.pred_channel_name)
+        if recorded_planes is not None:
+            uncovered = {
+                t: missing
+                for t, slab in enumerate(focus_slabs)
+                if (missing := sorted(set(range(slab.start, slab.stop)) - set(recorded_planes[t])))
+            }
+            if uncovered:
+                raise ValueError(
+                    f"{pos_name_pred}: the prediction holds only planes {recorded_planes} but focus2d scores "
+                    f"{[list(range(s.start, s.stop)) for s in focus_slabs]} (missing {uncovered}); the predict "
+                    "plane file and this eval resolve the focus plane differently"
+                )
+
     # In-focus slab for the 2D deep-feature crops + per-cell similarity (on by
     # default, feature_metrics.focus_slab). Computed once from the GT phase focus
     # plane (focus_slice zattrs, written by precompute-gt build.focus) and shared
     # with the prediction (slice-by-slice); None per t means full-stack
-    # projection. Does not touch CP.
+    # projection. Does not touch CP. focus2d replaces it with its own slab.
     slab_cfg = read_focus_slab_config(config)
-    if slab_cfg is not None:
+    if focus2d is not None:
+        z_slabs: list[slice | None] = list(focus_slabs)
+    elif slab_cfg is not None:
         fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
-        z_slabs: list[slice | None] = build_focus_slabs(
+        z_slabs = build_focus_slabs(
             pos_gt,
             halfwidth=slab_cfg.halfwidth,
             t_count=T,
@@ -735,26 +803,9 @@ def _process_one_fov(
     # Segmentation settings are read off ``cache_ctx``, which ``init_cache_context``
     # already resolved from this same config — no second OmegaConf.select pass.
     instance_mode = bool(getattr(config, "compute_instance_ap", False))
-    semantic_focus = _semantic_focus_settings(config)
     backend = cache_ctx.backend
     gt_cells = pred_cells = None
     gt_mask_stack = pred_mask_stack = None
-
-    gt_nuclei_vol: np.ndarray | None = None
-
-    def _gt_nuclei() -> np.ndarray:
-        """GT nucleus volume ``(T, Z, Y, X)``, read from zarr at most once per FOV.
-
-        Both the ``nucleus_area`` focus anchor and the whole-cell seed/carve paths
-        consume it. Comes from a separate store (``pos_nuclei``) when the GT nuclei
-        live apart from the GT membrane (A549: membrane in ``CAAX_*.ozx``, nuclei in
-        ``H2B_*.ozx``), else from the GT plate (iPSC ``cell.zarr``).
-        """
-        nonlocal gt_nuclei_vol
-        if gt_nuclei_vol is None:
-            source = pos_nuclei if pos_nuclei is not None else pos_gt
-            gt_nuclei_vol = np.asarray(source.data[:, source.get_channel_index(cache_ctx.nuclei_channel_name)])
-        return gt_nuclei_vol
 
     if instance_mode:
         is3d = cache_ctx.dimension == "3d"
@@ -765,13 +816,16 @@ def _process_one_fov(
         else:
             sel = cache_ctx.slice_selection
             slab_hw = cache_ctx.focus_slab_halfwidth if sel == "focus" else 0
-            if sel == "focus":
+            if focus_z is not None:
+                # focus2d validated slice_selection=focus and focus_slab_halfwidth == its halfwidth.
+                z_idx = focus_z
+            elif sel == "focus":
                 # In-focus plane per FOV; the same z (+ optional +/-slab_hw MIP) is applied to
                 # GT, prediction, and nuclei seeds. Default anchor is the plane of maximum
                 # nuclear foreground area (widest cross-section) — robust to the phase-midband
                 # edge artifacts on confocal iPSC. See focus.resolve_focus_instance_planes.
                 if cache_ctx.focus_anchor == "nucleus_area":
-                    nucleus_vol = target if config.target_name == "nucleus" else _gt_nuclei()
+                    nucleus_vol = _gt_nuclei()
                 else:
                     nucleus_vol = None
                 z_idx = resolve_focus_instance_planes(
@@ -848,14 +902,10 @@ def _process_one_fov(
                 gt_cells = fov_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
             with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 pred_cells = fov_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
-    elif semantic_focus is not None:
+    elif focus2d is not None:
         # Focus-plane semantic masks (2D benchmark): segment the slab around the GT focus
         # plane, keep its focus plane. Not cached -- a 3-plane slab costs milliseconds on
         # GPU, and the whole-volume mask cache must not hold 2D masks.
-        nucleus_vol = _gt_nuclei() if semantic_focus["focus_anchor"] == "nucleus_area" else None
-        focus_z = resolve_focus_instance_planes(
-            config, t_count=T, pos_gt=pos_gt, pos_name=pos_name_pred, nucleus_vol=nucleus_vol
-        )
 
         def _segment(vol: np.ndarray) -> np.ndarray:
             return segment(
@@ -869,9 +919,9 @@ def _process_one_fov(
 
         # (T, 1, Y, X): the 2D instance-label shape, so segmentation_results.zarr stays 5D.
         with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-            gt_mask_stack = segment_focus_slabs(target, focus_z, semantic_focus["halfwidth"], _segment)[:, None]
+            gt_mask_stack = segment_focus_slabs(target, focus_z, focus2d["halfwidth"], _segment)[:, None]
         with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-            pred_mask_stack = segment_focus_slabs(predict, focus_z, semantic_focus["halfwidth"], _segment)[:, None]
+            pred_mask_stack = segment_focus_slabs(predict, focus_z, focus2d["halfwidth"], _segment)[:, None]
     else:
         with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
@@ -888,8 +938,11 @@ def _process_one_fov(
     gt_morphem_per_t = None
     pred_per_t = None
     if config.compute_feature_metrics:
+        # focus2d: CP regionprops on the focus plane, as (T, 1, Y, X) one-plane volumes.
+        cp_target = focus_plane_stack(target, focus_z)
+        cp_cells = focus_plane_stack(cell_segmentation, focus_z)
         with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-            gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
+            gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, cp_target, cp_cells)
         with region_timer("deep_gt_dinov3", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_dinov3_per_t = fov_deep_features(
                 cache_ctx,
@@ -945,6 +998,7 @@ def _process_one_fov(
                 config.feature_metrics.patch_size,
                 config.pixel_metrics.spacing,
                 z_slabs=z_slabs,
+                cp_planes=focus_z,
             )
 
     microssim_data: list[dict] = []
@@ -976,10 +1030,13 @@ def _process_one_fov(
     for t in tqdm(range(T), desc="Processing timepoints", leave=False, disable=suppress_inner_tqdm):
         data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
+        # focus2d scores the (Y, X) focus plane: 2D SSIM, Spectral PCC and FRC.
+        pixel_pred = predict_xp[t] if focus_z is None else predict_xp[t, focus_z[t]]
+        pixel_target = target_xp[t] if focus_z is None else target_xp[t, focus_z[t]]
         with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock(gate=use_gpu):
             pixel_metrics = compute_pixel_metrics(
-                predict_xp[t],
-                target_xp[t],
+                pixel_pred,
+                pixel_target,
                 spacing=config.pixel_metrics.spacing,
                 fsc_kwargs=config.pixel_metrics.fsc,
                 spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
@@ -1001,7 +1058,9 @@ def _process_one_fov(
                     )
                 )
         if config.compute_microssim:
-            microssim_data.append({"target": target[t], "predict": predict[t]})
+            # MicroMS3IM scores (Z, Y, X) entries slice by slice; focus2d keeps the plane only.
+            planes = slice(None) if focus_z is None else slice(focus_z[t], focus_z[t] + 1)
+            microssim_data.append({"target": target[t, planes], "predict": predict[t, planes]})
         fov_pixel_metrics.append(pixel_row)
 
         with region_timer("mask_metrics", pos_name_pred, t):
@@ -1290,55 +1349,6 @@ def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
         if float(value) < 0:
             raise ValueError(f"pixel_metrics.foreground.{key} must be >= 0; got {value!r}")
         settings[key] = float(value)
-    return settings
-
-
-def _semantic_focus_settings(config: DictConfig) -> dict[str, Any] | None:
-    """Resolve ``segmentation.semantic_focus_halfwidth`` into the focus-plane mask recipe, or ``None`` when off.
-
-    Off (null, the default) scores the semantic masks (ER, mitochondria, ...) over the
-    whole volume. An integer ``h`` segments the ``2*h + 1`` planes centered on each
-    timepoint's focus plane as one small volume and scores only the focus plane of the
-    mask (``h=1`` is the 2D benchmark's slab3). The plane is chosen by
-    ``segmentation.focus_anchor``, the same resolver the 2D instance planes use. The
-    dict is also the ``semantic_focus`` provenance stamp, so it records every setting
-    that moves the plane.
-
-    Raises
-    ------
-    ValueError
-        If the halfwidth is negative, ``compute_instance_ap`` is on (instance targets
-        choose their plane with ``segmentation.slice_selection``), the anchor is
-        unknown, or ``nucleus_area`` has no ``segmentation.nuclei_channel_name``.
-    """
-    from dynacell.evaluation.focus import read_focus_compute_config
-
-    halfwidth = OmegaConf.select(config, "segmentation.semantic_focus_halfwidth", default=None)
-    if halfwidth is None:
-        return None
-    if bool(OmegaConf.select(config, "compute_instance_ap", default=False)):
-        raise ValueError(
-            "segmentation.semantic_focus_halfwidth applies to semantic masks; instance targets "
-            "choose their plane with segmentation.slice_selection"
-        )
-    if int(halfwidth) < 0:
-        raise ValueError(f"segmentation.semantic_focus_halfwidth must be >= 0; got {halfwidth!r}")
-    anchor = str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area"))
-    settings: dict[str, Any] = {"halfwidth": int(halfwidth), "focus_anchor": anchor}
-    if anchor == "nucleus_area":
-        nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
-        if nuclei_channel is None:
-            raise ValueError(
-                "segmentation.focus_anchor='nucleus_area' needs segmentation.nuclei_channel_name "
-                "(the GT nuclei channel) for semantic_focus_halfwidth; use 'phase_midband' for stores without one"
-            )
-        settings["nuclei_channel_name"] = str(nuclei_channel)
-    elif anchor == "phase_midband":
-        channel = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
-        settings["focus_channel_name"] = channel
-        settings.update(read_focus_compute_config(config, channel_name=channel).estimator_params)
-    else:
-        raise ValueError(f"segmentation.focus_anchor must be 'nucleus_area' or 'phase_midband', got {anchor!r}")
     return settings
 
 
@@ -1658,6 +1668,18 @@ def evaluate_predictions(
                 gt_positions = [(n, p) for n, p in gt_positions if _keep(n)]
                 seg_positions = [(n, p) for n, p in seg_positions if _keep(n)]
 
+            # A plane-restricted prediction (HCSDataModule.predict_z_planes) holds zeros off
+            # its slab; refuse a full-volume eval of it before MicroMS3IM fits on those zeros.
+            if read_focus2d_config(config) is None:
+                restricted = [
+                    n for n, p in pred_positions if predicted_z_planes(p, io_config.pred_channel_name) is not None
+                ]
+                if restricted:
+                    raise ValueError(
+                        f"{len(restricted)} FOVs of the prediction hold only some planes (a plane-restricted "
+                        f"predict, e.g. {restricted[:3]}); score it with focus2d.halfwidth, not over the full volume"
+                    )
+
             # Position-count alignment.
             #
             # When ``limit_positions`` is unset (production), require strict
@@ -1755,6 +1777,21 @@ def evaluate_predictions(
                 max_pairs = int(OmegaConf.select(config, "microssim.calibration.max_pairs", default=12))
                 seed = int(OmegaConf.select(config, "microssim.calibration.seed", default=42))
                 cache_reads = bool(OmegaConf.select(config, "microssim.calibration.cache", default=False))
+                focus_planes = None
+                if read_focus2d_config(config) is not None:
+
+                    def focus_planes(pos_name: str, pos_gt, target: np.ndarray) -> list[int]:
+                        pos_nuclei = nuclei_by_name[pos_name] if nuclei_by_name is not None else None
+                        return resolve_focus2d_planes(
+                            config,
+                            t_count=target.shape[0],
+                            pos_gt=pos_gt,
+                            pos_name=pos_name,
+                            nucleus_vol=lambda: gt_nucleus_volume(
+                                config, pos_gt=pos_gt, pos_nuclei=pos_nuclei, target=target
+                            ),
+                        )
+
                 with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
                     microssim_sim, microssim_read_cache = _calibrate_microssim(
                         pred_positions,
@@ -1764,6 +1801,7 @@ def evaluate_predictions(
                         max_pairs=max_pairs,
                         seed=seed,
                         cache_reads=cache_reads,
+                        focus_planes=focus_planes,
                     )
 
             if config.compute_feature_metrics:
@@ -1783,7 +1821,9 @@ def evaluate_predictions(
                     sides_for_precompute["pred"] = pred_cache_ctx
                     side_positions["pred"] = pred_positions
                     side_channels["pred"] = io_config.pred_channel_name
-                if sides_for_precompute:
+                # focus2d slabs need the GT nuclei per FOV; the per-FOV path fills the
+                # caches itself, so the batched warm pass is skipped there.
+                if sides_for_precompute and read_focus2d_config(config) is None:
                     # In-focus slabs (GT-derived, keyed by pos_name) so the
                     # batched warm pass builds the same slab crops the per-FOV
                     # path expects — else the cache would be poisoned with
@@ -2124,7 +2164,7 @@ def save_metrics(
         prediction_digest=prediction_digest,
         pixel_foreground=_foreground_stamp(config),
         compute_fid=config.compute_feature_metrics and _feature_metric_flags(config)["compute_fid"],
-        semantic_focus=_semantic_focus_settings(config),
+        focus2d=read_focus2d_config(config),
     )
 
 
@@ -2153,7 +2193,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # Resolved before every early return: both entrypoints call this gate before any
     # model load, so an invalid recipe fails here rather than after the load.
     foreground = _foreground_stamp(config)
-    semantic_focus = _semantic_focus_settings(config)
+    focus2d = read_focus2d_config(config)
     if _forces_final_metrics(config):
         return False
     save_dir = Path(config.save.save_dir)
@@ -2186,7 +2226,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         prediction_sources=sources,
         pixel_foreground=foreground,
         compute_fid=config.compute_feature_metrics and _feature_metric_flags(config)["compute_fid"],
-        semantic_focus=semantic_focus,
+        focus2d=focus2d,
     ):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
@@ -2300,7 +2340,9 @@ _MODEL_LOADING_FIELDS: tuple[str, ...] = (
 #: on them. ``pixel_metrics.foreground`` sets the ``FG_*`` columns and their scoring
 #: region, so one bucket must not mix FG and no-FG rows or two recipes. (Not all of
 #: ``pixel_metrics``: ``spacing`` legitimately follows each condition's dataset_ref.)
-_GROUPED_SHARED_FIELDS: tuple[str, ...] = ("pixel_metrics.foreground",)
+#: ``focus2d`` switches every metric between the full volume and the focus plane, so a
+#: bucket is either the 3D or the 2D benchmark (the anchor may still follow the dataset).
+_GROUPED_SHARED_FIELDS: tuple[str, ...] = ("pixel_metrics.foreground", "focus2d")
 
 
 def _snapshot_field(cfg: DictConfig, cfg_field: str):

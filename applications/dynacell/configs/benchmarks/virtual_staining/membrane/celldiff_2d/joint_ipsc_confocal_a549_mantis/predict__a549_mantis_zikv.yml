@@ -1,7 +1,7 @@
 # CellDiff-2D predict: membrane trained on joint_ipsc_confocal_a549_mantis, tested on a549-mantis-caax-zikv.
 # In-focus 2D track. The Z=1 checkpoint predicts over the FULL-Z 3D test
 # store with z_window_size=1 (celldiff_2d_predict overlay), emitting one
-# window per z-plane -> a full-Z prediction store the existing focus-aware
+# window per z-plane -> a full-extent prediction store the existing focus-aware
 # eval consumes unchanged.
 #
 # Source normalization is MinMaxSampled(timepoint_statistics), reproducing
@@ -36,6 +36,13 @@ model:
 
 data:
   init_args:
+    # 2D benchmark (focus2d.halfwidth=1): predict only the 3-plane focus slab of each
+    # FOV/timepoint listed in this plane file (precompute-gt build.focus_planes, resolved
+    # exactly as the focus2d eval resolves it); every other plane of the full-extent store
+    # stays empty, so only a focus2d eval reads the store. Set null to predict every plane.
+    # Remove a full-Z store here before a slab predict: the writer refuses to keep its
+    # old planes around the slab.
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/membrane/a549__zikv__h1.json
     normalizations:
       - class_path: viscy_transforms.MinMaxSampled
         init_args:

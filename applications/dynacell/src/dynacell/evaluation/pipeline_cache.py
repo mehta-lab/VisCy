@@ -284,16 +284,25 @@ def init_cache_context(
     # the plane, so fold the estimator signature into the deep tag and the resolved
     # params onto the context (consumed by _instance_identity). Both are channel-
     # independent, so one resolve covers both paths.
-    from dynacell.evaluation.focus import read_focus_compute_config, read_focus_slab_config
+    from dynacell.evaluation.focus import read_focus2d_config, read_focus_compute_config, read_focus_slab_config
 
+    # focus2d (the 2D benchmark) scores CP on the focus plane and the deep features on
+    # its slab, and the CP identity carries no z geometry, so its caches live in their
+    # own subdir and the manifest records the plane recipe; a cache of another recipe
+    # is refused rather than reused or overwritten.
+    focus2d = read_focus2d_config(config)
     slab_cfg = read_focus_slab_config(config)
     slice_selection = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
     focus_estimator_params: dict[str, float] = {}
-    if slab_cfg is not None or slice_selection == "focus":
+    if slab_cfg is not None or slice_selection == "focus" or focus2d is not None:
         fc = read_focus_compute_config(config)
         focus_estimator_params = fc.estimator_params
-        if slab_cfg is not None:
+        focus_tag = None
+        if focus2d is not None:
+            focus_tag = f"+focus2d_h{focus2d['halfwidth']}_{focus2d['focus_anchor']}"
+        elif slab_cfg is not None:
             focus_tag = f"+focusslab_h{slab_cfg.halfwidth}_{slab_cfg.channel_name}_{fc.estimator_sig}"
+        if focus_tag is not None:
             dinov3_preprocess_version = (dinov3_preprocess_version + focus_tag) if dinov3_preprocess_version else None
             dynaclr_preprocess_version = (
                 (dynaclr_preprocess_version + focus_tag) if dynaclr_preprocess_version else None
@@ -328,7 +337,7 @@ def init_cache_context(
         focus_channel_name=OmegaConf.select(config, "segmentation.focus_channel_name", default=None),
         focus_anchor=str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area")),
         focus_slab_halfwidth=int(OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)),
-        focus_slab_enabled=slab_cfg is not None,
+        focus_slab_enabled=slab_cfg is not None or focus2d is not None,
         focus_estimator_params=focus_estimator_params,
         nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
         nuclei_plate_path=str(nuclei_plate_path) if nuclei_plate_path is not None else None,
@@ -364,8 +373,18 @@ def init_cache_context(
         ).expanduser().resolve(strict=False):
             raise ValueError("io.pred_cache_dir must be distinct from io.gt_cache_dir")
 
-    paths = cache_paths(Path(cache_dir))
+    cache_root = Path(cache_dir)
+    if focus2d is not None:
+        cache_root = cache_root / f"focus2d_h{focus2d['halfwidth']}"
+    paths = cache_paths(cache_root)
     manifest = load_manifest(paths)
+    if focus2d is not None:
+        recorded = manifest.get("focus2d")
+        if recorded is not None and recorded != focus2d:
+            raise StaleCacheError(
+                f"{cache_root} holds a focus2d cache of another plane recipe: manifest={recorded!r}, config={focus2d!r}"
+            )
+        manifest["focus2d"] = focus2d
 
     other_side = _OTHER_SIDE[side]
     if manifest.get(other_side) is not None:

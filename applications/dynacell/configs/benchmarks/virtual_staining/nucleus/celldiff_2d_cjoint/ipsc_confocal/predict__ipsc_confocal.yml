@@ -26,6 +26,7 @@ model:
     mask_mode: joint
 data:
   init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/nucleus/ipsc__h1.json
     normalizations:
     - class_path: viscy_transforms.MinMaxSampled
       init_args:

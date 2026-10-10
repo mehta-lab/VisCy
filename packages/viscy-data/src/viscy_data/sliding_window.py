@@ -1,7 +1,10 @@
 """Sliding window datasets for HCS NGFF stores."""
 
 import bisect
+import json
 import logging
+from collections.abc import Mapping, Sequence
+from os import PathLike
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +19,29 @@ from viscy_data._utils import _ensure_channel_list, _read_norm_meta, _search_int
 from viscy_data.foreground_masks import ForegroundMaskSupport
 
 _logger = logging.getLogger("lightning.pytorch")
+
+
+def read_z_planes(path: str | PathLike) -> dict[str, list[list[int]]]:
+    """Read a predict plane file: position name -> one Z-plane list per timepoint.
+
+    The file is JSON with a ``positions`` mapping (``{"A/1/0": [[11, 12, 13], ...]}``);
+    any other top-level keys are provenance (how the planes were chosen) and are
+    ignored here.
+
+    Parameters
+    ----------
+    path : str or PathLike
+        Plane file written by the producer of the planes (dynacell writes them with
+        ``precompute-gt build.focus_planes``).
+
+    Returns
+    -------
+    dict[str, list[list[int]]]
+        Plate-relative position name to per-timepoint plane lists.
+    """
+    with open(path) as f:
+        payload = json.load(f)
+    return {name: [[int(z) for z in planes] for planes in per_t] for name, per_t in payload["positions"].items()}
 
 
 class SlidingWindowDataset(Dataset):
@@ -61,6 +87,12 @@ class SlidingWindowDataset(Dataset):
         ``(T, C, Z, Y, X)``. Channels are ``source + target`` in order.
         When set, bypasses zarr reads via ``.clone()`` copies from the
         preloaded data. Default None reads from zarr.
+    z_planes : Mapping[str, Sequence[Sequence[int]]] or None
+        Restrict the windows to these Z planes: plate-relative position name
+        (``"A/1/0"``) to one plane list per timepoint (see :func:`read_z_planes`).
+        Requires ``z_window_size == 1``; every position needs an entry with one list
+        per timepoint. Windows stay in increasing ``z`` order within a timepoint.
+        Default None takes every plane.
     """
 
     def __init__(
@@ -77,8 +109,12 @@ class SlidingWindowDataset(Dataset):
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
         preloaded_fovs: list[Tensor] | None = None,
+        z_planes: Mapping[str, Sequence[Sequence[int]]] | None = None,
     ) -> None:
         super().__init__()
+        if z_planes is not None and z_window_size != 1:
+            raise ValueError(f"z_planes selects single planes and needs z_window_size=1, got {z_window_size}")
+        self.z_planes = z_planes
         if not 0.0 <= min_nonzero_fraction <= 1.0:
             raise ValueError(f"min_nonzero_fraction must be in [0, 1], got {min_nonzero_fraction}")
         if max_nonzero_retries < 0:
@@ -138,9 +174,35 @@ class SlidingWindowDataset(Dataset):
             if self.fg_mask_support is not None:
                 self.fg_mask_support.validate_and_store(fov, img_arr, self.target_ch_idx)
         self._max_window = w
+        self._planned: list[tuple[int, int]] | None = None
+        if self.z_planes is not None:
+            self._planned = self._planned_windows()
+            self._max_window = len(self._planned)
+
+    def _planned_windows(self) -> list[tuple[int, int]]:
+        """``(array index, window index)`` of every ``z_planes`` plane, in dataset order."""
+        planned = []
+        for arr_idx, img_arr in enumerate(self.window_arrays):
+            name = img_arr.path.rsplit("/", 1)[0]
+            if name not in self.z_planes:
+                raise KeyError(f"z_planes has no entry for position {name!r}")
+            per_t = self.z_planes[name]
+            if len(per_t) != img_arr.frames:
+                raise ValueError(f"z_planes[{name!r}] has {len(per_t)} timepoints; the array has {img_arr.frames}")
+            for t, planes in enumerate(per_t):
+                zs = sorted(set(int(z) for z in planes))
+                if not zs or zs[0] < 0 or zs[-1] >= img_arr.slices:
+                    raise ValueError(
+                        f"z_planes[{name!r}][{t}] = {list(planes)} is empty or outside [0, {img_arr.slices})"
+                    )
+                planned.extend((arr_idx, t * img_arr.slices + z) for z in zs)
+        return planned
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, int]:
         """Look up window given index."""
+        if self._planned is not None:
+            arr_idx, tz = self._planned[index]
+            return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)
         arr_idx = bisect.bisect_right(self.window_keys, index)
         tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
         return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)

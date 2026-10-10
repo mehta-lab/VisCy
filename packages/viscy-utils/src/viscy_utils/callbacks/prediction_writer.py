@@ -25,8 +25,10 @@ from viscy_utils.prediction_metadata import (
     mark_started,
     outruns,
     prediction_run,
+    record_z_planes,
     same_run,
     tzyx_shape,
+    z_planes_sha256_12,
 )
 from viscy_utils.tensor_utils import to_numpy
 
@@ -260,6 +262,10 @@ class HCSPredictionWriter(BasePredictionWriter):
                 f"Checkpoint '{self.checkpoint_path}' changed since this writer was constructed alongside the "
                 "model, so its hash would not name the weights actually loaded. Restart the predict."
             )
+        # Plane-restricted predict (HCSDataModule.predict_z_planes): only the listed
+        # planes are predicted, the rest keep the fill value, and the planes are part
+        # of the run identity so a resume never mixes them with another selection.
+        self._z_planes = dm.predict_dataset.z_planes
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
             array_key=dm.array_key,
@@ -267,15 +273,21 @@ class HCSPredictionWriter(BasePredictionWriter):
             z_reduction=self.z_reduction,
             checkpoint_path=self.checkpoint_path,
             settings_sha256_12=self.settings_sha256_12,
+            z_planes_sha256_12=None if self._z_planes is None else z_planes_sha256_12(self._z_planes),
         )
         window_arrays = dm.predict_dataset.window_arrays
         self._source_shapes = {f"/{array.path}": tzyx_shape(array) for array in window_arrays}
         # Array dimensions grow before writes, so only a successful write of every
         # distinct (T, Z-window) establishes completion, including overlapping windows.
-        self._written_windows: dict[str, NDArray[np.bool_]] = {
-            f"/{array.path}": np.zeros((array.frames, array.slices - dm.z_window_size + 1), dtype=bool)
-            for array in window_arrays
-        }
+        # A plane-restricted run marks the windows it skips as written up front.
+        self._written_windows: dict[str, NDArray[np.bool_]] = {}
+        for array in window_arrays:
+            written = np.zeros((array.frames, array.slices - dm.z_window_size + 1), dtype=bool)
+            if self._z_planes is not None:
+                written[:] = True
+                for t, planes in enumerate(self._z_planes[array.path.rsplit("/", 1)[0]]):
+                    written[t, list(planes)] = False
+            self._written_windows[f"/{array.path}"] = written
         run_positions = {array.path.rsplit("/", 1)[0] for array in window_arrays}
         if os.path.exists(self.output_store):
             if self.write_input:
@@ -288,6 +300,7 @@ class HCSPredictionWriter(BasePredictionWriter):
                 overwritten: list[str] = []
                 mixed: list[str] = []
                 oversized: list[str] = []
+                foreign: list[str] = []
                 channel_orders: set[tuple[str, ...]] = set()
                 for name, pos in positions.items():
                     existing = set(pos.channel_names)
@@ -313,6 +326,10 @@ class HCSPredictionWriter(BasePredictionWriter):
                         overwritten.append(name)
                         if self._outruns_source(pos, name, dm.array_key):
                             oversized.append(name)
+                        # A plane-restricted run rewrites only its planes; any other run's
+                        # voxels would survive beside them (overwrite rewrites in place).
+                        if self._z_planes is not None and self._cannot_share(pos, prediction_channel):
+                            foreign.append(name)
                     elif self._cannot_share(pos, prediction_channel):
                         mixed.append(name)
                 if oversized:
@@ -322,6 +339,13 @@ class HCSPredictionWriter(BasePredictionWriter):
                         f"slices than their source (e.g. {oversized[:3]}); arrays only grow, so the stale "
                         "planes would survive every rewrite yet the FOVs would be marked complete. "
                         "Predict into a new output store."
+                    )
+                if foreign:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(foreign)} FOVs in '{self.output_store}' hold {prediction_channel} from another "
+                        f"run (e.g. {foreign[:3]}); a plane-restricted predict writes only its planes, so the "
+                        "other run's planes would survive beside them. Remove the store or predict into a new one."
                     )
                 if mixed:
                     self.plate.close()
@@ -486,7 +510,10 @@ class HCSPredictionWriter(BasePredictionWriter):
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
         if written.all():
-            position = self.plate[img_name.rsplit("/", 1)[0]]
+            name = img_name.strip("/").rsplit("/", 1)[0]
+            position = self.plate[name]
+            planes = None if self._z_planes is None else self._z_planes[name]
+            record_z_planes(position, self._prediction_channels, planes)
             marker = completion_marker(self._source_shapes[img_name], self._run)
             mark_complete(position, self._prediction_channels, marker)
 
@@ -519,7 +546,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         Parameters
         ----------
         position : Position
-            Existing output position outside this run.
+            Existing output position outside this run (or, for a plane-restricted
+            run, inside it).
         channels : list of str
             This run's prediction channels.
 
@@ -572,6 +600,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         # from one written before completion markers existed.
         mark_started(position, self._prediction_channels, self._run)
         shape = [1] + list(shape)
+        if self._z_planes is not None:
+            # Allocate the full source extent: the planes this run skips must still
+            # exist (at the fill value) so the store aligns plane by plane with its
+            # source, instead of ending at the last predicted plane.
+            shape[0], shape[2] = self._source_shapes[img_name][:2]
         shape[1] = len(position.channel_names)
         return position.create_zeros(
             arr_name,

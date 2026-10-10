@@ -3,13 +3,14 @@
 import hashlib
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from iohub.ngff import ImageArray, Position
 
 __all__ = [
+    "PREDICTED_Z_PLANES_KEY",
     "PREDICTION_COMPLETE_KEY",
     "checkpoint_sha256_12",
     "checkpoint_signature",
@@ -18,12 +19,15 @@ __all__ = [
     "mark_started",
     "marker_identity",
     "outruns",
+    "predicted_z_planes",
     "prediction_complete",
     "prediction_run",
+    "record_z_planes",
     "same_marker",
     "same_run",
     "started_marker",
     "tzyx_shape",
+    "z_planes_sha256_12",
 ]
 
 # Position attribute mapping each prediction channel to its marker: the run
@@ -33,6 +37,12 @@ __all__ = [
 # own was never recorded by any run -- written before markers existed -- so
 # nothing can vouch for it, even when other channels of the FOV are marked.
 PREDICTION_COMPLETE_KEY = "viscy_prediction_complete"
+
+# Position attribute mapping each prediction channel to the Z planes a plane-restricted
+# run (``HCSDataModule.predict_z_planes``) predicted, one list per timepoint. Every other
+# plane holds the array's fill value, so a reader must score only these. Absent for a
+# channel predicted on every plane; a full run clears a stale entry.
+PREDICTED_Z_PLANES_KEY = "viscy_predicted_z_planes"
 
 # Marker fields kept for provenance only; two markers that differ solely in
 # these still describe the same prediction (a checkpoint may be moved).
@@ -168,6 +178,28 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, memoize: bool = True) -> st
     return digest[:12]
 
 
+def _canonical_planes(per_t: Sequence[Sequence[int]]) -> list[list[int]]:
+    """Sorted, de-duplicated ``int`` planes of each timepoint."""
+    return [sorted({int(z) for z in planes}) for planes in per_t]
+
+
+def z_planes_sha256_12(z_planes: Mapping[str, Sequence[Sequence[int]]]) -> str:
+    """Content hash of a plane selection, independent of key order and plane order.
+
+    Parameters
+    ----------
+    z_planes : Mapping[str, Sequence[Sequence[int]]]
+        Position name to one plane list per timepoint.
+
+    Returns
+    -------
+    str
+        First 12 hex digits of the SHA-256 of the canonical JSON.
+    """
+    canonical = {name: _canonical_planes(per_t) for name, per_t in z_planes.items()}
+    return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def prediction_run(
     *,
     array_key: str,
@@ -175,6 +207,7 @@ def prediction_run(
     z_reduction: str,
     checkpoint_path: str | os.PathLike | None,
     settings_sha256_12: str | None = None,
+    z_planes_sha256_12: str | None = None,
 ) -> dict[str, Any]:
     """Describe what determines a run's voxels: the weights, the depth handling and the other settings.
 
@@ -197,6 +230,10 @@ def prediction_run(
         Hash of the remaining settings that shape the predicted voxels (model
         inference arguments, input normalization, precision), computed by the
         submitter from the resolved config; ``None`` when the run records none.
+    z_planes_sha256_12 : str or None, optional
+        :func:`z_planes_sha256_12` of the planes a plane-restricted run predicts.
+        ``None`` (every plane) leaves the key out, so a full run's identity is
+        the one recorded before plane selection existed.
 
     Returns
     -------
@@ -204,7 +241,7 @@ def prediction_run(
         JSON-serializable identity, including ``checkpoint_sha256_12`` of the
         file's content and its path for provenance.
     """
-    return {
+    run = {
         "array_key": array_key,
         "z_window_size": int(z_window_size),
         "z_reduction": z_reduction,
@@ -214,6 +251,9 @@ def prediction_run(
         else checkpoint_sha256_12(checkpoint_path, memoize=False),
         "settings_sha256_12": settings_sha256_12,
     }
+    if z_planes_sha256_12 is not None:
+        run["z_planes_sha256_12"] = z_planes_sha256_12
+    return run
 
 
 def started_marker(run: dict[str, Any]) -> dict[str, Any]:
@@ -370,3 +410,46 @@ def prediction_complete(position: Position, channels: Iterable[str], marker: dic
     """
     completed = position.zattrs.get(PREDICTION_COMPLETE_KEY, {})
     return all(same_marker(completed.get(channel), marker) for channel in channels)
+
+
+def record_z_planes(position: Position, channels: Iterable[str], planes: Sequence[Sequence[int]] | None) -> None:
+    """Record the planes ``channels`` were predicted on, or clear them for a full prediction.
+
+    Parameters
+    ----------
+    position : Position
+        Output position whose attribute to update.
+    channels : iterable of str
+        Prediction channels that were just fully written.
+    planes : Sequence[Sequence[int]] or None
+        One plane list per timepoint, or ``None`` when every plane was predicted.
+    """
+    recorded = dict(position.zattrs.get(PREDICTED_Z_PLANES_KEY, {}))
+    for channel in channels:
+        if planes is None:
+            recorded.pop(channel, None)
+        else:
+            recorded[channel] = _canonical_planes(planes)
+    if recorded:
+        position.zattrs[PREDICTED_Z_PLANES_KEY] = recorded
+    elif PREDICTED_Z_PLANES_KEY in position.zattrs:
+        del position.zattrs[PREDICTED_Z_PLANES_KEY]
+
+
+def predicted_z_planes(position: Position, channel: str) -> list[list[int]] | None:
+    """Planes ``channel`` was predicted on (one list per timepoint), or ``None`` for every plane.
+
+    Parameters
+    ----------
+    position : Position
+        Prediction position to inspect.
+    channel : str
+        Prediction channel name.
+
+    Returns
+    -------
+    list[list[int]] or None
+        The recorded per-timepoint planes, or ``None`` when the channel holds a
+        prediction on every plane.
+    """
+    return position.zattrs.get(PREDICTED_Z_PLANES_KEY, {}).get(channel)

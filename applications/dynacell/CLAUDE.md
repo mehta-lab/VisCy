@@ -233,9 +233,23 @@ default (since 35c0235b, 2026-06-16):
   in-focus plane (vs the old `frac=0.30`). `segmentation.focus_anchor` chooses it:
   `nucleus_area` (default, widest GT nuclear cross-section) or `phase_midband`
   (the phase estimator below).
-- `segmentation.semantic_focus_halfwidth` (default null = whole volume) — semantic
-  targets (ER, mito) segment the `2h+1` planes around that plane and score only
-  the focus plane of the mask; `h=1` is the 2D benchmark's slab3.
+- `focus2d.halfwidth` (default null = the 3D benchmark, every metric over the full
+  volume) — the 2D benchmark: one GT-anchored plane per timepoint
+  (`segmentation.focus_anchor`) scores every metric. Pixel metrics, MicroMS3IM and CP
+  on the plane (2D SSIM/Spectral PCC, `FRC_Resolution`); deep features + per-cell
+  similarity on its `2h+1` slab (overrides `focus_slab`); semantic masks segment the
+  slab and keep the plane; instance targets must match (`slice_selection=focus`,
+  `focus_slab_halfwidth=h`). `h=1` is slab3. Caches go to `<cache_dir>/focus2d_h<h>/`
+  (the CP cache key has no z geometry, so sharing would silently reuse 3D rows), CP
+  uses the `<target>__focus2d_h<h>` reference (`build_cp_reference.py --focus2d h`),
+  and the recipe is stamped in `metrics_provenance.json`.
+- `precompute-gt build.focus_planes=<json>` (needs `focus2d`) — writes the slab of
+  every position/timepoint as the plane file a 2D model predicts with
+  (`HCSDataModule.predict_z_planes`): the predict then skips every other plane, and
+  the writer records the planes so the eval refuses a store that lacks its slab (and
+  a full-volume eval of such a store). The 2D predict leaves keep `prediction.zarr`;
+  the writer refuses a slab predict into a store another run wrote (its planes would
+  survive around the slab), so remove a full-Z store before re-predicting it.
 - `precompute-gt build.focus=true` (default false) — writes `focus_slice` zattrs
   to a writable GT store.
 
