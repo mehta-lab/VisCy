@@ -72,6 +72,12 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the pix2pix3d MEMBRANE segaux arm (fit 37115317, epoch 39/40, --ckpt last,
+  # EMA, sliding window; same rule as draw 1), 2026-10-09: the iPSC leg, scored ahead of the
+  # A549 legs that are still predicting. Generate with --wave wave3f.
+  wave3f:
+    membrane:
+      - {model: pix2pix3d_unetvit_segaux_seed1, leaves: [ipsc]}
   # Second draw of the UNeXt2-3D NUCLEUS segaux arm (fit 37027791, epoch 199/200, --ckpt best
   # epoch=75), 2026-10-09: all four legs. Stage-matched to the baselines (v2 e81, v2_seed1 e88).
   # Generate with --wave wave3e.
