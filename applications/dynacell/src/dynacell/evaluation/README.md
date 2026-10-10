@@ -158,7 +158,7 @@ Defaults live in `_configs/eval.yaml`. `eval_grouped.yaml` adds `conditions`, an
 | `compute_instance_ap` | `false` | Instance segmentation and AP. On in the grouped nucleus/membrane leaves. |
 | `segmentation.backend` | `supermodel` | Nucleus/membrane segmenter. `cpdino` in the grouped leaves. |
 | `compute_cell_similarity` | `false` | Per-cell `PerCell_*` pixel similarity. |
-| `pixel_metrics.foreground.enabled` | `false` | Foreground-weighted `FG_*` pixel metrics. |
+| `pixel_metrics.foreground.{enabled,feather_sigma_um}` | `true`, `0.0` | Foreground-weighted `FG_*` pixel metrics on the hard GT interior mask; `feather_sigma_um: null` feathers it per target. |
 | `feature_metrics.compute_{fid,prc,mind}` | `true` | FID, precision/recall/F1, MIND. |
 | `feature_metrics.focus_slab.{enabled,halfwidth}` | `true`, `2` | Crop deep features from an in-focus slab of `2·halfwidth+1` planes. |
 | `use_gpu` | `true` | GPU for metrics, segmentation and extractors. |

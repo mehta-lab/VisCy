@@ -26,7 +26,7 @@ from hydra import compose, initialize_config_module
 from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.pipeline import _merge_condition, _select_conditions
+from dynacell.evaluation.pipeline import _foreground_settings, _merge_condition, _select_conditions
 
 from ._eval_fixtures import make_hcs_plate
 
@@ -84,6 +84,25 @@ def _compose_eval_cfg(overrides: list[str], config_name: str = "eval") -> DictCo
     with initialize_config_module(config_module="dynacell.evaluation._configs", version_base="1.2"):
         cfg = compose(config_name=config_name, overrides=[*overrides, _searchpath_override()])
     return cfg
+
+
+def test_default_eval_scores_interior_only_foreground() -> None:
+    """eval.yaml turns the FG_* columns on with a hard (unfeathered) GT interior mask.
+
+    Hand-built test configs omit the block, so only the composed default can pin it.
+    """
+    cfg = _compose_eval_cfg(["target_name=er"])
+    assert cfg.pixel_metrics.foreground.enabled is True
+    assert cfg.pixel_metrics.foreground.feather_sigma_um == 0.0
+    assert _foreground_settings(cfg) == {"source": "smooth_otsu", "smooth_sigma_um": 1.0, "feather_sigma_um": 0.0}
+
+
+@pytest.mark.parametrize("target_name", ["nucleus", "membrane", "nucleoli", "lysosomes", "er", "mitochondria"])
+def test_default_foreground_resolves_for_every_eval_target(target_name: str) -> None:
+    """With FG on by default, every target the evaluator accepts needs a null-sigma default."""
+    settings = _foreground_settings(_compose_eval_cfg([f"target_name={target_name}"]))
+    assert settings["feather_sigma_um"] == 0.0
+    assert settings["smooth_sigma_um"] > 0
 
 
 def test_default_eval_pins_morphem_to_a_hub_commit() -> None:
