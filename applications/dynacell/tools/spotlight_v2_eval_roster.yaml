@@ -72,6 +72,23 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # Second draw of the FNet-3D vscyto3daug MITO segaux arm (fit 37115309, step 200000, --ckpt best
+  # epoch=18-step=49400), 2026-10-10: all four legs. Its best-val epoch is 44-47 epochs before the
+  # baselines (62 / 65), so ctrl5 re-predicts it from latest-epoch=76 like draw 1's ctrl3.
+  # Generate with --wave wave3k.
+  wave3k:
+    mito:
+      - fnet3d_vscyto3daug_segaux_seed1
+  # Stage-matched control for wave3k (leaves: experiments/2026-09-24_spotlight-v2/e76_mito_seed1_control/).
+  # Generate with --wave ctrl5.
+  ctrl5:
+    mito:
+      - model: fnet3d_vscyto3daug_segaux_seed1_e76
+        pred_paths:
+          ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/ipsc/prediction.zarr
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__zikv/prediction.zarr
   # ... its A549 denv leg (predict 37187254 COMPLETED 2026-10-10 ~06:05). Generate with --wave wave3j.
   wave3j:
     membrane:
