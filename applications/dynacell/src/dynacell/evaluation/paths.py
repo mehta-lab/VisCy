@@ -331,6 +331,10 @@ PAPER_KEY: dict[str, str] = {
     # retained epoch=68-step=179400 instead of its best-val epoch=38, closer to the baselines'
     # epoch 62 / 65.
     "fnet3d_vscyto3daug_segaux_cldice_e68": "fnet3d_vscyto3daug_segaux_cldice_e68",
+    # Checkpoint-stage control: the mito vscyto3daug segaux DRAW 2 (segaux_seed1) re-predicted
+    # from latest-epoch=76-step=200000 instead of its best-val epoch=18, closer to the baselines'
+    # epoch 62 / 65 (as draw 1's segaux_e76).
+    "fnet3d_vscyto3daug_segaux_seed1_e76": "fnet3d_vscyto3daug_segaux_seed1_e76",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
