@@ -11,6 +11,14 @@
 # Hardware-shape constants (gpus, cpus_per_task, mem) match hardware_h200_single
 # so resource accounting is identical; only the GPU vendor constraint is
 # relaxed.
+#
+# `time` is sized from measurement, not habit: across every completed predict in
+# Slurm's retention window the longest single-pass run was 21.9 h (a pix2pix3d
+# sliding-window predict on an A6000), so 2 days is ~2.2x the observed maximum.
+# CELL-Diff is the one family that does not fit under this cap and has its own
+# profile -- see hardware_predict_celldiff.yml. Do NOT raise this back to 4 days
+# to accommodate a slow leaf; give that leaf a profile, or the cap stops meaning
+# anything.
 launcher:
   sbatch:
     partition: gpu
@@ -20,4 +28,4 @@ launcher:
     gpus: 1
     mem: "256G"
     constraint: null
-    time: "4-00:00:00"
+    time: "2-00:00:00"

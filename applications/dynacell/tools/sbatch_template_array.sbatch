@@ -51,4 +51,8 @@ fi
 echo "[array] task $SLURM_ARRAY_TASK_ID / $((${#CONFIGS[@]} - 1)) → $CFG"
 
 # Predict-only: single-rank, no NCCL preflight (matches sbatch_template_batch.sbatch).
-srun uv run python -m dynacell predict --config "$CFG"
+# --cpu-bind=none for the same reason as sbatch_template.sbatch: Slurm hands out
+# non-contiguous CPU masks on a busy node and srun's default core binding cannot
+# satisfy one ("Unable to satisfy cpu bind request", rc 192, ~3 s in). Single-rank
+# here, so there is no per-rank pinning to lose.
+srun --cpu-bind=none uv run python -m dynacell predict --config "$CFG"

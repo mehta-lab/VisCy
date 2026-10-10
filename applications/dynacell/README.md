@@ -2,6 +2,10 @@
 
 **An evaluation framework for dynamic 3D virtual staining of live cells.**
 
+- 📦 **Dataset:** [DynaCell on the AWS Open Data Registry](https://registry.opendata.aws/dynacell/)
+- 🤗 **Demo:** [Interactive virtual-staining Space on Hugging Face](https://huggingface.co/spaces/biohub/dynacell)
+- 📓 **Notebook:** [Get to know the DynaCell dataset](examples/notebooks/get-to-know-dynacell-dataset.ipynb)
+
 Virtual staining predicts fluorescence-like images of cell structures from
 label-free microscopy (brightfield, phase contrast), enabling live-cell
 profiling without the phototoxicity and photobleaching of direct fluorescent
@@ -14,24 +18,60 @@ three linked components:
   Zika/Dengue perturbations), plus a reprocessed, curated subset of the Allen
   Institute WTC-11 hiPSC dataset for cross-cell-type and cross-microscope
   evaluation.
-- **Baseline models** — four regression and one generative baseline, trained
-  under a shared protocol across nucleus, plasma membrane, endoplasmic reticulum
-  (ER), and mitochondria.
+- **Baseline models** — four regression baselines, a deterministic 3D Pix2Pix
+  GAN, and CELL-Diff under conditional-mean and sampled inference, trained under
+  a shared protocol across nucleus, plasma membrane, endoplasmic reticulum (ER),
+  and mitochondria.
 - **Metrics** — a three-tier panel measuring pixel-level fidelity, organelle
   segmentation utility, and single-cell phenotypic similarity.
 
-Across 2 cell types and microscopes, 4 organelles, and 3 perturbation states,
-DynaCell exposes trade-offs that single-metric evaluation obscures: regression
-baselines better predict organelle localization and are more robust to
-label-free input shifts, while the generative baseline better captures
+Across iPSC and A549 training/test domains, an evaluation-only HEK293T ablation,
+4 organelles, and 3 perturbation states, DynaCell exposes trade-offs that
+single-metric evaluation obscures. Deterministic point predictors preserve
+paired spatial structure, while sampled CELL-Diff better captures
 population-level phenotype distributions.
 
 This directory is the DynaCell application of the [VisCy](../../README.md)
 monorepo. See the paper for the full benchmark description.
 
+## Directory map
+
+- **[configs/](configs/README.md)** — Hydra/LightningCLI configs: reusable recipes, generic examples, and the
+  runnable benchmark leaves (`configs/benchmarks/virtual_staining/`).
+- **[src/](src/README.md)** — the installable `dynacell` package: engines, data/manifest layer, evaluation
+  pipeline, reporting, preprocessing, and the bundled dataset registry.
+- **[tools/](tools/README.md)** — operational scripts: leaf submission, config generation, data/artifact builders.
+- **[tests/](tests/README.md)** — the pytest suite (integration-first) for the package and tools.
+- **[examples/](examples/README.md)** — the dataset notebook and the Hugging Face virtual-staining demo.
+- **[CLAUDE.md](./CLAUDE.md)** — conventions reference: code↔paper names, prediction/eval-dir naming, batch
+  semantics, eval runtime.
+
 ## Installation
 
-DynaCell is part of the VisCy `uv` workspace. From the repository root:
+DynaCell is part of the VisCy [uv](https://docs.astral.sh/uv/) workspace and
+must be installed with `uv`. Install uv first if you don't have it
+(`curl -LsSf https://astral.sh/uv/install.sh | sh`), then:
+
+```bash
+git clone --branch dynacell-models https://github.com/mehta-lab/VisCy.git
+cd VisCy
+uv venv -p 3.13
+source .venv/bin/activate
+uv pip install -e "applications/dynacell[eval]"
+```
+
+The `eval` extra adds the evaluation stack (segmentation models, deep-feature
+extractors, `cubic`) used for the paper's metrics; drop it if you only train
+or predict. Python 3.12 or newer is required.
+
+Plain `pip` does not work. DynaCell depends on in-workspace packages
+(`viscy-data`, `viscy-models`, `viscy-transforms`, `viscy-utils`, `dynaclr`)
+that are wired through `[tool.uv.sources]` in the repository-root
+`pyproject.toml`. `pip` ignores that table: it fetches older, incompatible
+`viscy-*` releases from PyPI and cannot find `dynaclr` at all.
+
+For development (every workspace package, all extras, tests), sync the whole
+workspace from the repository root instead:
 
 ```bash
 uv venv -p 3.13
@@ -87,17 +127,16 @@ references for localization, segmentation, and tracking.
 - **VSCyto3D** — UNeXt2 with a pretrained FCMAE encoder (Cytoland).
 - **UNetViT3D** — a hybrid CNN-Transformer adapted from the CELL-Diff backbone.
 
-### Generative baseline (`DynacellFlowMatching`)
+### Generative baselines
 
-- **CELL-Diff** — a 2D flow-matching virtual-staining model extended to 3D
+- **Pix2Pix3D** (`DynacellGAN`) — deterministic adversarial training with the
+  UNetViT3D generator and a multiscale 3D PatchGAN discriminator.
+
+- **CELL-Diff** (`DynacellFlowMatching`) — a 2D flow-matching virtual-staining model extended to 3D
   inputs and outputs. Samples plausible fluorescence volumes conditioned on
   phase; uses iterative flow-matching inpainting for large-volume inference, and
   a single-pass mean-prediction mode for point-estimate comparison. The
   flow-matching loss is computed internally — no external loss function needed.
-
-The engine module also provides an adversarial `DynacellGAN` (pix2pix3d) sharing
-the UNetViT3D generator backbone, used for controlled regression-vs-adversarial
-comparison; it is not a paper baseline.
 
 ## Evaluation metrics
 
@@ -106,12 +145,13 @@ Three tiers, each interrogating predicted stain quality differently:
 - **Pixel fidelity** — PSNR, SSIM, PCC, NRMSE, plus microscopy-aware Fourier
   shell correlation (FSC), MicroSSIM, and a frequency-aware Spectral PCC robust
   to photobleaching-driven noise in fluorescence targets.
-- **Segmentation utility** — predicted and experimental volumes pass through the
-  Allen Institute organelle segmenters; masks compared via Dice, IoU, precision,
-  recall, and accuracy.
-- **Phenotype similarity** — per-cell embeddings from CellProfiler, DINOv3, and
-  DynaCLR; median cosine similarity between matched cells plus FID and KID
-  between pooled predicted and experimental distributions.
+- **Segmentation utility** — Cellpose v4 cpdino instances for nucleus and
+  membrane, and Allen Institute semantic segmenters for ER and mitochondria;
+  masks are compared with overlap and instance-detection metrics.
+- **Phenotype similarity** — a 22-feature handcrafted GLCM+ space and learned
+  DINOv3, DynaCLR, CELL-DINO, and MorphEm embeddings; median cosine similarity
+  between matched cells plus FID and KID between pooled predicted and
+  experimental distributions.
 
 ## Config structure
 
@@ -179,3 +219,32 @@ a bare invocation writes **and** submits.
   Institute Terms of Use.
 - **Demo** — a small reviewer sample is at
   [dynacell_a549_demo.zip](https://dynacell.s3.us-west-2.amazonaws.com/v1/demo/dynacell_a549_demo.zip).
+- **Trained checkpoints** — one per (training set, organelle, model) for all six
+  baselines, at `s3://dynacell/v1/models/`. The
+  [models README](https://dynacell.s3.us-west-2.amazonaws.com/v1/models/README.md)
+  describes the layout, the `checkpoints.csv` manifest, and how to load a checkpoint.
+  Download one model with
+  `aws s3 cp --no-sign-request --recursive s3://dynacell/v1/models/ipsc/nucleus/vscyto3d/ ./vscyto3d_nucleus/`.
+
+## Citation
+
+If you use DynaCell (code, data, or trained checkpoints), please cite
+([CITATION.cff](CITATION.cff)):
+
+```bibtex
+@inproceedings{kalinin2026dynacell,
+  title     = {{DynaCell}: An Evaluation Framework for Dynamic {3D} Virtual Staining of Live Cells},
+  author    = {Kalinin, Alexandr A. and Zheng, Dihan and Theodoro, Taylla Milena and
+               Ivanov, Ivan and Hirata-Miyasaki, Eduardo and Lee, See-Chi and Liu, Aofei and
+               Varra, Sricharan Reddy and Chandler, Talon and Pradeep, Soorya and Liu, Chad and
+               Leonetti, Manuel D. and Arias, Carolina and Huang, Bo and Mehta, Shalin B.},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS 2026), Evaluations and Datasets Track},
+  year      = {2026}
+}
+```
+
+## Navigation
+
+- Up: [VisCy monorepo](../../README.md)
+- Subdirectories: [configs/](configs/README.md) · [src/](src/README.md) · [tools/](tools/README.md) ·
+  [tests/](tests/README.md) · [examples/](examples/README.md)

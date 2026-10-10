@@ -10,21 +10,46 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PIXEL_METRICS = ["PCC", "SSIM", "NRMSE", "PSNR", "Spectral_PCC", "MicroMS3IM"]
+# SSIM / NRMSE / PSNR are each reported in both scalings, adjacent so the pair
+# reads as one comparison: the bare column is scale-sensitive (per-input min-max)
+# and ``SI_*`` is scale-invariant (least-squares affine fit to the target). Listing
+# only one would show a scaling without naming it.
+PIXEL_METRICS = [
+    "PCC",
+    "SSIM",
+    "SI_SSIM",
+    "NRMSE",
+    "SI_NRMSE",
+    "PSNR",
+    "SI_PSNR",
+    "Spectral_PCC",
+    "MicroMS3IM",
+]
 MASK_METRICS = ["Dice", "IoU", "Precision", "Recall"]
 FEATURE_METRICS = [
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
     "CP_FID",
     "DINOv3_FID",
     "DynaCLR_FID",
+    "CellDINO_FID",
+    "MorphEm_FID",
 ]
 
+# The foreground-limited ``FG_*`` columns (``pixel_metrics.foreground``, off by default)
+# are ranked here but stay out of PIXEL_METRICS: callers ask for them by name.
 HIGHER_IS_BETTER = {
     "PCC",
     "SSIM",
+    "SI_SSIM",
     "PSNR",
+    "SI_PSNR",
+    "FG_PCC",
+    "FG_SI_SSIM",
+    "FG_SI_PSNR",
     "Spectral_PCC",
     "MicroMS3IM",
     "Dice",
@@ -35,7 +60,13 @@ HIGHER_IS_BETTER = {
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
 }
+
+# Columns that describe the evaluation data rather than a model's quality, so no row
+# is best: ``FG_frac`` is the GT foreground fraction, identical across models.
+UNRANKED = {"FG_frac"}
 
 
 def load_eval_results(
@@ -91,8 +122,7 @@ def aggregate_metrics(
     """
     if metrics is None:
         metrics = [c for c in df.columns if c not in ("FOV", "Timepoint")]
-    agg = df[metrics].agg(["mean", "std"])
-    return agg
+    return df[metrics].agg(["mean", "std"])
 
 
 def load_and_aggregate(
@@ -192,7 +222,7 @@ def to_latex(
     df
         DataFrame from :func:`comparison_table`.
     bold_best
-        Whether to bold the best value in each column.
+        Whether to bold the best value in each column (except :data:`UNRANKED` ones).
     caption, label
         Optional LaTeX caption and label.
 
@@ -204,6 +234,8 @@ def to_latex(
     if bold_best and len(df) > 1:
         formatted = df.copy()
         for col in formatted.columns:
+            if col in UNRANKED:
+                continue
             vals: list[float | None] = []
             for cell in formatted[col]:
                 try:

@@ -6,6 +6,10 @@ model:
       init_args:
         lambda_mse: 0.5
         sigmoid_k: -0.95
+        # INERT while data.fg_mask_key is set below: forward() short-circuits
+        # on `if fg_mask is not None`, so the mask from the store defines
+        # foreground and this threshold is never consulted. It applies only if
+        # fg_mask_key is removed. Same for data.nonzero_threshold.
         fg_threshold: 0.0
 data:
   init_args:

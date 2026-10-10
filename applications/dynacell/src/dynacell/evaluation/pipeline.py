@@ -1,6 +1,7 @@
 """Batch orchestration: load, segment, evaluate, save."""
 
 import json
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass, field, fields
@@ -17,21 +18,26 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.cache import FeatureKind
+from dynacell.evaluation.cache import FeatureKind, prediction_sources, prediction_sources_sha256_12
+from dynacell.evaluation.cp_reference import (
+    CP_SIDECAR_FILENAME,
+    DatasetCPSpace,
+    complete_cached_gt_cp_blocks,
+    cp_sidecar_payload,
+    eval_cp_space,
+)
+from dynacell.evaluation.cross_condition_probe import GROUP_PROBE_FILENAME, probe_group
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
 )
-from dynacell.evaluation.feature_select import (
-    DEFAULT_CORR_THRESHOLD,
-    DEFAULT_FREQ_CUT,
-    DEFAULT_UNIQUE_CUT,
-    select_features,
-)
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
-    active_cp_feature_names,
+    FOREGROUND_COLUMNS,
+    FOREGROUND_METRICS_VERSION,
+    FOREGROUND_SIGMAS_UM,
+    FOREGROUND_SOURCES,
     ascupy,
     build_crops,
     compute_pixel_metrics,
@@ -45,14 +51,25 @@ from dynacell.evaluation.metrics import (
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
+    check_cp_cache_feature_names,
+    cpdino_infer_kwargs,
     flush_manifest,
     fov_cp_features,
+    fov_cpdino_nucleus_instances,
+    fov_cpdino_whole_cell_instances,
     fov_deep_features,
     fov_masks,
     fov_nucleus_instances,
     fov_whole_cell_instances,
     instance_cache_hit,
     precompute_deep_features,
+    seg_spacing,
+)
+from dynacell.evaluation.provenance import (
+    PROVENANCE_FILENAME,
+    check_cubic_pin,
+    metrics_provenance_matches,
+    write_metrics_provenance,
 )
 from dynacell.evaluation.runtime import (
     apply_thread_budget,
@@ -68,6 +85,7 @@ from dynacell.evaluation.runtime import (
     reset_timings,
     resolve_runtime,
 )
+from dynacell.evaluation.segmentation import require_cubic_workflows
 from dynacell.evaluation.utils import plot_metrics
 
 
@@ -92,25 +110,16 @@ def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[s
     }
 
 
-def _zscore_per_side(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-side z-score: separate (mean, std) computed for each matrix."""
-    pred_z = (pred - pred.mean(axis=0)) / (pred.std(axis=0) + 1e-8)
-    target_z = (target - target.mean(axis=0)) / (target.std(axis=0) + 1e-8)
-    return pred_z, target_z
+def _cp_row_features(pred_cp: np.ndarray, gt_cp: np.ndarray, cp_space: DatasetCPSpace) -> tuple[np.ndarray, np.ndarray]:
+    """Per-(FOV, timepoint) CP inputs: the reference mask + this dataset's GT scaler, clipped, on both sides.
 
-
-def _cp_dropzero_zscore(pred_raw: np.ndarray, target_raw: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-(FOV, timepoint) CP cleanup: drop target-zero columns then z-score.
-
-    Returns ``(np.empty(...), np.empty(...))`` when all columns drop, so
-    the caller can short-circuit and emit a NaN row.
+    The same transform as the dataset-level stage
+    (:meth:`DatasetCPSpace.transform_clipped`), so a per-row CP value is
+    comparable across models and FOVs. Empty inputs (no cells) pass through.
     """
-    non_zero_cols = ~np.all(target_raw == 0, axis=0)
-    pred_mat = pred_raw[:, non_zero_cols]
-    target_mat = target_raw[:, non_zero_cols]
-    if pred_mat.size == 0:
-        return pred_mat, target_mat
-    return _zscore_per_side(pred_mat, target_mat)
+    if not (pred_cp.size and gt_cp.size):
+        return pred_cp, gt_cp
+    return cp_space.transform_clipped(pred_cp), cp_space.transform_clipped(gt_cp)
 
 
 def _real_vs_pred_probe(
@@ -139,6 +148,7 @@ def _fov_pred_features_per_t(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    morphem_feature_extractor,
     patch_size: int,
     spacing,
     z_slabs: list[slice | None] | None = None,
@@ -185,6 +195,19 @@ def _fov_pred_features_per_t(
                 if celldino_feature_extractor is not None
                 else None
             ),
+            "morphem": (
+                fov_deep_features(
+                    pred_cache_ctx,
+                    pos_name,
+                    predict,
+                    cell_segmentation,
+                    morphem_feature_extractor,
+                    "morphem",
+                    z_slabs=z_slabs,
+                )
+                if morphem_feature_extractor is not None
+                else None
+            ),
         }
     t_count = predict.shape[0]
     # Single per-t pass: build crops once per timepoint, fan out to every
@@ -194,6 +217,7 @@ def _fov_pred_features_per_t(
     dinov3: list[np.ndarray] = []
     dynaclr: list[np.ndarray] = []
     celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    morphem: list[np.ndarray] | None = [] if morphem_feature_extractor is not None else None
     use_gpu = pred_cache_ctx.use_gpu
     for t in range(t_count):
         cp.append(
@@ -213,7 +237,9 @@ def _fov_pred_features_per_t(
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
         if celldino is not None:
             celldino.append(features_from_crops(crops_t, celldino_feature_extractor))
-    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino}
+        if morphem is not None:
+            morphem.append(features_from_crops(crops_t, morphem_feature_extractor))
+    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino, "morphem": morphem}
 
 
 def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]]) -> None:
@@ -257,6 +283,23 @@ class _BackboneLists:
 _BACKBONE_KEYS: tuple[FeatureKind, ...] = get_args(FeatureKind)
 _BB_FIELDS = fields(_BackboneLists)
 
+# Backbone key -> metric-column prefix. Keys must cover _BACKBONE_KEYS so the
+# dataset-metrics block can derive its tracks/prefixes/embedding groups from one
+# "which backbones are active" list instead of three hand-synced literals.
+_COLUMN_PREFIX: dict[FeatureKind, str] = {
+    "cp": "CP",
+    "dinov3": "DINOv3",
+    "dynaclr": "DynaCLR",
+    "celldino": "CellDINO",
+    "morphem": "MorphEm",
+}
+if set(_COLUMN_PREFIX) != set(_BACKBONE_KEYS):
+    raise RuntimeError(
+        f"_COLUMN_PREFIX must cover FeatureKind exactly; "
+        f"missing={sorted(set(_BACKBONE_KEYS) - set(_COLUMN_PREFIX))}, "
+        f"extra={sorted(set(_COLUMN_PREFIX) - set(_BACKBONE_KEYS))}"
+    )
+
 
 def _extend_backbone(
     bb: _BackboneLists,
@@ -298,6 +341,99 @@ def _extend_backbone(
     bb.gt_ts.append(t_arr)
 
 
+def _gate_and_record_cp_space(
+    cp_space: DatasetCPSpace,
+    gt_cp_blocks: dict[tuple[str, int], np.ndarray],
+    save_dir: Path,
+    pred_clip: dict[str, Any],
+) -> None:
+    """Run the GT content gate and write the CP sidecar for this eval dir.
+
+    Runs whenever feature metrics are on, whether or not the prediction
+    contributed any finite CP rows, so the gate is never bypassed and every
+    feature-metrics eval dir carries its sidecar.
+
+    Parameters
+    ----------
+    cp_space : DatasetCPSpace
+        Reference bound to the eval's dataset.
+    gt_cp_blocks : dict
+        ``{(position, t): GT-finite CP rows}`` the run scored.
+    save_dir : pathlib.Path
+        Eval dir receiving the sidecar.
+    pred_clip : dict
+        :meth:`DatasetCPSpace.clip_fraction` of the run's pred CP cells, recorded in
+        the sidecar so what the z-clip discarded stays inspectable per feature.
+    """
+    cp_space.check_gt_cells(gt_cp_blocks)
+
+    def _json_frac(v: float) -> float | None:
+        # No pred CP rows -> NaN fraction; strict JSON has no NaN, so record null.
+        return None if np.isnan(v) else v
+
+    payload = {
+        **cp_sidecar_payload(cp_space),
+        "clip": {
+            "z_clip": cp_space.z_clip,
+            "pred_clip_frac": _json_frac(pred_clip["any"]),
+            "pred_clip_frac_per_feature": {k: _json_frac(v) for k, v in pred_clip["per_feature"].items()},
+        },
+    }
+    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(payload, indent=2, allow_nan=False))
+
+
+def _stage_cp_dataset_inputs(
+    cp: _BackboneLists,
+    cp_space: DatasetCPSpace,
+    gt_cp_blocks: dict[tuple[str, int], np.ndarray],
+    save_dir: Path,
+    pred_clip: dict[str, Any] | None = None,
+) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Stage the dataset-level CP inputs in the reference feature space.
+
+    KID/FID/cosine get the reference-masked features standardized by this
+    dataset's GT scaler and clipped to +-z_clip (identical for pred and GT); the linear probe gets the
+    reference-masked raw features, since it fits its own per-fold scaler. Writes
+    ``cp_selected_feature_mask.json`` recording which reference and scaler were
+    applied.
+
+    Parameters
+    ----------
+    cp : _BackboneLists
+        Aggregated CP rows of the run.
+    cp_space : DatasetCPSpace
+        Reference bound to the eval's dataset.
+    gt_cp_blocks : dict
+        ``{(position, t): GT-finite CP rows}`` the run scored, before the pairwise
+        pred/GT non-finite drop; must hash to the reference's recorded GT matrix
+        (:meth:`DatasetCPSpace.check_gt_cells`) before anything is written.
+    save_dir : pathlib.Path
+        Eval dir receiving the sidecar.
+    pred_clip : dict, optional
+        :meth:`DatasetCPSpace.clip_fraction` of the pred cells, if the caller already
+        computed it; computed here otherwise.
+
+    Returns
+    -------
+    tuple
+        ``("CP", pred_metric, target_metric, pred_probe, target_probe, pred_fovs, target_fovs)``.
+    """
+    pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
+    _gate_and_record_cp_space(
+        cp_space, gt_cp_blocks, save_dir, pred_clip if pred_clip is not None else cp_space.clip_fraction(pred_cp_raw)
+    )
+    target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
+    return (
+        "CP",
+        cp_space.transform_clipped(pred_cp_raw),
+        cp_space.transform_clipped(target_cp_raw),
+        cp_space.select(pred_cp_raw),
+        cp_space.select(target_cp_raw),
+        np.concatenate(cp.pred_fovs, axis=0),
+        np.concatenate(cp.gt_fovs, axis=0),
+    )
+
+
 @dataclass
 class FovResult:
     """Output of ``_process_one_fov``: everything one FOV contributes to the run.
@@ -306,9 +442,8 @@ class FovResult:
     types (str, list[dict], list[np.ndarray], np.ndarray) — no iohub handles,
     no torch modules.
 
-    Microssim scores are merged into ``per_t_pixel_rows`` before return
-    (matching the existing serial path at ``pipeline.py:478-481``); no
-    separate microssim field.
+    Microssim scores are merged into ``per_t_pixel_rows`` before return; there is
+    no separate microssim field.
     """
 
     pos_name: str
@@ -323,6 +458,10 @@ class FovResult:
     dinov3: _BackboneLists = field(default_factory=_BackboneLists)
     dynaclr: _BackboneLists = field(default_factory=_BackboneLists)
     celldino: _BackboneLists = field(default_factory=_BackboneLists)
+    morphem: _BackboneLists = field(default_factory=_BackboneLists)
+    # GT-finite CP rows per timepoint, before the pairwise pred/GT non-finite drop: the
+    # cells the dataset-level content gate hashes.
+    gt_cp_blocks: dict[int, np.ndarray] = field(default_factory=dict)
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
@@ -375,16 +514,20 @@ def _calibrate_microssim(
     Returns
     -------
     (sim, read_cache)
-        ``sim`` is the fitted MicroMS3IM (or raises on degenerate input).
+        ``sim`` is the fitted MicroMS3IM, or ``None`` when ``fit_microssim``
+        finds α undefined: every sampled GT slice is constant (single
+        constant slices are dropped from the pool), a sampled GT slice holds
+        a non-finite pixel, or the pool's normalization is degenerate. The
+        leaf then scores MicroMS3IM=NaN.
         ``read_cache`` is the per-position array dict; empty when
         ``cache_reads=False``.
 
     Raises
     ------
-    ValueError, RuntimeError
-        Propagated from ``fit_microssim``; the caller wraps this call in
-        ``try/except`` so a degenerate leaf falls back to MicroMS3IM=NaN
-        instead of aborting the rest of the eval.
+    Exception
+        Anything ``fit_microssim`` raises propagates, GPU/host OOM
+        included, so a resource failure fails the job instead of
+        overwriting valid MicroMS3IM with NaN.
     """
     n_positions = len(pred_positions)
     if n_positions == 0:
@@ -437,8 +580,13 @@ def _validate_instance_ap_config(config: DictConfig) -> None:
     - ``backend='cellpose_watershed'`` requires ``target_name='membrane'``, a
       non-null ``segmentation.nuclei_channel_name`` (the GT watershed seeds), and
       ``compute_instance_ap=true`` (whole-cell AP is the backend's sole purpose).
+    - ``backend='cpdino'`` (the default instance backend) serves both targets:
+      ``target_name='nucleus'`` (direct) and ``target_name='membrane'`` (whole-cell +
+      nucleus carve, which needs ``segmentation.nuclei_channel_name`` for the carve
+      seeds). Both require ``compute_instance_ap=true``.
     - ``compute_instance_ap=true`` requires an instance-producing pair:
-      ``(cellpose_watershed, membrane)`` or ``(cellpose, nucleus)``.
+      ``(cpdino, {nucleus, membrane})``, ``(cellpose_watershed, membrane)`` or
+      ``(cellpose, nucleus)``.
     """
     backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
     compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
@@ -456,13 +604,27 @@ def _validate_instance_ap_config(config: DictConfig) -> None:
         if not compute_instance_ap:
             raise ValueError("segmentation.backend='cellpose_watershed' requires compute_instance_ap=true")
 
+    if backend == "cpdino":
+        if target_name not in ("nucleus", "membrane"):
+            raise ValueError("segmentation.backend='cpdino' requires target_name in {'nucleus', 'membrane'}")
+        if target_name == "membrane" and nuclei_channel is None:
+            raise ValueError(
+                "segmentation.backend='cpdino' with target_name='membrane' requires "
+                "segmentation.nuclei_channel_name (the GT-plate channel for the nucleus carve seeds)"
+            )
+        if not compute_instance_ap:
+            raise ValueError("segmentation.backend='cpdino' requires compute_instance_ap=true")
+
     if compute_instance_ap:
-        valid = (backend == "cellpose_watershed" and target_name == "membrane") or (
-            backend == "cellpose" and target_name == "nucleus"
+        valid = (
+            (backend == "cpdino" and target_name in ("nucleus", "membrane"))
+            or (backend == "cellpose_watershed" and target_name == "membrane")
+            or (backend == "cellpose" and target_name == "nucleus")
         )
         if not valid:
             raise ValueError(
                 "compute_instance_ap=true requires an instance-producing backend/target: "
+                "(backend='cpdino', target_name in {'nucleus','membrane'}), "
                 "(backend='cellpose_watershed', target_name='membrane') or "
                 "(backend='cellpose', target_name='nucleus'); "
                 f"got backend={backend!r}, target_name={target_name!r}"
@@ -484,11 +646,17 @@ def _process_one_fov(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    morphem_feature_extractor,
     microssim_sim,
+    cp_space: DatasetCPSpace | None,
     predict_cached=None,
     target_cached=None,
 ) -> FovResult:
     """Compute everything one FOV contributes to the eval and return a FovResult.
+
+    ``cp_space`` is the target's CP reference bound to the eval's dataset (``None``
+    only when ``compute_feature_metrics=false``); per-timepoint CP metrics are
+    scored in it.
 
     No side effects on shared parent state (no segmentation_results plate
     writes, no manifest flush). The parent aggregator handles those — see
@@ -499,11 +667,14 @@ def _process_one_fov(
         build_focus_slabs,
         read_focus_compute_config,
         read_focus_slab_config,
-        resolve_focus_planes,
+        resolve_focus_instance_planes,
+        segment_focus_slabs,
+        slab_mip,
     )
     from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
+    from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
     from dynacell.evaluation.segmentation_whole_cell import slice_index
 
     timings_start = len(get_timings())
@@ -518,6 +689,8 @@ def _process_one_fov(
     compute_cell_similarity = bool(OmegaConf.select(config, "compute_cell_similarity", default=False))
     cell_sim_metrics = tuple(OmegaConf.select(config, "cell_similarity.metrics", default=["pcc"]))
     cell_sim_reduce = tuple(OmegaConf.select(config, "cell_similarity.reduce", default=["mean", "median"]))
+    compute_fid = _feature_metric_flags(config)["compute_fid"]
+    foreground = _foreground_settings(config)
 
     if predict_cached is not None and target_cached is not None:
         # Reuse arrays already read by _calibrate_microssim (serial mode opt-in
@@ -534,10 +707,11 @@ def _process_one_fov(
 
     T = predict.shape[0]
 
-    # In-focus slab for the 2D deep-feature crops + per-cell similarity (off by
-    # default). Computed once from the GT phase focus plane (focus_slice zattrs,
-    # written by precompute-gt build.focus) and shared with the prediction
-    # (slice-by-slice); None per t means full-stack projection. Does not touch CP.
+    # In-focus slab for the 2D deep-feature crops + per-cell similarity (on by
+    # default, feature_metrics.focus_slab). Computed once from the GT phase focus
+    # plane (focus_slice zattrs, written by precompute-gt build.focus) and shared
+    # with the prediction (slice-by-slice); None per t means full-stack
+    # projection. Does not touch CP.
     slab_cfg = read_focus_slab_config(config)
     if slab_cfg is not None:
         fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
@@ -557,75 +731,147 @@ def _process_one_fov(
     # pred_cells are (T, D, H, W) uint16 instance labels; the binary mask metrics
     # are derived from labels>0 in the per-T loop. Otherwise the legacy binary
     # path runs byte-identically.
+    #
+    # Segmentation settings are read off ``cache_ctx``, which ``init_cache_context``
+    # already resolved from this same config — no second OmegaConf.select pass.
     instance_mode = bool(getattr(config, "compute_instance_ap", False))
-    backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
+    semantic_focus = _semantic_focus_settings(config)
+    backend = cache_ctx.backend
     gt_cells = pred_cells = None
     gt_mask_stack = pred_mask_stack = None
+
+    gt_nuclei_vol: np.ndarray | None = None
+
+    def _gt_nuclei() -> np.ndarray:
+        """GT nucleus volume ``(T, Z, Y, X)``, read from zarr at most once per FOV.
+
+        Both the ``nucleus_area`` focus anchor and the whole-cell seed/carve paths
+        consume it. Comes from a separate store (``pos_nuclei``) when the GT nuclei
+        live apart from the GT membrane (A549: membrane in ``CAAX_*.ozx``, nuclei in
+        ``H2B_*.ozx``), else from the GT plate (iPSC ``cell.zarr``).
+        """
+        nonlocal gt_nuclei_vol
+        if gt_nuclei_vol is None:
+            source = pos_nuclei if pos_nuclei is not None else pos_gt
+            gt_nuclei_vol = np.asarray(source.data[:, source.get_channel_index(cache_ctx.nuclei_channel_name)])
+        return gt_nuclei_vol
+
     if instance_mode:
-        is3d = OmegaConf.select(config, "segmentation.dimension", default="2d") == "3d"
+        is3d = cache_ctx.dimension == "3d"
         # Separate working arrays — never rebind predict/target (the 3D pixel
         # metrics + MicroMS3IM below keep using the full native arrays).
         if is3d:
             target_cells, predict_cells = target, predict
         else:
-            sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+            sel = cache_ctx.slice_selection
+            slab_hw = cache_ctx.focus_slab_halfwidth if sel == "focus" else 0
             if sel == "focus":
-                # Single in-focus plane per FOV (still 2D, no slab). Same z applied to
-                # GT, prediction, and nuclei seeds. From precomputed focus_slice zattrs
-                # when present, else computed from the phase channel and cached in
-                # io.gt_cache_dir — so it works on read-only published .ozx.
-                focus_ch = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
-                fc = read_focus_compute_config(config, channel_name=focus_ch)
-                z_idx = resolve_focus_planes(
-                    pos_gt,
-                    t_count=T,
-                    compute=fc,
-                    cache_dir=OmegaConf.select(config, "io.gt_cache_dir", default=None),
-                    pos_name=pos_name_pred,
+                # In-focus plane per FOV; the same z (+ optional +/-slab_hw MIP) is applied to
+                # GT, prediction, and nuclei seeds. Default anchor is the plane of maximum
+                # nuclear foreground area (widest cross-section) — robust to the phase-midband
+                # edge artifacts on confocal iPSC. See focus.resolve_focus_instance_planes.
+                if cache_ctx.focus_anchor == "nucleus_area":
+                    nucleus_vol = target if config.target_name == "nucleus" else _gt_nuclei()
+                else:
+                    nucleus_vol = None
+                z_idx = resolve_focus_instance_planes(
+                    config, t_count=T, pos_gt=pos_gt, pos_name=pos_name_pred, nucleus_vol=nucleus_vol
                 )
             else:
-                frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
-                z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
-            target_cells = np.stack([target[t, z_idx[t]] for t in range(T)])  # (T, Y, X)
-            predict_cells = np.stack([predict[t, z_idx[t]] for t in range(T)])
+                z_idx = [slice_index(target[t], selection=sel, fraction=cache_ctx.slice_fraction) for t in range(T)]
+            target_cells = slab_mip(target, z_idx, slab_hw)  # (T, Y, X)
+            predict_cells = slab_mip(predict, z_idx, slab_hw)
+
+        nuclei_cells_vol: np.ndarray | None = None
+
+        def _gt_nuclei_cells() -> np.ndarray:
+            """GT nuclei in the working geometry: full volume in 3-D, the same slab MIP in 2-D.
+
+            Must track the ``target_cells`` / ``predict_cells`` projection above, or the
+            seeds land on a different z than the cells they seed.
+            """
+            nonlocal nuclei_cells_vol
+            if nuclei_cells_vol is None:
+                nuclei = _gt_nuclei()
+                nuclei_cells_vol = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
+            return nuclei_cells_vol
+
+        def _nuclei_seeds(segment_fn, **infer) -> np.ndarray | None:
+            """GT-nuclei instance seeds, or ``None`` when both sides' caches already hit.
+
+            Only the compute path of ``fov_*_whole_cell_instances`` reads the seeds (a
+            disabled cache or a forced/invalidated slot counts as a miss), so on a warm
+            run this skips the nuclei read and MIP as well as the segmentation.
+            """
+            if instance_cache_hit(cache_ctx, pos_name_pred) and instance_cache_hit(pred_cache_ctx, pos_name_pred):
+                return None
+            nuclei_cells = _gt_nuclei_cells()
+            spacing = seg_spacing(cache_ctx)
+            with region_timer("nucleus_seeds", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                return np.stack(
+                    [segment_fn(nuclei_cells[t], spacing, seg_model, do_3d=is3d, **infer) for t in range(T)]
+                )
+
         if backend == "cellpose_watershed":
-            nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
-            # GT nuclei seeds come from a separate store (pos_nuclei) when the GT
-            # nuclei live apart from the GT membrane (A549: membrane in CAAX_*.ozx,
-            # nuclei in H2B_*.ozx); pos_nuclei is the same-named position from that
-            # store. When None (iPSC cell.zarr), read nuclei from the GT membrane
-            # plate, byte-identical to the single-store path.
-            nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
-            nuclei = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])  # (T, Z, Y, X)
-            nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
-            # Seed preflight: compute GT-nuclei watershed seeds only when at least
-            # one side will actually run segment_whole_cell (a disabled cache or a
-            # manifest-invalidated/forced slot counts as a miss).
-            gt_will_compute = not cache_ctx.enabled or not instance_cache_hit(cache_ctx, pos_name_pred)
-            pred_will_compute = not pred_cache_ctx.enabled or not instance_cache_hit(pred_cache_ctx, pos_name_pred)
-            seed_stack = None
-            if gt_will_compute or pred_will_compute:
-                seg_spacing = tuple(config.pixel_metrics.spacing) if is3d else tuple(config.pixel_metrics.spacing[-2:])
-                with region_timer("nucleus_seeds", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-                    seed_stack = np.stack(
-                        [
-                            segment_nucleus_instances(
-                                nuclei_cells[t], seg_spacing, seg_model, do_3d=is3d, **cache_ctx.cellpose_params
-                            )
-                            for t in range(T)
-                        ]
-                    )
+            # Unlike cpdino below, the watershed needs the nuclei channel itself (not just
+            # the seeds), so this read happens even on a cache hit.
+            nuclei_cells = _gt_nuclei_cells()
+            seed_stack = _nuclei_seeds(segment_nucleus_instances, **cache_ctx.cellpose_params)
             with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 gt_cells = fov_whole_cell_instances(cache_ctx, pos_name_pred, target_cells, nuclei_cells, seed_stack)
             with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 pred_cells = fov_whole_cell_instances(
                     pred_cache_ctx, pos_name_pred, predict_cells, nuclei_cells, seed_stack
                 )
+        elif backend == "cpdino":
+            if config.target_name == "membrane":
+                # Whole-cell: cpdino segments the cell directly from the membrane channel
+                # (replacing the nuclei-seed + EDT watershed), then carves the nucleus.
+                # Both GT and pred cells carve the same GT-nucleus footprint, so the carve
+                # stays byte-consistent with the watershed backend.
+                seed_stack = _nuclei_seeds(segment_cpdino_instances, **cpdino_infer_kwargs(cache_ctx))
+                with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    gt_cells = fov_cpdino_whole_cell_instances(
+                        cache_ctx, pos_name_pred, target_cells, seed_stack, seg_model
+                    )
+                with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    pred_cells = fov_cpdino_whole_cell_instances(
+                        pred_cache_ctx, pos_name_pred, predict_cells, seed_stack, seg_model
+                    )
+            else:  # nucleus: cpdino on the nucleus channel, independent per side
+                with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    gt_cells = fov_cpdino_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
+                with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    pred_cells = fov_cpdino_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
         else:  # backend == "cellpose": independent per-side nucleus instances
             with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 gt_cells = fov_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
             with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 pred_cells = fov_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
+    elif semantic_focus is not None:
+        # Focus-plane semantic masks (2D benchmark): segment the slab around the GT focus
+        # plane, keep its focus plane. Not cached -- a 3-plane slab costs milliseconds on
+        # GPU, and the whole-volume mask cache must not hold 2D masks.
+        nucleus_vol = _gt_nuclei() if semantic_focus["focus_anchor"] == "nucleus_area" else None
+        focus_z = resolve_focus_instance_planes(
+            config, t_count=T, pos_gt=pos_gt, pos_name=pos_name_pred, nucleus_vol=nucleus_vol
+        )
+
+        def _segment(vol: np.ndarray) -> np.ndarray:
+            return segment(
+                vol,
+                config.target_name,
+                seg_model=seg_model,
+                backend=backend,
+                spacing_zyx=tuple(cache_ctx.spacing),
+                use_gpu=use_gpu,
+            )
+
+        # (T, 1, Y, X): the 2D instance-label shape, so segmentation_results.zarr stays 5D.
+        with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            gt_mask_stack = segment_focus_slabs(target, focus_z, semantic_focus["halfwidth"], _segment)[:, None]
+        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            pred_mask_stack = segment_focus_slabs(predict, focus_z, semantic_focus["halfwidth"], _segment)[:, None]
     else:
         with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
@@ -639,6 +885,7 @@ def _process_one_fov(
     gt_dinov3_per_t = None
     gt_dynaclr_per_t = None
     gt_celldino_per_t = None
+    gt_morphem_per_t = None
     pred_per_t = None
     if config.compute_feature_metrics:
         with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
@@ -674,6 +921,17 @@ def _process_one_fov(
                     "celldino",
                     z_slabs=z_slabs,
                 )
+        if morphem_feature_extractor is not None:
+            with region_timer("deep_gt_morphem", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_morphem_per_t = fov_deep_features(
+                    cache_ctx,
+                    pos_name_pred,
+                    target,
+                    cell_segmentation,
+                    morphem_feature_extractor,
+                    "morphem",
+                    z_slabs=z_slabs,
+                )
         with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             pred_per_t = _fov_pred_features_per_t(
                 pred_cache_ctx,
@@ -683,12 +941,14 @@ def _process_one_fov(
                 dinov3_feature_extractor,
                 dynaclr_feature_extractor,
                 celldino_feature_extractor,
+                morphem_feature_extractor,
                 config.feature_metrics.patch_size,
                 config.pixel_metrics.spacing,
                 z_slabs=z_slabs,
             )
 
     microssim_data: list[dict] = []
+    gt_cp_blocks: dict[int, np.ndarray] = {}
     fov_pixel_metrics: list[dict] = []
     fov_mask_metrics: list[dict] = []
     fov_feature_metrics: list[dict] = []
@@ -697,6 +957,7 @@ def _process_one_fov(
     dinov3 = _BackboneLists()
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
+    morphem = _BackboneLists()
 
     # Bulk-upload predict/target once per FOV so compute_pixel_metrics' per-T
     # ascupy is a no-op via cupy-on-cupy. mask / feature / microssim paths
@@ -723,6 +984,7 @@ def _process_one_fov(
                 fsc_kwargs=config.pixel_metrics.fsc,
                 spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
                 use_gpu=use_gpu,
+                foreground=foreground,
             )
         pixel_row = {**data_info, **pixel_metrics}
         if compute_cell_similarity and cell_segmentation is not None:
@@ -764,8 +1026,9 @@ def _process_one_fov(
                                 predict[t],
                                 config.target_name,
                                 seg_model=seg_model,
-                                backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
-                                spacing_zyx=tuple(config.pixel_metrics.spacing),
+                                backend=backend,
+                                spacing_zyx=tuple(cache_ctx.spacing),
+                                use_gpu=use_gpu,
                             )
                         ).astype(bool)
                 fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
@@ -777,19 +1040,38 @@ def _process_one_fov(
                 pred_dinov3 = pred_per_t["dinov3"][t]
                 pred_dynaclr = pred_per_t["dynaclr"][t]
                 pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
+                pred_morphem = pred_per_t["morphem"][t] if pred_per_t["morphem"] is not None else None
+                if gt_cp_per_t[t].size:
+                    gt_cp_blocks[t] = gt_cp_per_t[t][np.isfinite(gt_cp_per_t[t]).all(axis=1)]
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
-                if pred_cp.size and gt_cp_t.size:
-                    pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
-                else:
-                    pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
+                pred_cp_z, gt_cp_z = _cp_row_features(pred_cp, gt_cp_t, cp_space)
+                cp_clip_frac = cp_space.clip_fraction(pred_cp)["any"] if pred_cp.size else float("nan")
+                # Prefixes come from _COLUMN_PREFIX, not literals: these per-timepoint
+                # columns must match the dataset-level ones the parent derives from the
+                # same map, or the two halves of a <prefix>_* family drift apart.
                 pairwise_metrics = {
-                    **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
-                    **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
-                    **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
+                    **compute_feature_similarity_pairwise(
+                        pred_cp_z, gt_cp_z, _COLUMN_PREFIX["cp"], compute_fid=compute_fid
+                    ),
+                    f"{_COLUMN_PREFIX['cp']}_clip_frac": cp_clip_frac,
+                    **compute_feature_similarity_pairwise(
+                        pred_dinov3, gt_dinov3_per_t[t], _COLUMN_PREFIX["dinov3"], compute_fid=compute_fid
+                    ),
+                    **compute_feature_similarity_pairwise(
+                        pred_dynaclr, gt_dynaclr_per_t[t], _COLUMN_PREFIX["dynaclr"], compute_fid=compute_fid
+                    ),
                 }
                 if pred_celldino is not None:
                     pairwise_metrics.update(
-                        compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
+                        compute_feature_similarity_pairwise(
+                            pred_celldino, gt_celldino_per_t[t], _COLUMN_PREFIX["celldino"], compute_fid=compute_fid
+                        )
+                    )
+                if pred_morphem is not None:
+                    pairwise_metrics.update(
+                        compute_feature_similarity_pairwise(
+                            pred_morphem, gt_morphem_per_t[t], _COLUMN_PREFIX["morphem"], compute_fid=compute_fid
+                        )
                     )
                 fov_feature_metrics.append({**data_info, **pairwise_metrics})
                 _extend_backbone(cp, pred_cp, gt_cp_t, pos_name_pred, t)
@@ -797,6 +1079,8 @@ def _process_one_fov(
                 _extend_backbone(dynaclr, pred_dynaclr, gt_dynaclr_per_t[t], pos_name_pred, t)
                 gt_celldino_t = gt_celldino_per_t[t] if pred_celldino is not None else None
                 _extend_backbone(celldino, pred_celldino, gt_celldino_t, pos_name_pred, t)
+                gt_morphem_t = gt_morphem_per_t[t] if pred_morphem is not None else None
+                _extend_backbone(morphem, pred_morphem, gt_morphem_t, pos_name_pred, t)
 
         maybe_empty_cuda_cache(t, cuda_empty_cache_every_n_timepoints)
 
@@ -804,10 +1088,11 @@ def _process_one_fov(
 
     if config.compute_microssim:
         if microssim_sim is None:
-            # Leaf-level calibration failed (degenerate slice / OOM / cubic
-            # bracket failure) — the parent already logged the cause. Emit
-            # NaN per timepoint so the column exists and the rest of the
-            # pixel / mask / feature metrics still get computed.
+            # Leaf-level calibration returned no sim: a degenerate GT pool
+            # (logged by fit_microssim) or no (FOV, t) pairs to fit (then T is
+            # 0 here and nothing is emitted). Emit NaN per timepoint so the
+            # column exists and the rest of the pixel / mask / feature metrics
+            # still get computed.
             for i in range(T):
                 fov_pixel_metrics[i]["MicroMS3IM"] = float("nan")
         else:
@@ -830,6 +1115,8 @@ def _process_one_fov(
         dinov3=dinov3,
         dynaclr=dynaclr,
         celldino=celldino,
+        morphem=morphem,
+        gt_cp_blocks=gt_cp_blocks,
         timings=get_timings()[timings_start:],
     )
 
@@ -913,10 +1200,164 @@ def _worker_setup(config: DictConfig) -> None:
             "dinov3": models.dinov3,
             "dynaclr": models.dynaclr,
             "celldino": models.celldino,
+            "morphem": models.morphem,
             "cache_ctx": cache_ctx,
             "pred_cache_ctx": pred_cache_ctx,
         }
     )
+
+
+def _validate_exclusions(exclude: list[str], position_names: list[str]) -> None:
+    """Reject an ``io.exclude_fov_names`` entry that is a typo or ambiguous.
+
+    Parameters
+    ----------
+    exclude : list of str
+        Requested exclusions, each a full position name (``0/0/fov0011``) or a
+        bare leaf (``fov0011``).
+    position_names : list of str
+        Full names of the prediction positions the exclusions filter.
+
+    Raises
+    ------
+    ValueError
+        If an entry matches no position, or if a bare leaf matches more than
+        one. Both fail open otherwise: a typo silently evaluates the full set
+        (the opposite of what was asked), and an ambiguous leaf silently drops
+        every well sharing it -- ``exclude: ["1"]`` removes ``A/1/1`` *and*
+        ``B/2/1``. Leaf matching itself is deliberate; only ambiguity is not.
+    """
+    for entry in exclude:
+        matched = [name for name in position_names if name == entry or name.rsplit("/", 1)[-1] == entry]
+        if not matched:
+            raise ValueError(
+                f"io.exclude_fov_names entry {entry!r} matched no position; "
+                f"expected a full name (e.g. {position_names[0]!r}) or its leaf. "
+                "Leaving it unmatched would silently evaluate the full set."
+            )
+        if len(matched) > 1:
+            raise ValueError(
+                f"io.exclude_fov_names entry {entry!r} is ambiguous: it matches "
+                f"{len(matched)} positions ({', '.join(matched)}). Use full "
+                "position names to disambiguate."
+            )
+
+
+def _feature_metric_flags(config: DictConfig) -> dict[str, bool]:
+    """Read the ``feature_metrics.compute_{fid,prc,mind}`` switches (default on).
+
+    Returned as keyword arguments for :func:`compute_feature_similarity`. A switch
+    that is off drops that metric's columns entirely rather than NaN-filling them.
+    """
+    return {
+        name: bool(OmegaConf.select(config, f"feature_metrics.{name}", default=True))
+        for name in ("compute_fid", "compute_prc", "compute_mind")
+    }
+
+
+def _foreground_settings(config: DictConfig) -> dict[str, Any] | None:
+    """Resolve ``pixel_metrics.foreground`` into ``foreground_weight`` kwargs, or ``None`` when off.
+
+    Read with ``OmegaConf.select`` so a config without the block (hand-built test
+    configs) runs with the ``FG_*`` columns off. A null sigma takes the target's
+    default from :data:`~dynacell.evaluation.metrics.FOREGROUND_SIGMAS_UM`. The
+    ``otsu`` source does not smooth, so its ``smooth_sigma_um`` is left out.
+    :func:`_foreground_stamp` extends it into what the provenance sidecar records.
+
+    Raises
+    ------
+    ValueError
+        If ``source`` is not in
+        :data:`~dynacell.evaluation.metrics.FOREGROUND_SOURCES`, a sigma is negative,
+        or a sigma is null and ``target_name`` has no default.
+    """
+    if not bool(OmegaConf.select(config, "pixel_metrics.foreground.enabled", default=False)):
+        return None
+    source = str(OmegaConf.select(config, "pixel_metrics.foreground.source", default="smooth_otsu"))
+    if source not in FOREGROUND_SOURCES:
+        raise ValueError(f"pixel_metrics.foreground.source must be one of {FOREGROUND_SOURCES}; got {source!r}")
+    settings: dict[str, Any] = {"source": source}
+    keys = ("feather_sigma_um",) if source == "otsu" else ("smooth_sigma_um", "feather_sigma_um")
+    for key in keys:
+        value = OmegaConf.select(config, f"pixel_metrics.foreground.{key}", default=None)
+        if value is None:
+            if config.target_name not in FOREGROUND_SIGMAS_UM:
+                raise ValueError(
+                    f"pixel_metrics.foreground.{key} is null and target_name={config.target_name!r} has no default "
+                    f"in FOREGROUND_SIGMAS_UM ({sorted(FOREGROUND_SIGMAS_UM)}); set it explicitly."
+                )
+            value = FOREGROUND_SIGMAS_UM[config.target_name][key]
+        if float(value) < 0:
+            raise ValueError(f"pixel_metrics.foreground.{key} must be >= 0; got {value!r}")
+        settings[key] = float(value)
+    return settings
+
+
+def _semantic_focus_settings(config: DictConfig) -> dict[str, Any] | None:
+    """Resolve ``segmentation.semantic_focus_halfwidth`` into the focus-plane mask recipe, or ``None`` when off.
+
+    Off (null, the default) scores the semantic masks (ER, mitochondria, ...) over the
+    whole volume. An integer ``h`` segments the ``2*h + 1`` planes centered on each
+    timepoint's focus plane as one small volume and scores only the focus plane of the
+    mask (``h=1`` is the 2D benchmark's slab3). The plane is chosen by
+    ``segmentation.focus_anchor``, the same resolver the 2D instance planes use. The
+    dict is also the ``semantic_focus`` provenance stamp, so it records every setting
+    that moves the plane.
+
+    Raises
+    ------
+    ValueError
+        If the halfwidth is negative, ``compute_instance_ap`` is on (instance targets
+        choose their plane with ``segmentation.slice_selection``), the anchor is
+        unknown, or ``nucleus_area`` has no ``segmentation.nuclei_channel_name``.
+    """
+    from dynacell.evaluation.focus import read_focus_compute_config
+
+    halfwidth = OmegaConf.select(config, "segmentation.semantic_focus_halfwidth", default=None)
+    if halfwidth is None:
+        return None
+    if bool(OmegaConf.select(config, "compute_instance_ap", default=False)):
+        raise ValueError(
+            "segmentation.semantic_focus_halfwidth applies to semantic masks; instance targets "
+            "choose their plane with segmentation.slice_selection"
+        )
+    if int(halfwidth) < 0:
+        raise ValueError(f"segmentation.semantic_focus_halfwidth must be >= 0; got {halfwidth!r}")
+    anchor = str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area"))
+    settings: dict[str, Any] = {"halfwidth": int(halfwidth), "focus_anchor": anchor}
+    if anchor == "nucleus_area":
+        nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+        if nuclei_channel is None:
+            raise ValueError(
+                "segmentation.focus_anchor='nucleus_area' needs segmentation.nuclei_channel_name "
+                "(the GT nuclei channel) for semantic_focus_halfwidth; use 'phase_midband' for stores without one"
+            )
+        settings["nuclei_channel_name"] = str(nuclei_channel)
+    elif anchor == "phase_midband":
+        channel = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
+        settings["focus_channel_name"] = channel
+        settings.update(read_focus_compute_config(config, channel_name=channel).estimator_params)
+    else:
+        raise ValueError(f"segmentation.focus_anchor must be 'nucleus_area' or 'phase_midband', got {anchor!r}")
+    return settings
+
+
+def _foreground_stamp(config: DictConfig) -> dict[str, Any] | None:
+    """The ``pixel_foreground`` provenance stamp: the resolved recipe plus what else sets ``FG_*``.
+
+    ``FG_*`` values also depend on the metrics code
+    (:data:`~dynacell.evaluation.metrics.FOREGROUND_METRICS_VERSION`) and on
+    ``pixel_metrics.spacing``, which turns the physical sigmas into voxel sigmas.
+    ``None`` when the columns are off.
+    """
+    settings = _foreground_settings(config)
+    if settings is None:
+        return None
+    return {
+        **settings,
+        "version": FOREGROUND_METRICS_VERSION,
+        "spacing": [float(s) for s in config.pixel_metrics.spacing],
+    }
 
 
 def _separate_nuclei_path(config: DictConfig) -> str | None:
@@ -926,14 +1367,17 @@ def _separate_nuclei_path(config: DictConfig) -> str | None:
     cross-store case — membrane in ``CAAX_*.ozx``, nuclei in ``H2B_*.ozx``), else
     ``None`` (iPSC single-store ``cell.zarr`` — nuclei read from the GT plate).
 
-    Only the ``cellpose_watershed`` instance-AP path consumes a separate GT-nuclei
-    store; for any other backend ``nuclei_gt_path`` is an inert ``io`` field, so the
-    helper returns ``None`` rather than opening + position-validating a store that
-    will never be read.
+    Only the whole-cell **membrane** instance-AP paths (``cellpose_watershed`` and
+    ``cpdino``, which carve the nucleus footprint) consume a separate GT-nuclei store.
+    For nucleus/ER/mito targets — or any other backend — ``nuclei_gt_path`` is an inert
+    ``io`` field, so the helper returns ``None`` rather than opening + position-validating
+    a store that will never be read.
     """
+    if OmegaConf.select(config, "target_name", default=None) != "membrane":
+        return None
     backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
     compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
-    if not (compute_instance_ap and backend == "cellpose_watershed"):
+    if not (compute_instance_ap and backend in ("cellpose_watershed", "cpdino")):
         return None
     nuclei_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
     if nuclei_path is None or str(nuclei_path) == str(config.io.gt_path):
@@ -958,6 +1402,7 @@ def _worker_run_fov(
     pos_name: str,
     cuda_empty_every_n: int,
     microssim_sim,
+    cp_space: DatasetCPSpace | None,
 ) -> FovResult:
     """Worker entry point: process one FOV by name and return FovResult.
 
@@ -966,10 +1411,12 @@ def _worker_run_fov(
     file descriptors close before the worker accepts its next FOV. Models
     + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
 
-    ``microssim_sim`` is the leaf-level fitted MicroMS3IM (or ``None`` when
-    ``compute_microssim=false``); shipped per submission rather than via
-    worker state because the parent fits it after the position list is
-    finalized and before any worker pool spawns.
+    ``microssim_sim`` is the leaf-level fitted MicroMS3IM, or ``None`` when
+    ``compute_microssim=false``, when the calibration GT pool is degenerate,
+    or when the leaf has no positions or (FOV, t) pairs to fit. It is shipped
+    per submission rather than via worker state because the parent fits it
+    after the position list is finalized and before any worker pool spawns. ``cp_space`` is shipped the
+    same way so every worker scores CP in the parent's verified reference.
     """
     _worker_setup(config)
     state = _WORKER_STATE
@@ -1010,7 +1457,9 @@ def _worker_run_fov(
             state["dinov3"],
             state["dynaclr"],
             state["celldino"],
+            state["morphem"],
             microssim_sim,
+            cp_space,
         )
 
     # Worker-side manifest flush so interrupted runs preserve progress even
@@ -1022,7 +1471,13 @@ def _worker_run_fov(
     return result
 
 
-def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None):
+def evaluate_predictions(
+    config: DictConfig,
+    *,
+    models: EvalModels | None = None,
+    cp_space: DatasetCPSpace | None = None,
+    prediction_snapshot: dict[str, dict[str, Any]] | None = None,
+):
     """Evaluate predictions on all test images.
 
     Parameters
@@ -1037,10 +1492,19 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         preserves the historical single-condition behavior. Note: under
         ``runtime.executor=process``, workers still load their own model
         copies; this kwarg saves only the parent-side load.
+    cp_space : DatasetCPSpace | None, optional
+        The CP reference bound to this eval's dataset (:func:`eval_cp_space`).
+        Required exactly when ``compute_feature_metrics=true``; the caller loads it
+        so the same verified reference is stamped by :func:`save_metrics`.
+    prediction_snapshot : dict or None, optional
+        :func:`~dynacell.evaluation.cache.prediction_sources` of ``io.pred_path``, read
+        by the caller for the stamp it hashes; the prediction-side cache then uses the
+        same snapshot instead of reading the store again. ``None`` reads it here.
+        Process-executor workers read their own.
     """
     # Phase 1 runtime resolution: lock in executor + thread caps before any
     # heavy work. fov_workers may be provisional when "auto"; re-resolved in
-    # Phase 2 once the position list is known (C4). threads_per_worker stays
+    # Phase 2 once the position list is known. threads_per_worker stays
     # frozen across phases for parent/worker BLAS-cap consistency.
     runtime = resolve_runtime(config)
     apply_thread_budget(runtime.threads_per_worker)
@@ -1051,6 +1515,11 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     OmegaConf.resolve(config)
     reset_timings()
     _validate_instance_ap_config(config)
+    if config.compute_feature_metrics != (cp_space is not None):
+        raise ValueError(
+            f"cp_space must be given exactly when compute_feature_metrics=true "
+            f"(compute_feature_metrics={config.compute_feature_metrics}, cp_space={cp_space is not None})"
+        )
 
     use_gpu = bool(getattr(config, "use_gpu", True))
 
@@ -1072,6 +1541,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             "io.cell_segmentation_path is required when compute_feature_metrics=true or compute_cell_similarity=true"
         )
 
+    # Whether this call owns the model bundle (vs borrowing the grouped driver's
+    # shared one) — decides if the parent may release its seg_model copy below.
+    owns_models = models is None
     with region_timer("parent_load_models", "<parent>"):
         if models is None:
             models = load_eval_models(config)
@@ -1079,12 +1551,51 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         dinov3_feature_extractor = models.dinov3
         dynaclr_feature_extractor = models.dynaclr
         celldino_feature_extractor = models.celldino
+        morphem_feature_extractor = models.morphem
 
-        cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
+        cache_ctx, pred_cache_ctx = init_cache_contexts(config, models, prediction_snapshot=prediction_snapshot)
+    # The CP reference masks and scales by column position: refuse a GT or pred CP
+    # cache whose columns are not the reference's, by name and order.
+    if cp_space is not None:
+        for ctx in (cache_ctx, pred_cache_ctx):
+            check_cp_cache_feature_names(ctx, cp_space.feature_names)
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
     parent_lists: dict[str, _BackboneLists] = {name: _BackboneLists() for name in _BACKBONE_KEYS}
+    # GT-finite CP rows by (position, t), merged across FOVs by _aggregate; hashed against
+    # the CP reference fit before any dataset-level metric is computed.
+    gt_cp_blocks: dict[tuple[str, int], np.ndarray] = {}
+
+    # Deep-feature extractors by backbone key. Bound at function scope because the
+    # precompute gate and the dataset-metrics block both derive from it and sit in
+    # different ``with`` scopes — building it inside the first would leave the second
+    # reading a name bound three blocks deeper.
+    deep_extractors: dict[FeatureKind, Any] = {
+        "dinov3": dinov3_feature_extractor,
+        "dynaclr": dynaclr_feature_extractor,
+    }
+    if celldino_feature_extractor is not None:
+        deep_extractors["celldino"] = celldino_feature_extractor
+    if morphem_feature_extractor is not None:
+        deep_extractors["morphem"] = morphem_feature_extractor
+    if config.compute_feature_metrics:
+        # DINOv3/DynaCLR have no soft-skip: their Dataset_* columns are expected in
+        # every feature_metrics.csv, NaN-filled when a run produced no cells. This
+        # cannot fire today — LoadFlags.for_evaluate gates all four extractors on
+        # compute_feature_metrics and the grouped driver cannot skew that, since
+        # compute_feature_metrics is a _MODEL_LOADING_FIELDS invariant. Assert it
+        # anyway: ``active_kinds`` derives from this map's *keys*, so a variant that
+        # omits absent backbones instead of storing None — which precompute_gt_artifacts
+        # already does via ``if build[k]`` — would drop Dataset_DINOv3_* /
+        # Dataset_DynaCLR_* from the CSV rather than NaN-fill them. ``.get`` catches
+        # both a missing key and a None value.
+        for required in ("dinov3", "dynaclr"):
+            if deep_extractors.get(required) is None:
+                raise ValueError(
+                    f"compute_feature_metrics=true but the {required} extractor is missing; "
+                    "its dataset-metric columns would be dropped instead of NaN-filled"
+                )
 
     channel_names = ["prediction_seg", "target_seg"]
     with (
@@ -1122,6 +1633,31 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             if nuclei_path is not None:
                 nuclei_plate = aux_stack.enter_context(open_ome_zarr(Path(nuclei_path), mode="r"))
                 nuclei_by_name = dict(nuclei_plate.positions())
+
+            # Optional explicit FOV exclusion (e.g. drop positions whose prediction
+            # zarr is incomplete). Applied uniformly to pred/gt/seg so the counts
+            # stay aligned and the strict-mode validation below still holds. Match
+            # on the full position name (``0/0/fov0011``) or its leaf (``fov0011``).
+            #
+            # Unlike ``limit_positions`` this does NOT set ``partial_walk``: a hard
+            # StaleCacheError would defeat the point, since this flag exists to
+            # evaluate the finished FOVs of a partially-run predict, where a full
+            # walk is impossible. It DOES set ``excluded_walk``, which stops the
+            # manifest advancing its preprocess_version over the skipped FOVs --
+            # otherwise a later unrestricted run reads their stale embeddings back
+            # as a cache hit. See ``_update_manifest_entry``.
+            exclude = OmegaConf.select(config, "io.exclude_fov_names", default=None) or []
+            if exclude:
+                _validate_exclusions(exclude, [n for n, _ in pred_positions])
+                exclude_set = set(exclude)
+
+                def _keep(name: str) -> bool:
+                    return name not in exclude_set and name.rsplit("/", 1)[-1] not in exclude_set
+
+                pred_positions = [(n, p) for n, p in pred_positions if _keep(n)]
+                gt_positions = [(n, p) for n, p in gt_positions if _keep(n)]
+                seg_positions = [(n, p) for n, p in seg_positions if _keep(n)]
+
             # Position-count alignment.
             #
             # When ``limit_positions`` is unset (production), require strict
@@ -1177,6 +1713,31 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         f"nuclei_gt_path store is missing positions {sorted(missing_nuclei)!r} "
                         "(cellpose_watershed reads GT-nuclei seeds there, matched by position name)"
                     )
+            # Every per-timepoint artifact is indexed by its own store's t, so a
+            # T-subset prediction (or a lite GT against a full-T segmentation store)
+            # would score frame k against frame k of a different frame list. Compare
+            # per position: T legitimately varies across FOVs within one store.
+            # Shape metadata only — no array is read.
+            for (pos_name, pos_pred), (_, pos_gt), (_, pos_seg) in zip(pred_positions, gt_positions, seg_positions):
+                t_counts = {"pred": pos_pred.data.shape[0], "gt": pos_gt.data.shape[0]}
+                if pos_seg is not None:
+                    t_counts["seg"] = pos_seg.data.shape[0]
+                if nuclei_by_name is not None:
+                    t_counts["nuclei"] = nuclei_by_name[pos_name].data.shape[0]
+                if len(set(t_counts.values())) > 1:
+                    raise ValueError(f"Timepoint count mismatch at position {pos_name!r}: {t_counts}")
+            # The CP scaler describes a fixed set of GT cells: refuse a position set it was not fit on
+            # before any per-FOV work (limit_positions / exclude_fov_names on a non-lite dataset).
+            if cp_space is not None:
+                cp_space.check_positions([name for name, _ in gt_positions])
+                # Early content gate: when the GT CP cache already holds every slot and this run
+                # will not recompute it, the cells the loop will score are known now, so a GT
+                # that no longer matches the fit fails in seconds instead of after the loop. The
+                # post-staging gate in _stage_cp_dataset_inputs stays the authoritative check.
+                if not cache_ctx.force["gt_cp"]:
+                    cached = complete_cached_gt_cp_blocks(cache_ctx, gt_path, len(cp_space.feature_names))
+                    if cached is not None:
+                        cp_space.check_gt_cells(cached)
 
             # Leaf-level MicroMS3IM calibration: fit α once on a random
             # subsample of (FOV, t) volumes and reuse the fitted sim for
@@ -1194,32 +1755,18 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 max_pairs = int(OmegaConf.select(config, "microssim.calibration.max_pairs", default=12))
                 seed = int(OmegaConf.select(config, "microssim.calibration.seed", default=42))
                 cache_reads = bool(OmegaConf.select(config, "microssim.calibration.cache", default=False))
-                try:
-                    with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
-                        microssim_sim, microssim_read_cache = _calibrate_microssim(
-                            pred_positions,
-                            gt_positions,
-                            io_config,
-                            use_gpu=use_gpu,
-                            max_pairs=max_pairs,
-                            seed=seed,
-                            cache_reads=cache_reads,
-                        )
-                except (ValueError, RuntimeError, MemoryError) as exc:
-                    print(
-                        f"[microssim] leaf-level calibration failed "
-                        f"({type(exc).__name__}: {exc}); MicroMS3IM will be NaN for all FOVs."
+                with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
+                    microssim_sim, microssim_read_cache = _calibrate_microssim(
+                        pred_positions,
+                        gt_positions,
+                        io_config,
+                        use_gpu=use_gpu,
+                        max_pairs=max_pairs,
+                        seed=seed,
+                        cache_reads=cache_reads,
                     )
-                    microssim_sim = None
-                    microssim_read_cache = {}
 
             if config.compute_feature_metrics:
-                deep_extractors = {
-                    "dinov3": dinov3_feature_extractor,
-                    "dynaclr": dynaclr_feature_extractor,
-                }
-                if celldino_feature_extractor is not None:
-                    deep_extractors["celldino"] = celldino_feature_extractor
                 flush_threshold = int(
                     OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256)
                 )
@@ -1271,10 +1818,14 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             # pre-warming in the parent prevents N workers from racing on a
             # cold cache). After Phase 2 we know the final executor — if it's
             # process, drop the parent copy so we don't keep two seg model
-            # copies resident on the GPU.
+            # copies resident on the GPU. Clearing the bundle's field is what
+            # actually frees it — unbinding the local alone leaves
+            # ``models.seg_model`` holding the only other reference. Only safe
+            # when we own the bundle; the grouped driver reuses its own.
             if runtime.executor == "process" and seg_model is not None:
-                del seg_model
                 seg_model = None
+                if owns_models:
+                    models.seg_model = None
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
@@ -1286,6 +1837,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             extend_worker_timings = runtime.executor == "process"
 
             def _aggregate(result: FovResult) -> None:
+                gt_cp_blocks.update({(result.pos_name, t): rows for t, rows in result.gt_cp_blocks.items()})
                 _aggregate_fov_result(
                     result,
                     segmentation_results,
@@ -1325,7 +1877,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dinov3_feature_extractor,
                         dynaclr_feature_extractor,
                         celldino_feature_extractor,
+                        morphem_feature_extractor,
                         microssim_sim,
+                        cp_space,
                         predict_cached=cached_pair[0],
                         target_cached=cached_pair[1],
                     )
@@ -1351,7 +1905,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 # rather than the full N×seg_array (~N × 440 MB).
                 from concurrent.futures import as_completed
 
-                pos_names_in_order = [p[0] for p, _, _ in zip(pred_positions, gt_positions, seg_positions)]
+                pos_names_in_order = [name for name, _ in pred_positions]
                 next_idx = 0
                 buffer: dict[str, FovResult] = {}
                 with make_fov_executor(runtime) as pool:
@@ -1364,6 +1918,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                             pos_name,
                             runtime.cuda_empty_cache_every_n_timepoints,
                             microssim_sim,
+                            cp_space,
                         ): pos_name
                         for pos_name in pos_names_in_order
                     }
@@ -1390,57 +1945,46 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         with region_timer("dataset_metrics", "<parent>"):
             dataset_row: dict[str, float] = {}
 
+            # Backbones that actually produced features this run, keyed off the
+            # function-scope ``deep_extractors``: dinov3/dynaclr are always present,
+            # celldino/morphem soft-skip when unconfigured. Everything below (metric
+            # tracks, NaN-fill prefixes, embedding groups) derives from these two lists
+            # rather than repeating the None checks.
+            deep_kinds: list[FeatureKind] = [k for k in _BACKBONE_KEYS if k in deep_extractors]
+            active_kinds: list[FeatureKind] = ["cp", *deep_kinds]
+            metric_flags = _feature_metric_flags(config)
+
             # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
             # pred_for_probe, target_for_probe, pred_fovs, target_fovs).
-            # CP gets pruning + z-score; the pre-prune CP arrays feed the
-            # linear probe so MADScaler can normalize per-fold.
+            # CP is scored in the target's reference space (GT-only mask + shared GT
+            # scaler); the masked-but-unscaled CP arrays feed the linear probe so
+            # MADScaler can normalize per-fold.
             prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
-            cp = parent_lists["cp"]
-            if cp.pred_feats:
-                pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
-                target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
-                target_cp_filtered, pred_cp_filtered, cp_keep_mask = select_features(target_cp_raw, pred_cp_raw)
-                cp_glcm_enabled = bool(OmegaConf.select(config, "feature_metrics.cp.glcm.enabled", default=False))
-                mask_payload = {
-                    "feature_names": list(active_cp_feature_names(cp_glcm_enabled)),
-                    "keep_mask": [bool(b) for b in cp_keep_mask],
-                    "n_kept": int(cp_keep_mask.sum()),
-                    "n_total": int(cp_keep_mask.size),
-                    "criteria": {
-                        "freq_cut": DEFAULT_FREQ_CUT,
-                        "unique_cut": DEFAULT_UNIQUE_CUT,
-                        "corr_threshold": DEFAULT_CORR_THRESHOLD,
-                    },
-                }
-                (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
-                if pred_cp_filtered.size and target_cp_filtered.size:
-                    pred_cp_z, target_cp_z = _zscore_per_side(pred_cp_filtered, target_cp_filtered)
-                else:
-                    pred_cp_z, target_cp_z = pred_cp_filtered, target_cp_filtered
+            # What the shared-space z-clip discards: the fraction of pred CP cells with any
+            # kept feature beyond +-z_clip (NaN without pred cells), next to Dataset_CP_KID.
+            pred_cp_all = (
+                np.concatenate(parent_lists["cp"].pred_feats, axis=0)
+                if parent_lists["cp"].pred_feats
+                else np.empty((0, len(cp_space.feature_names)))
+            )
+            pred_clip = cp_space.clip_fraction(pred_cp_all)
+            dataset_row[f"Dataset_{_COLUMN_PREFIX['cp']}_clip_frac"] = pred_clip["any"]
+            if parent_lists["cp"].pred_feats:
                 prefix_inputs.append(
-                    (
-                        "CP",
-                        pred_cp_z,
-                        target_cp_z,
-                        pred_cp_filtered,
-                        target_cp_filtered,
-                        np.concatenate(cp.pred_fovs, axis=0),
-                        np.concatenate(cp.gt_fovs, axis=0),
-                    )
+                    _stage_cp_dataset_inputs(parent_lists["cp"], cp_space, gt_cp_blocks, save_dir, pred_clip)
                 )
+            else:  # no finite pred CP rows: CP metrics are NaN, but the GT gate and sidecar still apply
+                _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir, pred_clip)
 
-            deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
-            if celldino_feature_extractor is not None:
-                deep_tracks.append(("CellDINO", "celldino"))
-            for display_name, key in deep_tracks:
+            for key in deep_kinds:  # cp is handled above (reference space)
                 bb = parent_lists[key]
                 if bb.pred_feats:
                     pred_arr = np.concatenate(bb.pred_feats, axis=0)
                     target_arr = np.concatenate(bb.gt_feats, axis=0)
                     prefix_inputs.append(
                         (
-                            display_name,
+                            _COLUMN_PREFIX[key],
                             pred_arr,
                             target_arr,
                             pred_arr,
@@ -1463,7 +2007,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 # leaf comparability of the MIND column).
                 name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
                 raw = {
-                    **compute_feature_similarity(p_metric, t_metric, name),
+                    **compute_feature_similarity(p_metric, t_metric, name, **metric_flags),
                     **_real_vs_pred_probe(p_probe, t_probe, fov_p, fov_t, name),
                 }
                 return {f"Dataset_{k}": v for k, v in raw.items()}
@@ -1480,14 +2024,12 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dataset_row.update(result)
 
             # NaN-fill any prefix that had no cells (parallel pool would
-            # otherwise skip it). Cheap; runs on empty arrays.
-            expected_prefixes = ["CP", "DINOv3", "DynaCLR"]
-            if celldino_feature_extractor is not None:
-                expected_prefixes.append("CellDINO")
-            for name in expected_prefixes:
-                if f"Dataset_{name}_FID" not in dataset_row:
+            # otherwise skip it). Cheap; runs on empty arrays. KID is the
+            # sentinel because it is the one family no flag can switch off.
+            for name in (_COLUMN_PREFIX[k] for k in active_kinds):
+                if f"Dataset_{name}_KID" not in dataset_row:
                     raw = {
-                        **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
+                        **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name, **metric_flags),
                         **_real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name),
                     }
                     dataset_row.update({f"Dataset_{k}": v for k, v in raw.items()})
@@ -1495,21 +2037,64 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             for row in all_feature_metrics:
                 row.update(dataset_row)
             embedding_groups: dict[str, tuple] = {}
-            for key in _BACKBONE_KEYS:
-                if key == "celldino" and celldino_feature_extractor is None:
-                    continue
+            for key in active_kinds:
                 bb = parent_lists[key]
                 embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)
                 embedding_groups[f"gt_{key}"] = (bb.gt_feats, bb.gt_fovs, bb.gt_ts)
             _save_embeddings(save_dir, embedding_groups)
+
+    if _foreground_settings(config) is not None:
+        # A (FOV, t) whose GT has no foreground scores NaN in every FG_* column (see
+        # foreground_pixel_metrics); count them so a mean over fewer rows is visible.
+        empty = sum(not np.isfinite(row["FG_SI_SSIM"]) for row in all_pixel_metrics)
+        print(
+            f"[foreground] {empty} of {len(all_pixel_metrics)} (FOV, t) rows have no GT foreground; FG_* are NaN there."
+        )
 
     dump_timings_csv(save_dir)
 
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
 
 
-def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feature_metrics=None):
-    """Save metrics to files."""
+def save_metrics(
+    config: DictConfig,
+    pixel_metrics=None,
+    mask_metrics=None,
+    feature_metrics=None,
+    *,
+    cp_space: DatasetCPSpace | None,
+    prediction_digest: str,
+):
+    """Save metric rows as CSV + NPY (and plots), then stamp ``metrics_provenance.json``.
+
+    Parameters
+    ----------
+    config : DictConfig
+        Eval config (``save.*`` filenames and ``save.save_dir``,
+        ``compute_feature_metrics``).
+    pixel_metrics, mask_metrics, feature_metrics : list of dict, optional
+        Per-(FOV, timepoint) rows; an empty or ``None`` family is skipped.
+    cp_space : DatasetCPSpace or None
+        The bound CP space the run SCORED with, ``None`` without feature metrics.
+        Its ``reference_sha256`` (audit) and ``binding_sha256`` (compared on cache
+        reuse) are stamped. It is passed in rather than re-read here, so a reference
+        rebuilt mid-run cannot be stamped on values it did not produce.
+    prediction_digest : str
+        :func:`~dynacell.evaluation.cache.prediction_sources_sha256_12` of the
+        ``io.pred_path`` snapshot scored, taken before scoring for the same reason: a
+        re-predict landing mid-run then leaves a stamp that no longer matches the
+        store, and the rows are recomputed.
+
+    Raises
+    ------
+    ValueError
+        If ``cp_space`` is given without feature metrics, or missing with them.
+    """
+    if config.compute_feature_metrics != (cp_space is not None):
+        raise ValueError(
+            "cp_space must be given exactly when compute_feature_metrics=true "
+            f"(compute_feature_metrics={config.compute_feature_metrics})"
+        )
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1528,6 +2113,32 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
             plot_metrics(df, save_dir, plot_dir)
             print(f"Saved {plot_dir} plots to {save_dir / plot_dir}")
 
+    # Stamp the numeric stack that produced these rows LAST, so a later run can tell
+    # whether the cache is comparable instead of assuming it is. Stamping first meant a
+    # crash partway through the loop above left a fresh stamp certifying a previous
+    # run's rows -- the exact misattribution the sidecar exists to make detectable.
+    write_metrics_provenance(
+        save_dir,
+        cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
+        cp_space_sha256=cp_space.binding_sha256 if cp_space is not None else None,
+        prediction_digest=prediction_digest,
+        pixel_foreground=_foreground_stamp(config),
+        compute_fid=config.compute_feature_metrics and _feature_metric_flags(config)["compute_fid"],
+        semantic_focus=_semantic_focus_settings(config),
+    )
+
+
+#: Pixel columns that only a dual-scaling run writes. Their absence marks a pixel
+#: cache whose bare ``PSNR``/``SSIM``/``NRMSE`` cannot be trusted to be the
+#: scale-sensitive form — see :func:`_final_metrics_cache_valid`.
+_SCALED_PIXEL_COLUMNS = frozenset({"SI_PSNR", "SI_SSIM", "SI_NRMSE"})
+
+
+def _forces_final_metrics(config: DictConfig) -> bool:
+    """True when ``force_recompute`` rejects every final-metrics cache of ``config``."""
+    force = config.force_recompute
+    return bool(force.all or force.final_metrics)
+
 
 def _final_metrics_cache_valid(config: DictConfig) -> bool:
     """Return True when the saved CSV/NPY caches can be reused.
@@ -1539,10 +2150,45 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     campaign launcher passes it). Encoding a focus signature into the saved rows would
     let this auto-detect — a follow-up.
     """
-    force = config.force_recompute
-    if force.all or force.final_metrics:
+    # Resolved before every early return: both entrypoints call this gate before any
+    # model load, so an invalid recipe fails here rather than after the load.
+    foreground = _foreground_stamp(config)
+    semantic_focus = _semantic_focus_settings(config)
+    if _forces_final_metrics(config):
         return False
     save_dir = Path(config.save.save_dir)
+    # Metric values are not comparable across cubic versions — FSC/FRC/Spectral_PCC
+    # move (see dynacell.evaluation.provenance). A cache with no stamp, or one
+    # stamped with a different cubic, is not reusable regardless of its columns.
+    # Likewise for CP: KID/FID/cosine were scored in the CP space stamped beside them
+    # (reference + dataset + the GT cells it was fit on), so another dataset's space, a
+    # changed GT matrix, or a rebuilt (or never-stamped) reference forces a recompute.
+    # An unstamped dir has nothing to reuse, so it needs no reference to be rejected.
+    if not (save_dir / PROVENANCE_FILENAME).is_file():
+        return False
+    current_sha256 = None
+    if config.compute_feature_metrics:
+        space = eval_cp_space(config)
+        # The cached rows cover the positions of the run that wrote them; a partial walk
+        # must go through the scoring path so ``check_positions`` sees its GT position set.
+        if config.limit_positions is not None or OmegaConf.select(config, "io.exclude_fov_names", default=None):
+            return False
+        # Same position guard as the scoring path, on the GT store as it is now: a GT
+        # store replaced or extended since the fit must not hand back cached CP rows.
+        with open_ome_zarr(Path(config.io.gt_path), mode="r") as gt_plate:
+            space.check_positions([name for name, _ in gt_plate.positions()])
+        current_sha256 = space.binding_sha256
+    # A missing prediction store raises FileNotFoundError here, as it would when scoring.
+    sources = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+    if not metrics_provenance_matches(
+        save_dir,
+        cp_space_sha256=current_sha256,
+        prediction_sources=sources,
+        pixel_foreground=foreground,
+        compute_fid=config.compute_feature_metrics and _feature_metric_flags(config)["compute_fid"],
+        semantic_focus=semantic_focus,
+    ):
+        return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename
     mask_ok = mask_path.exists()
@@ -1553,6 +2199,20 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     if mask_ok and bool(getattr(config, "compute_instance_ap", False)):
         rows = np.load(mask_path, allow_pickle=True).tolist()
         if not rows or "mAP" not in rows[0] or "instance_dice" not in rows[0]:
+            return False
+    # A pixel cache without the SI_* columns is not merely incomplete, it is
+    # MISLABELED: between the scale-invariant switch (2026-07-29) and the
+    # dual-reporting change, ``PSNR``/``SSIM``/``NRMSE`` held scale-INVARIANT
+    # values under the names now reserved for the scale-sensitive ones, and
+    # nothing on disk distinguishes those rows from a pre-switch (genuinely
+    # scale-sensitive) cache. Reusing either would publish one scaling under the
+    # other's name, so require the SI_* columns and recompute both otherwise.
+    if pixel_ok:
+        pixel_rows = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
+        if not pixel_rows or not _SCALED_PIXEL_COLUMNS.issubset(pixel_rows[0]):
+            return False
+        # The stamp above already pins the foreground recipe; the columns must be there too.
+        if foreground is not None and not set(FOREGROUND_COLUMNS).issubset(pixel_rows[0]):
             return False
     # Same guard for per-cell similarity, keyed to the exact requested columns:
     # a prior run with a different metrics/reduce set (e.g. PCC-only) must not
@@ -1565,6 +2225,32 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         pixel_rows = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
         if not pixel_rows or not expected.issubset(pixel_rows[0]):
             return False
+    # A feature cache written with a metric switched off lacks that metric's
+    # columns entirely; once the switch is back on, it must not suppress them.
+    # Keyed per prefix off the always-present Dataset_<prefix>_KID column, so a
+    # full run (every family present for every prefix it scored) still passes.
+    if feature_ok and config.compute_feature_metrics:
+        feature_rows = np.load(save_dir / config.save.feature_metrics_filename, allow_pickle=True).tolist()
+        if feature_rows:
+            flags = _feature_metric_flags(config)
+            suffixes = [
+                *(["FID"] if flags["compute_fid"] else []),
+                *(["Precision", "Recall", "F1"] if flags["compute_prc"] else []),
+                *(["MIND"] if flags["compute_mind"] else []),
+            ]
+            columns = feature_rows[0].keys()
+            prefixes = [
+                c.removeprefix("Dataset_").removesuffix("_KID")
+                for c in columns
+                if c.startswith("Dataset_") and c.endswith("_KID")
+            ]
+            if any(f"Dataset_{prefix}_{suffix}" not in columns for prefix in prefixes for suffix in suffixes):
+                return False
+            # CP rows scored before the shared-space z-clip carry no clip-fraction columns:
+            # their KID was computed unclipped, so they must be recomputed, not reused.
+            cp = _COLUMN_PREFIX["cp"]
+            if cp in prefixes and not {f"Dataset_{cp}_clip_frac", f"{cp}_clip_frac"} <= set(columns):
+                return False
     return pixel_ok and mask_ok and feature_ok
 
 
@@ -1610,6 +2296,12 @@ _MODEL_LOADING_FIELDS: tuple[str, ...] = (
     "instance_metrics.iou_thresholds",
 )
 
+#: Fields every condition of a grouped run must share although no shared model depends
+#: on them. ``pixel_metrics.foreground`` sets the ``FG_*`` columns and their scoring
+#: region, so one bucket must not mix FG and no-FG rows or two recipes. (Not all of
+#: ``pixel_metrics``: ``spacing`` legitimately follows each condition's dataset_ref.)
+_GROUPED_SHARED_FIELDS: tuple[str, ...] = ("pixel_metrics.foreground",)
+
 
 def _snapshot_field(cfg: DictConfig, cfg_field: str):
     """Resolve a model-loading field to a comparable plain Python value."""
@@ -1651,6 +2343,10 @@ def _seg_model_required(cfg: DictConfig) -> bool:
     return pred_cache_dir is None
 
 
+#: Keys that describe the grouping itself; no single condition's config carries them.
+_GROUPING_KEYS = ("conditions", "only_conditions")
+
+
 def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
     """Return a fresh DictConfig with ``overrides`` deep-merged into ``base``.
 
@@ -1664,10 +2360,152 @@ def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConf
     """
     base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
     merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
-    for key in ("conditions", "name"):
+    for key in (*_GROUPING_KEYS, "name"):
         if key in merged:
             del merged[key]
     return merged  # type: ignore[return-value]
+
+
+def _condition_name(cond, idx: int) -> str:
+    """Label of one ``conditions`` entry: its ``name``, else its index in the leaf."""
+    return str(cond.get("name", idx))
+
+
+def _select_conditions(conditions, only) -> list[tuple[str, object]]:
+    """Return ``(name, condition)`` pairs, restricted to ``only`` when it is set.
+
+    ``only`` is the ``only_conditions`` list. Conditions keep their leaf order, and
+    names keep their leaf index, so filtering never relabels a condition. An empty list
+    or a name the leaf does not define raises, as does a scalar: a bracketless override
+    (``only_conditions=x``) would otherwise select by the characters of ``x``.
+    """
+    named = [(_condition_name(cond, idx), cond) for idx, cond in enumerate(conditions)]
+    if only is None:
+        return named
+    if not (OmegaConf.is_list(only) or isinstance(only, list)):
+        raise ValueError(f"only_conditions must be a list of condition names, e.g. only_conditions=[{only}]")
+    wanted = {str(name) for name in only}
+    available = [name for name, _ in named]
+    unknown = sorted(wanted - set(available))
+    if not wanted or unknown:
+        raise ValueError(
+            f"only_conditions={sorted(wanted)!r} must name at least one condition of this leaf; "
+            f"unknown: {unknown!r}; available: {available!r}"
+        )
+    return [(name, cond) for name, cond in named if name in wanted]
+
+
+def _with_forced_probe_siblings(config: DictConfig, conditions, selected: list) -> list:
+    """Add the unselected probe-group siblings of ``selected`` that ``force_recompute`` forces.
+
+    A forced condition has no cache that counts as current: forcing is how a recipe change
+    the cache check cannot see (``feature_metrics.focus_slab``) is applied, so pairing a
+    rescored condition with a forced sibling's old embeddings could mix recipes. Rescoring
+    the sibling keeps the probe whole. Every grouped leaf forces ``final_metrics``, so there
+    ``only_conditions=[<model>__a549_mock]`` rescores that model's mock, DENV and ZIKV.
+    Leaf order is kept.
+    """
+    selected_names = {name for name, _ in selected}
+    merged = {name: _merge_condition(config, cond) for name, cond in _select_conditions(conditions, None)}
+    membership = {name: probe_group(Path(cfg.save.save_dir)) for name, cfg in merged.items()}
+    keys = {membership[name][0] for name in selected_names if membership[name] is not None}
+    added = [
+        name
+        for name in merged
+        if name not in selected_names
+        and membership[name] is not None
+        and membership[name][0] in keys
+        and _forces_final_metrics(merged[name])
+    ]
+    if not added:
+        return selected
+    print(f"[grouped] force_recompute: also rescoring probe-group siblings {added}")
+    return [(name, cond) for name, cond in _select_conditions(conditions, None) if name in selected_names | set(added)]
+
+
+#: Marker in a mock's eval dir: its embeddings were replaced, and the probe CSVs of its
+#: group's infected conditions are not yet rebuilt against them. A probe pass clears it.
+PROBE_PENDING_FILENAME = "cross_condition_probe.pending"
+
+
+def _probe_group_dirs(config: DictConfig, conditions) -> dict[tuple[str, str, str], dict[str, Path]]:
+    """Each condition's eval dir, by probe group and then condition token."""
+    groups: dict[tuple[str, str, str], dict[str, Path]] = defaultdict(dict)
+    for _, cond in _select_conditions(conditions, None):
+        save_dir = Path(_merge_condition(config, cond).save.save_dir)
+        membership = probe_group(save_dir)
+        if membership is not None:
+            groups[membership[0]][membership[1]] = save_dir
+    return groups
+
+
+def _mark_probes_pending(group: dict[str, Path]) -> None:
+    """Before a mock's embeddings are replaced, drop its group's infected probe CSVs.
+
+    The marker outlives a run that fails later, so a retry that finds the new mock cached
+    still rebuilds the infected probes against it.
+    """
+    group["mock"].mkdir(parents=True, exist_ok=True)
+    (group["mock"] / PROBE_PENDING_FILENAME).touch()
+    for condition, save_dir in group.items():
+        stale = save_dir / GROUP_PROBE_FILENAME
+        if condition != "mock" and stale.is_file():
+            stale.unlink()
+            print(f"[grouped] removed cross-condition probe {stale}: its mock is being rescored")
+
+
+def _probe_counterparts(
+    config: DictConfig,
+    conditions,
+    selected_names: set[str],
+    selected_dirs: list[Path],
+    group_dirs: dict[tuple[str, str, str], dict[str, Path]],
+) -> tuple[list[Path], list[Path], list[Path]]:
+    """Unselected conditions whose probe the selected ones change.
+
+    Returns ``(usable, invalidated, pending)``. A selected infected condition is probed
+    against its group's mock, so an unselected mock is a counterpart. An unselected
+    infected condition is one only when its group's mock carries the
+    :data:`PROBE_PENDING_FILENAME` marker (rescored by this run or by one that failed
+    before its probe finished): its probe CSV pairs it with the mock's old embeddings, so
+    it is ``invalidated``. ``usable`` counterparts hold a cache this run would reuse if
+    they were selected, so the probe pairs their embeddings with the selected ones.
+    ``pending`` are the markers the probe pass resolves. Other conditions are not inspected.
+    """
+    groups: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for save_dir in selected_dirs:
+        membership = probe_group(save_dir)
+        if membership is not None:
+            groups[membership[0]].add(membership[1])
+    pending = [
+        marker
+        for key in groups
+        if "mock" in group_dirs[key] and (marker := group_dirs[key]["mock"] / PROBE_PENDING_FILENAME).is_file()
+    ]
+    remocked = {probe_group(marker.parent)[0] for marker in pending}
+    usable: list[Path] = []
+    invalidated: list[Path] = []
+    for name, cond in _select_conditions(conditions, None):
+        if name in selected_names:
+            continue
+        merged = _merge_condition(config, cond)
+        save_dir = Path(merged.save.save_dir)
+        membership = probe_group(save_dir)
+        if membership is None or membership[0] not in groups:
+            continue
+        key, condition = membership
+        if condition != "mock":
+            if key not in remocked:
+                continue
+            invalidated.append(save_dir)
+        apply_dataset_ref(merged)
+        if not Path(merged.io.pred_path).exists():
+            print(f"[grouped] probe counterpart {name!r}: no prediction store at {merged.io.pred_path}; not paired")
+        elif _final_metrics_cache_valid(merged):
+            usable.append(save_dir)
+        else:
+            print(f"[grouped] probe counterpart {name!r}: cached metrics not current; not paired")
+    return usable, invalidated, pending
 
 
 def _check_grouped_field_invariants(
@@ -1698,6 +2536,12 @@ def _check_grouped_field_invariants(
                 f"Condition {condition_name!r}: overrides changed model-loading field "
                 f"{cfg_field!r}. Move it to the base config or run this condition separately."
             )
+    for cfg_field in _GROUPED_SHARED_FIELDS:
+        if base_snapshot[cfg_field] != _snapshot_field(merged, cfg_field):
+            raise ValueError(
+                f"Condition {condition_name!r}: overrides changed {cfg_field!r}, which every condition "
+                f"of a grouped run must share. Move it to the base config or run this condition separately."
+            )
     if _seg_model_required(merged) and not base_seg_required:
         raise ValueError(
             f"Condition {condition_name!r}: io.pred_cache_dir override flips "
@@ -1725,19 +2569,22 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     Conditions may freely override ``io.*``, ``save.*``, ``runtime.*``,
     ``limit_positions``, and ``force_recompute.*``. They must NOT change
     ``target_name``, ``feature_extractor.*``, ``compute_feature_metrics``,
-    or ``use_gpu`` — those gate which models get loaded.
+    or ``use_gpu`` — those gate which models get loaded — nor
+    ``pixel_metrics.foreground``, which must be uniform across one bucket.
 
     Parameters
     ----------
     config : DictConfig
         Eval config with an extra top-level ``conditions: [...]`` list.
-        Each entry is a dict-like overlay applied to the base.
+        Each entry is a dict-like overlay applied to the base. An optional
+        ``only_conditions: [...]`` list of names restricts the run to those
+        conditions.
 
     Returns
     -------
     list[tuple[str, tuple]]
         ``[(condition_name, (pixel_rows, mask_rows, feature_rows)), ...]``
-        in input order. ``condition_name`` is taken from the entry's
+        for the evaluated conditions, in input order. ``condition_name`` is taken from the entry's
         ``name`` field, falling back to its index as a string.
 
     Notes
@@ -1750,10 +2597,23 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     conditions = OmegaConf.select(config, "conditions", default=None)
     if not conditions:
         raise ValueError("evaluate_predictions_grouped requires a non-empty top-level 'conditions' list")
+    only = OmegaConf.select(config, "only_conditions", default=None)
+    selected = _select_conditions(conditions, only)
+    # Gated by ``cross_condition_probe.enabled``; default-on whenever feature metrics
+    # are computed, since the probe consumes the embeddings those produce.
+    probe_enabled = bool(
+        OmegaConf.select(
+            config,
+            "cross_condition_probe.enabled",
+            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
+        )
+    )
+    if probe_enabled and only is not None:
+        selected = _with_forced_probe_siblings(config, conditions, selected)
 
     executor = OmegaConf.select(config, "runtime.executor", default="serial")
     require_complete = bool(OmegaConf.select(config, "io.require_complete_cache", default=False))
-    n_conditions = len(conditions)
+    n_conditions = len(selected)
     if executor == "process" and n_conditions > 1:
         if require_complete:
             # Cache-only path: workers still re-init per condition (pool spawn +
@@ -1791,9 +2651,12 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # to escape Hydra's struct-mode flag — ``del`` on a struct DictConfig
     # raises ``ConfigTypeError``.
     models_base = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
-    if "conditions" in models_base:
-        del models_base["conditions"]
-    base_snapshot = {field: _snapshot_field(models_base, field) for field in _MODEL_LOADING_FIELDS}
+    for key in _GROUPING_KEYS:
+        if key in models_base:
+            del models_base[key]
+    base_snapshot = {
+        field: _snapshot_field(models_base, field) for field in (*_MODEL_LOADING_FIELDS, *_GROUPED_SHARED_FIELDS)
+    }
     base_seg_required = _seg_model_required(models_base)
 
     models: EvalModels | None = None
@@ -1801,31 +2664,38 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     def get_models() -> EvalModels:
         nonlocal models
         if models is None:
-            print(f"[grouped] loading shared models for {len(conditions)} conditions ...")
+            print(f"[grouped] loading shared models for {n_conditions} conditions ...")
             models = load_eval_models(models_base)
         return models
 
     results: list[tuple[str, tuple]] = []
     condition_save_dirs: list[Path] = []
-    for idx, cond in enumerate(conditions):
-        name = (
-            cond.get("name", str(idx)) if isinstance(cond, dict) else OmegaConf.select(cond, "name", default=str(idx))
-        )
+    group_dirs = _probe_group_dirs(config, conditions)
+    for idx, (name, cond) in enumerate(selected):
         merged = _merge_condition(config, cond)
         apply_dataset_ref(merged)
         _check_grouped_field_invariants(base_snapshot, base_seg_required, merged, name)
-        print(f"[grouped] ({idx + 1}/{len(conditions)}) evaluating {name!r} → {merged.save.save_dir}")
+        print(f"[grouped] ({idx + 1}/{n_conditions}) evaluating {name!r} → {merged.save.save_dir}")
 
         if _final_metrics_cache_valid(merged):
-            print(f"[grouped] ({idx + 1}/{len(conditions)}) {name!r}: reusing cached final metrics")
+            print(f"[grouped] ({idx + 1}/{n_conditions}) {name!r}: reusing cached final metrics")
             pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
         else:
-            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(merged, models=get_models())
+            cp_space = eval_cp_space(merged) if merged.compute_feature_metrics else None
+            snapshot = prediction_sources(merged.io.pred_path, merged.io.pred_channel_name)
+            membership = probe_group(Path(merged.save.save_dir))
+            if membership is not None and membership[1] == "mock":
+                _mark_probes_pending(group_dirs[membership[0]])
+            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
+                merged, models=get_models(), cp_space=cp_space, prediction_snapshot=snapshot
+            )
             save_metrics(
                 merged,
                 pixel_metrics=pixel_metrics,
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
+                cp_space=cp_space,
+                prediction_digest=prediction_sources_sha256_12(snapshot),
             )
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
         condition_save_dirs.append(Path(merged.save.save_dir))
@@ -1833,25 +2703,29 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # Cross-condition infection probe: once every condition in the group has
     # its single-cell embeddings on disk, classify each infected condition vs
     # mock (FOV-stratified logistic probe, per feature space, GT and pred).
-    # Default-on whenever feature metrics were computed (the probe consumes the
-    # embeddings those produce) and a mock + >=1 infected condition are present.
-    # Gated by ``cross_condition_probe.enabled``; never fails the eval.
-    probe_enabled = bool(
-        OmegaConf.select(
-            config,
-            "cross_condition_probe.enabled",
-            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
-        )
-    )
+    # It needs a mock + >=1 infected condition. It runs after every condition's metrics
+    # are saved, so a failure loses nothing already written; it is not swallowed, since a
+    # CP reference/sidecar failure there means the probe would score in the wrong space.
+    # (Missing embeddings of one side are already a recorded skip inside the probe.)
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
-        try:
-            written = _cross_condition_run_for_group(condition_save_dirs, n_splits=n_splits, rng_seed=rng_seed)
-            if written:
-                print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
-        except Exception as e:  # noqa: BLE001 -- diagnostic add-on must not fail the eval
-            print(f"[grouped] cross-condition probe skipped: {type(e).__name__}: {e}")
+        usable, invalidated, pending = _probe_counterparts(
+            config, conditions, {name for name, _ in selected}, condition_save_dirs, group_dirs
+        )
+        # A probe CSV must not outlive the embeddings it was scored on: a selected
+        # condition's own, or its group's rescored mock. Drop each one this run rewrites
+        # or invalidates before probing, so a probe that raises leaves none behind.
+        for save_dir in condition_save_dirs + invalidated + usable:
+            stale = save_dir / GROUP_PROBE_FILENAME
+            if stale.is_file():
+                stale.unlink()
+                print(f"[grouped] removed cross-condition probe {stale} before re-probing")
+        written = _cross_condition_run_for_group(condition_save_dirs + usable, n_splits=n_splits, rng_seed=rng_seed)
+        for marker in pending:
+            marker.unlink()
+        if written:
+            print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
 
     return results
 
@@ -1859,18 +2733,29 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval")
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
+    check_cubic_pin()
+    require_cubic_workflows(config.target_name)
     apply_dataset_ref(config)
     if _final_metrics_cache_valid(config):
         print("Found existing metrics.")
         pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(config)
     else:
-        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config)
+        # Loaded here, before any model load, and threaded to both calls so the hash
+        # stamped by save_metrics is the reference the metrics were scored with. The
+        # prediction fingerprint is taken before scoring for the same reason.
+        cp_space = eval_cp_space(config) if config.compute_feature_metrics else None
+        snapshot = prediction_sources(config.io.pred_path, config.io.pred_channel_name)
+        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
+            config, cp_space=cp_space, prediction_snapshot=snapshot
+        )
         with region_timer("save_metrics_csvs", "<parent>"):
             save_metrics(
                 config,
                 pixel_metrics=pixel_metrics,
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
+                cp_space=cp_space,
+                prediction_digest=prediction_sources_sha256_12(snapshot),
             )
         # Re-dump so save_metrics_csvs lands in eval_timing.csv. evaluate_predictions
         # dumps once before save_metrics runs; this second dump overwrites with the
@@ -1882,6 +2767,8 @@ def evaluate_model(config: DictConfig):
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval_grouped")
 def evaluate_model_grouped(config: DictConfig):
     """Run grouped multi-condition eval, amortizing model loads across conditions."""
+    check_cubic_pin()
+    require_cubic_workflows(config.target_name)
     return evaluate_predictions_grouped(config)
 
 

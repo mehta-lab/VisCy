@@ -34,7 +34,6 @@ virtual_staining/
   <org>/<model>/<train_set>/
     train.yml                             # LightningCLI fit leaf
     predict__<predict_set>.yml            # LightningCLI predict leaf
-    eval__<predict_set>.yaml              # Hydra eval leaf (canonical location)
   _internal/                              # hidden support tree — not for browsing
     shared/
       model/
@@ -54,8 +53,9 @@ virtual_staining/
       eval/
         target/<target>.yaml              # target_name + benchmark.dataset_ref.target
         feature_extractor/dynaclr/        # DynaCLR checkpoint + encoder kwargs
-    leaf/                                 # symlink tree aliasing canonical eval leaves
-      <org>/<model>/<train_set>/eval__<predict_set>.yaml -> ../../../../../<org>/<model>/<train_set>/eval__<predict_set>.yaml
+    leaf/                                 # Hydra eval leaves (leaf=<path>)
+      grouped/<bucket>/eval_grouped.yaml  # benchmark evals: one model load, N conditions
+      <org>/, instance_ap/, pix2pix_reeval/  # single-condition research leaves
 ```
 
 Leaves are grouped by **train set** inside each `<org>/<model>/` cell so
@@ -63,20 +63,19 @@ that a training experiment (train + the predict/eval variants fed by its
 checkpoint) lives in one directory. Adding a new training run — e.g. the
 planned `joint_ipsc_confocal_a549_mantis` mix — means creating one new
 subdir; deleting one is `rm -r`. Each train-set dir holds one `train.yml`
-plus one `predict__<predict_set>.yml` and `eval__<predict_set>.yaml` per
-held-out split the model is evaluated on.
+plus one `predict__<predict_set>.yml` per held-out split the model is
+evaluated on. Evaluation is configured separately, in the grouped leaves under
+`_internal/leaf/grouped/`.
 
 The top level of `virtual_staining/` shows only biology (`er/`, `membrane/`,
 `mito/`, `nucleus/`) plus `_internal/` — a hidden support tree whose
 leading underscore signals "implementation detail; don't browse here for
 science." All Hydra group files, all shared composition building blocks,
-and the `leaf/` symlink adapter live under `_internal/`.
+and the eval leaves live under `_internal/`.
 
 Train/predict leaves use LightningCLI (`.yml`). Eval leaves use Hydra and
 keep `.yaml` because Hydra's group resolution only discovers `.yaml` files.
-The `_internal/leaf/` symlink tree aliases each canonical eval leaf so
-Hydra's `leaf=<path>` selector can discover them at
-`<searchpath>/leaf/<path>.yaml`.
+Hydra's `leaf=<path>` selector finds them at `<searchpath>/leaf/<path>.yaml`.
 
 Eval runtime uses two search paths injected by `dynacell.__main__`:
 `virtual_staining/_internal/` (for the `leaf/` tree) and
@@ -148,26 +147,36 @@ queue faster than pinning Hopper. Train leaves stay on
 `hardware_h200_single.yml` (or `hardware_4gpu.yml` for DDP) because
 their memory + bandwidth profiles differ.
 
-**Eval leaf** (at `<org>/<model>/<train_set>/eval__<predict_set>.yaml`):
+**Grouped eval leaf** (at `_internal/leaf/grouped/<bucket>/eval_grouped.yaml`):
 
 ```yaml
 # @package _global_
-defaults:
-  - override /target: <target>
-  - override /predict_set: <predict_set>
-  - override /feature_extractor/dinov3: lvd1689m
-  - override /feature_extractor/dynaclr: default
-
-io:
-  pred_path: /hpc/.../predictions.zarr
-
+target_name: er
 compute_feature_metrics: true
-
-save:
-  save_dir: /hpc/.../eval_results
+conditions:
+- name: fnet3d__ipsc_trained__a549_mock
+  benchmark:
+    dataset_ref: {dataset: a549-mantis-sec61b-mock, target: sec61b}
+  io:
+    pred_path: /hpc/.../prediction.zarr
+  save:
+    save_dir: /hpc/.../eval_output
 ```
 
 ## Running
+
+### Train, validation, and test separation
+
+The released train and test stores are physically separate and are resolved
+from the dataset manifests; benchmark training never reads a test store. During
+`fit`, each paper baseline makes an 80/20 position-level train/validation carve
+from its resolved train store (`data.init_args.split_ratio: 0.8`). The carve is
+deterministic for a given recipe: the paper FNet3D recipe sets
+`seed_everything: 0`, while the other paper baseline recipes inherit the
+LightningCLI default of `42`. Thus validation is held out from optimization,
+but it is a reproducible per-model carve rather than one shared validation
+partition across every architecture. The manifest-defined test positions remain
+untouched until prediction and evaluation.
 
 The default `trainer.logger` in `configs/recipes/trainer/fit.yml` is
 `lightning.pytorch.loggers.WandbLogger`. Install dynacell with the
@@ -183,9 +192,10 @@ Direct LightningCLI (no sbatch):
 - `uv run dynacell fit -c configs/benchmarks/virtual_staining/<org>/<model>/<train_set>/train.yml`
 - `uv run dynacell predict -c configs/benchmarks/virtual_staining/<org>/<model>/<train_set>/predict__<predict_set>.yml`
 
-Hydra eval:
+Hydra eval (one bucket, or selected conditions of it):
 
-- `uv run dynacell evaluate leaf=<org>/<model>/<train_set>/eval__<predict_set>`
+- `uv run --package dynacell --extra eval --extra eval_gpu dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped`
+- `... evaluate-grouped leaf=grouped/<bucket>/eval_grouped 'only_conditions=[<name>]'`
 
 Via sbatch with `submit_benchmark_job.py`:
 
@@ -296,3 +306,9 @@ Eval leaves follow the same split on the Hydra side:
   `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`,
   `io.pred_channel_name`, `io.gt_cache_dir`, and
   `pixel_metrics.spacing` from the manifest.
+
+## Navigation
+
+- Up: [benchmarks](../README.md)
+- See also: `_internal/leaf/grouped/` [bucket summary](_internal/leaf/grouped/README.md) ·
+  eval-pipeline internals in [dynacell.evaluation](../../../src/dynacell/evaluation/README.md)

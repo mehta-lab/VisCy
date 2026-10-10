@@ -1,0 +1,60 @@
+# FNet3D temporal-sampling ablation (Phase 17) predict: nucleus arm `fnet3d_tspread`
+# trained on a549_mantis, predicting a549-mantis-h2b-denv.
+#
+# This arm trained on 2 timepoints spread across each position's full 5->23 hpi range, at the
+# same frame budget as its partner. The A549 test set spans hpi 5->23, so it is the
+# shared yardstick: the two arms validate on DIFFERENT frames (each on its own subset
+# store), which makes `loss/validate` incomparable across arms. These predicts are the
+# only valid cross-arm comparison.
+#
+# The pinned `ckpt_path` below is PROVISIONAL -- the best-by-monitor checkpoint as of
+# 2026-07-30 11:00, while the fit is still running. Submit with `--ckpt best`, which
+# takes only the parent directory from this path and re-resolves `best_model_path`
+# from the newest `last*.ckpt` at submit time. `save_top_k: 4` may well have rotated
+# this exact file away by then; that is expected and harmless.
+# NEVER pin `last.ckpt`: these arms' val curves are noisy (epoch IQR 0.066-0.237,
+# larger than the whole second-half trend), so `last` lands at an arbitrary point in
+# the jitter -- nucleus/fnet3d_t01's `last` was val 0.166 against a best of 0.078.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_denv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: a549_mantis
+  predict_set: a549_mantis_h2b_denv
+  model_name: fnet3d_tspread
+  experiment_id: nucleus__a549_mantis__fnet3d_tspread__a549_mantis_h2b_denv
+  # A549 keys nucleus by gene; override the iPSC-side `nucleus` target_id.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fnet3d_tspread/checkpoints/epoch=479-step=65280-loss=0.109.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_tspread/a549/a549__denv/prediction.zarr
+
+launcher:
+  job_name: FNet3DTSpread_PRED_NUCL_A549TR_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_tspread/a549/a549__denv

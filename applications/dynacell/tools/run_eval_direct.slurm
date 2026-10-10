@@ -1,6 +1,5 @@
 #!/bin/bash
-# Direct eval launcher for vscyto3d-ablations leaves that bypass the
-# submit_evaluation_job.py / submit_evaluation_batch.py helpers.
+# SLURM launcher for one eval leaf, single-condition or grouped.
 #
 # Usage:
 #   sbatch applications/dynacell/tools/run_eval_direct.slurm <leaf_path_no_ext> [extra_overrides...]
@@ -16,7 +15,11 @@
 # all others invoke ``dynacell evaluate``.
 #
 # Extra positional args after the leaf path are passed verbatim as Hydra
-# overrides (e.g. ``limit_positions=2 force_recompute.final_metrics=true``).
+# overrides, e.g. a smoke run on two FOVs:
+#   ``limit_positions=2 compute_feature_metrics=false force_recompute.final_metrics=true``
+# (``compute_feature_metrics=false`` is required with ``limit_positions``: the CP
+# feature metrics are scored against a reference fit on every GT position, so a
+# partial walk with them on raises.)
 
 #SBATCH --job-name=eval_direct
 #SBATCH --time=1-00:00:00
@@ -26,7 +29,15 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus=1
 #SBATCH --mem=256G
-#SBATCH --constraint="a40|l40s|a100|h100|h200"
+#SBATCH --constraint="a40|l40s|a100|h100_80|h200"
+# >=40 GB. MicroMS3IM calibration plus the resident segmenter/extractors OOMed on
+# 40-48 GB cards under cubic 0.9.0a1 (6 L40S + 2 A100-40GB units, 2026-09-26).
+# cubic 0.9.0a2 bounds the fit: on an L40S (job 36696972, grouped er_a549_trained
+# conditions, max_pairs=12, cold pred features) peak device use was 15.6 GiB,
+# including a 12.0 GiB cupy pool, leaving ~21 GiB even on a 40 GB A100 (bare `a100`
+# matches a100_40 and a100_80). A fully cold A549 membrane eval (fresh GT cache,
+# all five feature extractors on GT and prediction) peaked at 28.9 GiB on an A40
+# (2026-09-29), so cold deep-feature extraction also fits a 40 GB card.
 
 set -euo pipefail
 
@@ -55,7 +66,15 @@ else
 fi
 cd "${REPO}"
 
-ml uv
+# Use the uv-built project environment (``.venv`` at the repository root), the same
+# one ``dynacell predict`` jobs use. ``--package dynacell --extra eval --extra eval_gpu``
+# syncs the eval dependencies pinned in uv.lock (cubic, cellpose >= 4.2, CuPy, ...) without removing
+# anything else; ``--frozen`` keeps the job from re-resolving the lock. Set uv's own
+# UV_PROJECT_ENVIRONMENT to use a different environment.
+if ! command -v uv >/dev/null 2>&1 && command -v ml >/dev/null 2>&1; then
+  ml uv
+fi
+export PYTHONUNBUFFERED=1
 
 # Decide single vs grouped from leaf basename. Grouped leaves carry a
 # ``conditions:`` list: ``eval_grouped`` (current convention, incl. the
@@ -67,6 +86,7 @@ case "${LEAF_BASENAME}" in
 esac
 
 echo "[run_eval_direct] subcmd=${SUBCMD} leaf=${LEAF} overrides=${EXTRA_OVERRIDES[*]:-<none>}"
+echo "[run_eval_direct] venv=${UV_PROJECT_ENVIRONMENT:-${REPO}/.venv}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-uv run dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"
+uv run --frozen --package dynacell --extra eval --extra eval_gpu dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"

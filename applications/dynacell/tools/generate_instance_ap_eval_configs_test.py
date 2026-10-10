@@ -26,8 +26,10 @@ from generate_instance_ap_eval_configs import (  # noqa: E402
     save_dir_for,
 )
 
+_BUCKET_TO_CANONICAL = {"ipsc_trained": "ipsc", "a549_trained": "a549", "joint": "joint"}
 
-def _pz(organelle, model, train_set, test_set, condition=None, variant=None) -> ParsedZarr:
+
+def _pz(organelle, model, train_set, test_set, condition=None, variant=None, train_set_canonical=None) -> ParsedZarr:
     name = f"{organelle}_{model}.zarr"
     return ParsedZarr(
         pred_path=Path(f"/tmp/{test_set}/predictions/{name}"),
@@ -35,9 +37,9 @@ def _pz(organelle, model, train_set, test_set, condition=None, variant=None) -> 
         model=model,
         variant=variant,
         train_set=train_set,
+        train_set_canonical=train_set_canonical or _BUCKET_TO_CANONICAL[train_set],
         test_set=test_set,
         condition=condition,
-        is_legacy_form=False,
     )
 
 
@@ -81,31 +83,31 @@ def test_instance_eligibility_is_opt_out() -> None:
 
 
 def test_audit_clean_when_all_predictions_registered(tmp_path) -> None:
-    """A registered prediction zarr produces no coverage error."""
-    (tmp_path / "ipsc" / "predictions" / "nucl_fnet3d_paper.zarr").mkdir(parents=True)
-    (tmp_path / "a549" / "joint_predictions" / "memb_celldiff_r2_denv.zarr").mkdir(parents=True)
+    """A registered prediction zarr at its canonical path produces no coverage error."""
+    (tmp_path / "nucleus" / "fnet3d_paper" / "ipsc" / "ipsc" / "prediction.zarr").mkdir(parents=True)
+    (tmp_path / "membrane" / "celldiff_r2" / "joint" / "a549__denv" / "prediction.zarr").mkdir(parents=True)
     assert audit_prediction_coverage(tmp_path) == []
 
 
 def test_audit_flags_unregistered_prediction(tmp_path) -> None:
     """An unregistered model's prediction surfaces as an actionable error, not a crash."""
-    (tmp_path / "ipsc" / "predictions" / "nucl_fnet3d_paper.zarr").mkdir(parents=True)
-    (tmp_path / "ipsc" / "predictions" / "nucl_brandnewmodel.zarr").mkdir(parents=True)
+    (tmp_path / "nucleus" / "fnet3d_paper" / "ipsc" / "ipsc" / "prediction.zarr").mkdir(parents=True)
+    (tmp_path / "nucleus" / "brandnewmodel" / "ipsc" / "ipsc" / "prediction.zarr").mkdir(parents=True)
     errors = audit_prediction_coverage(tmp_path)
     assert len(errors) == 1
-    assert "nucl_brandnewmodel.zarr" in errors[0]
+    assert "brandnewmodel" in errors[0]
     assert "register" in errors[0].lower()
 
 
 def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:
-    """The A549 nuclei store is the H2B manifest's test store for that plate."""
+    """The A549 nuclei store is the H2B manifest's test store (now the merged dual store)."""
     for cond in ("mock", "denv", "zikv"):
         store = a549_nuclei_store(cond)
-        assert store.endswith(".ozx") and "H2B" in store
+        assert store.endswith(".zarr") and "dual_nucl_memb" in store
 
 
 def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → watershed backend, slice 0.3, per-condition H2B nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend, no slice_fraction, per-condition dual-store nuclei_gt_path."""
     conds = [
         _pz("membrane", "fnet3d_paper", "a549_trained", "a549", "mock"),
         _pz("membrane", "fcmae_vscyto3d_scratch", "joint", "a549", "zikv"),
@@ -114,34 +116,33 @@ def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
     assert leaf["target_name"] == "membrane"
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is False
-    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
-    assert leaf["segmentation"]["slice_fraction"] == 0.3
+    assert leaf["segmentation"]["backend"] == "cpdino"
+    assert "slice_fraction" not in leaf["segmentation"]
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     for block in leaf["conditions"]:
-        assert "H2B" in block["io"]["nuclei_gt_path"]
+        assert "dual_nucl_memb" in block["io"]["nuclei_gt_path"]
         assert block["benchmark"]["dataset_ref"]["target"] == "caax"
 
 
 def test_membrane_ipsc_leaf_has_no_nuclei_gt_path() -> None:
     """Membrane × ipsc reads nuclei from the same cell.zarr → no nuclei_gt_path."""
     leaf = build_leaf("membrane", "ipsc", [_pz("membrane", "fnet3d_paper", "ipsc_trained", "ipsc")])
-    assert leaf["segmentation"]["slice_fraction"] == 0.5
+    assert "slice_fraction" not in leaf["segmentation"]
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
 
-def test_nucleus_leaf_is_cellpose_without_nuclei_channel() -> None:
-    """Nucleus → backend cellpose, no nuclei_channel_name, no nuclei_gt_path."""
+def test_nucleus_leaf_is_cpdino_without_nuclei_channel() -> None:
+    """Nucleus → backend cpdino, no nuclei_channel_name, no nuclei_gt_path."""
     leaf = build_leaf("nucleus", "ipsc", [_pz("nucleus", "fnet3d_paper", "ipsc_trained", "ipsc")])
-    assert leaf["segmentation"]["backend"] == "cellpose"
-    assert leaf["segmentation"]["slice_fraction"] == 0.5
+    assert leaf["segmentation"]["backend"] == "cpdino"
+    assert "slice_fraction" not in leaf["segmentation"]
     assert "nuclei_channel_name" not in leaf["segmentation"]
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
 
 def test_save_dir_under_instance_ap_parent() -> None:
-    """Save dirs land under the dedicated evaluations_instance_ap parent."""
+    """Save dirs land in the canonical eval leaf with a trailing instance_ap subdir."""
     p = _pz("nucleus", "fnet3d_paper", "a549_trained", "a549", "mock")
-    sd = save_dir_for(p)
-    assert "evaluations_instance_ap" in sd.parts
-    assert sd.name == "eval_fnet3d_a549trained_nucleus_mock"
+    sd = save_dir_for(p, dynacell_root=Path("/X"))
+    assert sd == Path("/X/nucleus/fnet3d_paper/a549/a549__mock/instance_ap")

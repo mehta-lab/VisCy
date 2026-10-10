@@ -50,18 +50,29 @@ FIG_H = 2.8  # figure height (inches) for data + regression
 GEN_PANEL_IN = 3.0
 GEN_FIG_H = 3.6
 
+# Theme sync. HF embeds the Space as `?__theme=system`, which only the browser can resolve,
+# so the browser reports the theme Gradio applied (the `dark` class on <body>). On page load
+# an observer is installed that clicks the hidden #theme-sync button whenever that class
+# flips (OS scheme change, Settings toggle), which re-reads the theme and re-renders.
+IS_DARK_JS = "() => document.body.classList.contains('dark')"
+THEME_INIT_JS = """
+() => {
+    const isDark = () => document.body.classList.contains('dark');
+    let last = isDark();
+    new MutationObserver(() => {
+        if (isDark() !== last) {
+            last = isDark();
+            document.getElementById('theme-sync').click();
+        }
+    }).observe(document.body, {attributes: true, attributeFilter: ['class']});
+    return last;
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def is_dark(request: gr.Request | None) -> bool:
-    """Detect the client theme from the `__theme` query param (default: dark)."""
-    try:
-        return (request.query_params.get("__theme") or "dark").lower() != "light"
-    except Exception:
-        return True
 
 
 def style_fig(fig, dark: bool) -> None:
@@ -261,7 +272,7 @@ def render_trajectory_frame(
 # ---------------------------------------------------------------------------
 
 
-def load_demo_data(organelle: str, progress=gr.Progress(), request: gr.Request | None = None) -> tuple:
+def load_demo_data(organelle: str, dark: bool, progress=gr.Progress()) -> tuple:
     """Download + extract the demo zarr; set every section's slider ranges; render view."""
     from huggingface_hub import hf_hub_download
 
@@ -273,7 +284,7 @@ def load_demo_data(organelle: str, progress=gr.Progress(), request: gr.Request |
     n_tp, n_z = get_data_shape(data_path)
     z_mid = n_z // 2
     z_start = (n_z - PATCH_D) // 2
-    fig = render_phase_exp(data_path, 0, z_mid, organelle, is_dark(request))
+    fig = render_phase_exp(data_path, 0, z_mid, organelle, dark)
     status = f"**Loaded:** {filename}  ·  {n_tp} timepoints · {n_z} Z slices"
     progress(1.0, desc="Ready.")
 
@@ -300,12 +311,12 @@ def on_data_slider(
     organelle: str,
     timepoint: int,
     z_slice: int,
-    request: gr.Request | None = None,
+    dark: bool,
 ) -> plt.Figure | None:
     """Re-render the data view on T/Z change."""
     if not zarr_state:
         return None
-    return render_phase_exp(zarr_state, timepoint, z_slice, organelle, is_dark(request))
+    return render_phase_exp(zarr_state, timepoint, z_slice, organelle, dark)
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +330,8 @@ def run_regression(
     selected_models: list[str],
     timepoint: int,
     z_slice: int,
+    dark: bool,
     progress=gr.Progress(),
-    request: gr.Request | None = None,
 ) -> tuple[plt.Figure | None, dict]:
     if not zarr_state:
         raise gr.Error("Load demo data first.")
@@ -359,7 +370,7 @@ def run_regression(
         "n_z": n_z,
     }
     progress(0.9, desc="Rendering...")
-    fig = render_predictions(pred_info, min(int(z_slice), n_z - 1), zarr_state, is_dark(request))
+    fig = render_predictions(pred_info, min(int(z_slice), n_z - 1), zarr_state, dark)
     progress(1.0, desc="Done.")
     return fig, pred_info
 
@@ -368,12 +379,12 @@ def rerender_regression(
     pred_info: dict | None,
     z_slice: int,
     zarr_state: str | None,
-    request: gr.Request | None = None,
+    dark: bool,
 ) -> plt.Figure | None:
     """Re-render regression predictions at a new Z slice (no re-prediction)."""
     if pred_info is None or not zarr_state:
         return None
-    return render_predictions(pred_info, int(z_slice), zarr_state, is_dark(request))
+    return render_predictions(pred_info, int(z_slice), zarr_state, dark)
 
 
 # ---------------------------------------------------------------------------
@@ -387,8 +398,8 @@ def run_generative(
     timepoint: int,
     num_steps: int,
     z_slice: int,
+    dark: bool,
     progress=gr.Progress(),
-    request: gr.Request | None = None,
 ) -> tuple:
     if not zarr_state:
         raise gr.Error("Load demo data first.")
@@ -399,7 +410,7 @@ def run_generative(
     n = int(num_steps)
     last = n - 1
     progress(0.95, desc="Rendering final step...")
-    fig = render_trajectory_frame(traj_info, int(z_slice), last, is_dark(request))
+    fig = render_trajectory_frame(traj_info, int(z_slice), last, dark)
     step_slider = gr.Slider(minimum=0, maximum=last, step=1, value=last, label="ODE step")
     progress(1.0, desc="Done.")
     return fig, traj_info, step_slider
@@ -409,19 +420,39 @@ def rerender_generative(
     traj_info: dict | None,
     z_slice: int,
     step: int,
-    request: gr.Request | None = None,
+    dark: bool,
 ) -> plt.Figure | None:
     """Re-render the trajectory frame at a new ODE step / Z slice (no ODE re-run)."""
     if traj_info is None:
         return None
-    return render_trajectory_frame(traj_info, int(z_slice), int(step), is_dark(request))
+    return render_trajectory_frame(traj_info, int(z_slice), int(step), dark)
+
+
+def rerender_all(
+    zarr_state: str | None,
+    organelle: str,
+    data_t: int,
+    data_z: int,
+    reg_pred_info: dict | None,
+    reg_z: int,
+    traj_info: dict | None,
+    gen_z: int,
+    gen_step: int,
+    dark: bool,
+) -> tuple:
+    """Re-render all three plots in the current theme (no inference re-run)."""
+    return (
+        on_data_slider(zarr_state, organelle, data_t, data_z, dark),
+        rerender_regression(reg_pred_info, reg_z, zarr_state, dark),
+        rerender_generative(traj_info, gen_z, gen_step, dark),
+    )
 
 
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
 
-with gr.Blocks(title="DynaCell Virtual Staining") as demo:
+with gr.Blocks(title="DynaCell Virtual Staining", css="#theme-sync {display: none !important;}") as demo:
     gr.Markdown("## DynaCell Virtual Staining Demo")
     gr.Markdown(
         "Predict fluorescence from label-free phase-contrast 3-D microscopy of live "
@@ -432,6 +463,8 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
     zarr_state = gr.State(value=None)
     reg_pred_state = gr.State(value=None)
     traj_state = gr.State(value=None)
+    dark_mode = gr.Checkbox(value=True, visible=False)  # set from the browser, see THEME_INIT_JS
+    theme_sync = gr.Button(elem_id="theme-sync")  # clicked by the theme observer; hidden by CSS
 
     # ---- 1. Data ---------------------------------------------------------
     gr.Markdown("### 1.&nbsp; Data")
@@ -445,7 +478,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
             )
             load_demo_btn = gr.Button("Load Demo Data", variant="primary")
             data_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
-            data_z = gr.Slider(0, 15, step=1, value=8, label="Z slice")
+            data_z = gr.Slider(0, 31, step=1, value=16, label="Z slice")
             data_status = gr.Markdown("")
         with gr.Column(scale=2):
             data_view = gr.Plot(label="Phase | Experimental fluorescence")
@@ -461,7 +494,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
                 label="Models",
             )
             reg_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
-            reg_z = gr.Slider(0, 15, step=1, value=8, label="Z slice")
+            reg_z = gr.Slider(0, 31, step=1, value=16, label="Z slice")
             reg_run_btn = gr.Button("Run regression", variant="primary")
         with gr.Column(scale=2):
             reg_plot = gr.Plot(label="Predictions")
@@ -471,9 +504,9 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
     gr.Markdown("### 3.&nbsp; Generative model: CELL-Diff")
     with gr.Row():
         with gr.Column(scale=1):
-            gen_steps = gr.Slider(10, 100, step=10, value=50, label="ODE steps")
+            gen_steps = gr.Slider(8, 24, step=1, value=8, label="ODE time points")
             gen_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
-            gen_z = gr.Slider(4, 11, step=1, value=8, label="Z slice")
+            gen_z = gr.Slider(12, 19, step=1, value=16, label="Z slice")
             gr.Markdown("_CELL-Diff inference requires 8 input slices._")
             gen_btn = gr.Button("Generate", variant="primary")
             gen_step = gr.Slider(0, 1, step=1, value=0, label="ODE step", info="Slide after generating.")
@@ -481,28 +514,38 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
             gen_plot = gr.Plot(label="Phase | Exp | Trajectory")
 
     # ---- Wiring ----------------------------------------------------------
+    # A js-only event never runs its .then() on the backend (Gradio 5.29), but it does fire
+    # .change on the component it updates.
+    demo.load(None, None, [dark_mode], js=THEME_INIT_JS)
+    theme_sync.click(None, None, [dark_mode], js=IS_DARK_JS)
+    dark_mode.change(
+        rerender_all,
+        [zarr_state, organelle, data_t, data_z, reg_pred_state, reg_z, traj_state, gen_z, gen_step, dark_mode],
+        [data_view, reg_plot, gen_plot],
+    )
+
     load_demo_btn.click(
         load_demo_data,
-        [organelle],
+        [organelle, dark_mode],
         [zarr_state, data_status, data_t, data_z, reg_t, reg_z, gen_t, gen_z, data_view],
     )
     for _trigger in (data_t, data_z):
-        _trigger.change(on_data_slider, [zarr_state, organelle, data_t, data_z], [data_view])
+        _trigger.change(on_data_slider, [zarr_state, organelle, data_t, data_z, dark_mode], [data_view])
 
     reg_run_btn.click(
         run_regression,
-        [zarr_state, organelle, reg_models, reg_t, reg_z],
+        [zarr_state, organelle, reg_models, reg_t, reg_z, dark_mode],
         [reg_plot, reg_pred_state],
     )
-    reg_z.change(rerender_regression, [reg_pred_state, reg_z, zarr_state], [reg_plot])
+    reg_z.change(rerender_regression, [reg_pred_state, reg_z, zarr_state, dark_mode], [reg_plot])
 
     gen_btn.click(
         run_generative,
-        [zarr_state, organelle, gen_t, gen_steps, gen_z],
+        [zarr_state, organelle, gen_t, gen_steps, gen_z, dark_mode],
         [gen_plot, traj_state, gen_step],
     )
     for _trigger in (gen_step, gen_z):
-        _trigger.change(rerender_generative, [traj_state, gen_z, gen_step], [gen_plot])
+        _trigger.change(rerender_generative, [traj_state, gen_z, gen_step, dark_mode], [gen_plot])
 
 
 if __name__ == "__main__":

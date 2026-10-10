@@ -1,0 +1,82 @@
+# CellDiff-2D (CELLDiffNet run Z-preserving at Z=1) fit on mito (Structure
+# channel) — a549_mantis, in-focus 2D track. Mirror of the 3D
+# mito/celldiff/a549_mantis fit leaf, flattened onto the offline
+# 5-plane in-focus slab store (z_window_size=1 emits one in-focus window
+# per plane).
+#
+# The 3D leaf resolves data_path/source_channel/target_channel from the
+# manifest via benchmark.dataset_ref, which points at the NON-focus store.
+# The 2D track reads the `_focus.zarr` slab instead, so the resolver is
+# disabled here (dataset_ref: null) and the three data fields are declared
+# inline — the resolver hook raises on any data.init_args field
+# co-declared with a full dataset_ref.
+#
+# The train_set fragment supplies data.class_path (HCSDataModule) plus
+# split_ratio / mmap_preload / scratch_dir — without it the resolved
+# config has an init_args-only data block and `dynacell fit` fails to
+# build the datamodule. targets/mito_celldiff.yml supplies the
+# MinMaxSampled(timepoint_statistics) normalization CellDiff needs
+# (p1/p99 -> [-1,1], not mean/std); only its RandWeightedCropd is
+# list-replaced below, flattened [13,624,624] -> [1,624,624].
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20_celldiff.yml
+  - ../../../_internal/shared/model/data_overlays/celldiff_2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_2d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  gene: TOMM20
+  target: mito
+  target_id: mito
+  train_set: a549_mantis
+  model_name: celldiff_2d
+  experiment_id: mito__a549_mantis__celldiff_2d
+  # Disable the manifest resolver: the 2D track reads the offline focus
+  # store, not the manifest-registered non-focus store.
+  dataset_ref: null
+
+data:
+  init_args:
+    # pooled TOMM20 all-conditions in-focus slab store — resolver disabled above.
+    source_channel: Phase3D
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/TOMM20_all_focus.zarr
+    # Flatten the target fragment's [13, 624, 624] weighted crop to Z=1.
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [1, 624, 624]
+          num_samples: 2
+
+
+trainer:
+  logger:
+    init_args:
+      name: CELLDiff2D_A549_TOMM20
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/celldiff_2d
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/celldiff_2d/checkpoints
+
+launcher:
+  job_name: CELLDiff2D_A549_TOMM20
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/celldiff_2d
+  # 128G: the in-focus slab store is a 5-plane slice of the full-Z 3D
+  # store (~1/4 the Z), so the 512G headroom the 3D leaf needed for
+  # mmap_preload is wasteful and delays scheduling.
+  sbatch:
+    mem: "128G"

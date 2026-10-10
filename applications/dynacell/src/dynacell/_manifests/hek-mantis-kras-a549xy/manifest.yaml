@@ -1,0 +1,34 @@
+name: hek-mantis-kras-a549xy
+version: '1'
+description: >-
+  HEK293T OpenCell KRAS-mNeonGreen (plasma membrane) imaged on mantis; the 4
+  QC-passing figure_3 FOVs. Third-cell-type probe for the NeurIPS response
+  (item O): the same instrument as the A549 dataset, so it supplies a cell-type
+  axis at fixed instrument. XY is resampled 0.116 -> 0.1494 um to the A549
+  assembly pitch (the same downsample the A549 pools took at assembly time);
+  Z is left at the native mantis 0.205 um, so lateral sampling matches A549 but
+  axial sampling does not. Evaluation-only: no HEK training, hence no train
+  store. Source:
+  /hpc/projects/comp.micro/mantis/mantis_paper_data_release/dynacell/HEK/figure_3_flipped_crop32_z64.zarr
+cell_type: HEK293T
+imaging_modality: mantis-lightsheet
+spacing:
+  z: 0.205
+  y: 0.1494
+  x: 0.1494
+channels:
+  source: Phase3D
+  auxiliary:
+  - Brightfield
+  - Membrane_label
+targets:
+  kras:
+    gene: KRAS
+    organelle: membrane
+    display_name: Membrane (KRAS)
+    target_channel: Membrane
+    stores:
+      test: /hpc/projects/virtual_staining/training/dynacell/hek/mantis/test/KRAS_a549xy.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/hek/mantis/test/KRAS_a549xy_seg_cleaned.zarr
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache/kras_a549xy
+    splits: splits/kras_train_test.yaml

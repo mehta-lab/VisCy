@@ -1,0 +1,47 @@
+# FNet2D predict: mito (TOMM20) trained on a549_mantis, tested on A549 mantis zikv.
+# In-focus 2D track (Phase F). The 2D checkpoint predicts over the FULL-Z 3D test
+# store with z_window_size=1 (fnet2d_predict overlay), emitting one window per
+# z-plane -> a full-Z prediction store the existing focus-aware eval consumes
+# unchanged. Source normalization (Phase3D fov_statistics mean/std) reproduces the
+# fnet2d fit overlay exactly; a mismatch here would silently degrade predictions.
+# Best val-loss checkpoint: epoch=985-step=147900-loss=1.169.ckpt (loss/validate=1.169).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_tomm20_zikv.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/fnet2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: a549_mantis
+  predict_set: a549_mantis_tomm20_zikv
+  model_name: fnet2d
+  experiment_id: mito__a549_mantis__fnet2d__a549_mantis_tomm20_zikv
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fnet2d/checkpoints/epoch=985-step=147900-loss=1.169.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fnet2d/a549/a549__zikv/prediction.zarr
+
+launcher:
+  job_name: FNet2D_PRED_TOMM20_A549TR_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fnet2d/a549/a549__zikv

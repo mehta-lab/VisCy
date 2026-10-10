@@ -55,39 +55,47 @@ FLOW_THRESHOLD = 0.4
 
 MIN_OBJECT_SIZE = 500
 """Drop Cellpose instances smaller than this many voxels (at the downscaled
-isotropic grid) as spurious — the one cleanup step we keep from fnet's
+isotropic grid) as spurious — the one cleanup step kept from fnet's
 ``postprocessing.yaml``.
 
-We deliberately do **not** call ``cubic.cleanup_segmentation``: its
-``clear_xy_borders`` uses ``np.in1d`` (removed in numpy>=2.2) and its
-``remove_large_objects`` asserts a non-constant label image mid-pipeline, which
-crashes on empty/near-empty FOVs. fnet's ``max_obj_size=7500`` /
-``max_hole_size=50`` filters are also dropped for now: those thresholds were
-tuned for fnet's legacy ``nuclei`` model on its grid and would wrongly remove
-real whole nuclei at Cellpose-SAM's ``TARGET_VOXEL_UM`` resolution — re-tune in
-Phase 0 before reinstating. Border-touching nuclei are kept (consistent on GT
-and prediction sides for binary Dice)."""
+``cubic.cleanup_segmentation`` is deliberately not used: its ``clear_xy_borders``
+calls ``np.in1d`` (removed in numpy>=2.2) and its ``remove_large_objects`` asserts
+a non-constant label image, which crashes on empty FOVs. fnet's
+``max_obj_size``/``max_hole_size`` filters are dropped too — tuned for fnet's
+legacy ``nuclei`` model, they remove real nuclei at ``TARGET_VOXEL_UM``. Border-
+touching nuclei are kept (consistently on both sides, so binary Dice is fair)."""
 
 
-def load_cellpose_model(use_gpu: bool = True) -> "models.CellposeModel":
-    """Load the Cellpose-SAM model.
+def load_cellpose_model(use_gpu: bool = True, model_name: str = "cpsam") -> "models.CellposeModel":
+    """Load a Cellpose v4 model by name.
 
     Parameters
     ----------
     use_gpu : bool
         Place the network on GPU. Defaults to True.
+    model_name : str
+        Cellpose v4 pretrained model: ``"cpsam"`` (Cellpose-SAM, ViT-L, the default
+        nucleus/watershed backend), ``"cpdino"`` / ``"cpdino-vitb"`` (Cellpose-DINO
+        ViT-L / ViT-B), or ``"cpsam_v2"``. cellpose>=4.2 sets ``model.backbone`` from the
+        weights (``sam_vitl`` / ``dino_vitl`` / ``dino_vitb``), which cubic's
+        ``segment_cellpose`` reads to pick the tile size (256 for SAM, 384 for DINO).
 
     Returns
     -------
     cellpose.models.CellposeModel
-        The Cellpose-SAM model (``cpsam``).
+        The requested Cellpose v4 model.
     """
-    model = models.CellposeModel(gpu=use_gpu)
-    # cellpose 4.1.x's CellposeModel no longer exposes a ``backbone`` attribute,
-    # which ``cubic.segmentation.segment_cpsam`` requires (it reads it only to
-    # pick the tile size: "sam_vitl" -> 256). Cellpose-SAM is the ViT-L backbone,
-    # so set it explicitly to keep the GPU-resident path's precondition satisfied.
+    model = models.CellposeModel(gpu=use_gpu, pretrained_model=model_name)
+    # cellpose>=4.2 sets ``backbone`` from the loaded weights. Keep a defensive
+    # fallback only for the SAM models on the older 4.1.x API that dropped the attr;
+    # a missing backbone on a DINO model would be a real error (cubic would pick the
+    # wrong tile size), so raise instead of silently mislabelling it SAM.
     if not hasattr(model, "backbone"):
+        if model_name not in ("cpsam", "cpsam_v2"):
+            raise RuntimeError(
+                f"cellpose model {model_name!r} has no `backbone` attribute (cellpose<4.2); "
+                "cubic needs it to choose the DINO tile size. Upgrade to cellpose>=4.2."
+            )
         model.backbone = "sam_vitl"
     return model
 

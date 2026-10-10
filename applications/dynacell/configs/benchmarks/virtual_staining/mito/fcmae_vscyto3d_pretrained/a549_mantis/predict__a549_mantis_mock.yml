@@ -23,7 +23,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fcmae_vscyto3d_pretrained_ws8500/checkpoints/epoch=139-step=22120.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fcmae_vscyto3d_pretrained/checkpoints/epoch=115-step=18328.ckpt
 
 data:
   init_args:
@@ -40,8 +40,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fcmae_vscyto3d_pretrained_a549trained_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/a549/a549__mock/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Pretrained_PRED_TOMM20_A549TR_MOCK
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/a549/a549__mock

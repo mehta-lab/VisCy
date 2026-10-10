@@ -8,11 +8,13 @@ module with the unified bottleneck interface
 Requires ``diffusers`` (for Attention and FeedForward).
 """
 
+from collections.abc import Sequence
+
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-from viscy_models.celldiff.modules.patch_embed_3d import PatchEmbed3D
+from viscy_models.celldiff.modules.patch_embed_3d import PatchEmbed3D, normalize_patch_size
 from viscy_models.celldiff.modules.positional_embedding import get_3d_sincos_pos_embed
 from viscy_models.celldiff.modules.transformer import (
     FinalLayer,
@@ -52,8 +54,10 @@ class ViTBottleneck3D(nn.Module):
         Feed-forward output dropout rate.
     num_hidden_layers : int
         Number of transformer blocks.
-    patch_size : int
-        Cubic patch size for the 3D patch embedding.
+    patch_size : int | Sequence[int]
+        Cubic patch size for the 3D patch embedding, or per-axis
+        ``(D, H, W)`` extents. Use ``(1, p, p)`` for a Z-preserving 2D
+        configuration at ``D=1``.
     time_embed_dim : int | None
         Timestep embedding dimension for adaLN-Zero conditioning.
         Pass None for unconditional (deterministic) models.
@@ -71,13 +75,13 @@ class ViTBottleneck3D(nn.Module):
         dropout: float = 0.0,
         final_dropout: float = 0.0,
         num_hidden_layers: int = 2,
-        patch_size: int = 4,
+        patch_size: int | Sequence[int] = 4,
         time_embed_dim: int | None = None,
     ) -> None:
         super().__init__()
 
         self._in_channels = in_channels
-        self._patch_size = patch_size
+        self._patch_size = normalize_patch_size(patch_size)
 
         # ── Compute latent spatial size after encoder downsamples ────────
         # Stride-2 convolutions require exact divisibility; floor division
@@ -98,20 +102,23 @@ class ViTBottleneck3D(nn.Module):
             latent_size = input_spatial_size[:1] + [s // factor for s in input_spatial_size[1:]]
 
         # ── Validate patch divisibility ─────────────────────────────────
-        for dim_val, name, orig in zip(latent_size, dim_names, input_spatial_size):
-            if dim_val % patch_size != 0:
+        # Checked per axis: a Z-preserving 2D configuration runs D=1 with a
+        # patch of (1, p, p), where a cubic p would be neither divisible nor
+        # convolvable.
+        for dim_val, name, orig, p in zip(latent_size, dim_names, input_spatial_size, self._patch_size):
+            if dim_val % p != 0:
                 raise ValueError(
                     f"Latent {name} dimension {dim_val} (from input {name}={orig}) "
-                    f"is not divisible by patch_size={patch_size}. "
+                    f"is not divisible by its patch extent {p} (patch_size={patch_size}). "
                     f"Each spatial dimension after {num_downsamples} encoder downsamples "
-                    f"must be divisible by patch_size."
+                    f"must be divisible by the patch extent on that axis."
                 )
 
-        self.latent_grid_size = [s // patch_size for s in latent_size]
+        self.latent_grid_size = [s // p for s, p in zip(latent_size, self._patch_size)]
 
         # ── Patch embedding ─────────────────────────────────────────────
         self.img_embedding = PatchEmbed3D(
-            patch_size=patch_size,
+            patch_size=self._patch_size,
             in_chans=in_channels,
             embed_dim=hidden_size,
             bias=True,
@@ -141,7 +148,7 @@ class ViTBottleneck3D(nn.Module):
         # ── Output projection ───────────────────────────────────────────
         self.proj_out = FinalLayer(
             hidden_size=hidden_size,
-            patch_size=patch_size,
+            patch_size=self._patch_size,
             out_channels=in_channels,
             time_embed_dim=time_embed_dim,
         )

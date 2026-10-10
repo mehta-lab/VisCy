@@ -336,7 +336,6 @@ def pytest_configure(config):
     # ArrowStringArray index. Remove when anndata fixes zarr 3 support.
     # See: https://github.com/scverse/anndata/issues/1510
     pd.options.future.infer_string = False
-    config.addinivalue_line("markers", "hpc_integration: requires HPC paths and GPU")
 
 
 def pytest_collection_modifyitems(config, items):

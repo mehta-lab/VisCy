@@ -158,7 +158,13 @@ class SpotlightLoss(nn.Module):
         self.fg_threshold = fg_threshold
         self._warned_no_real_mask = False
 
-    def forward(self, pred: Tensor, target: Tensor, fg_mask: Tensor | None = None) -> Tensor:
+    def forward(
+        self,
+        pred: Tensor,
+        target: Tensor,
+        fg_mask: Tensor | None = None,
+        return_components: bool = False,
+    ) -> Tensor | tuple[Tensor, dict[str, Tensor]]:
         """Compute the Spotlight loss.
 
         Loss is computed per (batch, channel) pair and averaged. Channels
@@ -176,11 +182,18 @@ class SpotlightLoss(nn.Module):
             When provided, used directly instead of computing from target.
             When None (default), mask is computed at runtime using
             ``fg_threshold`` or Otsu thresholding.
+        return_components : bool
+            When ``True``, also return the two terms that make up the loss.
+            The terms are the ones actually summed here, so logging them is a
+            faithful record of the objective being optimized — re-deriving them
+            in the caller would silently fork from it.
 
         Returns
         -------
-        Tensor
-            Scalar loss value.
+        Tensor or tuple of (Tensor, dict of str to Tensor)
+            Scalar loss value, or ``(loss, {"masked_mse": ..., "dice": ...})``
+            when ``return_components`` is ``True``. The components are the
+            unweighted terms, before ``lambda_mse`` is applied.
         """
         # Foreground mask: precomputed > fixed threshold > per-(sample, channel) Otsu
         if fg_mask is not None:
@@ -222,4 +235,7 @@ class SpotlightLoss(nn.Module):
                 self._warned_no_real_mask = True
             dice = pred.new_tensor(0.0)
 
-        return self.lambda_mse * masked_mse + (1 - self.lambda_mse) * dice
+        total = self.lambda_mse * masked_mse + (1 - self.lambda_mse) * dice
+        if return_components:
+            return total, {"masked_mse": masked_mse, "dice": dice}
+        return total

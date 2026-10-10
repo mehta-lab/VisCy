@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import numpy as np
 
-# Defaults shared with downstream consumers (e.g. the cp_selected_feature_mask
-# JSON sidecar emitted by the evaluation pipeline). Keep `select_features`,
-# `variance_threshold`, and `correlation_threshold` keyword defaults aligned
-# with these constants so the sidecar cannot drift from the actual call.
+# Selection criteria of the per-target CP reference. `fit_cp_reference` passes
+# these explicitly and records them in the reference's `criteria` block (inside
+# its content hash), so the reference is where the applied values live. Keep the
+# `select_gt_features`, `variance_threshold` and `correlation_threshold` keyword
+# defaults aligned with them.
 DEFAULT_FREQ_CUT = 0.05
 DEFAULT_UNIQUE_CUT = 0.01
 DEFAULT_CORR_THRESHOLD = 0.9
@@ -160,24 +161,26 @@ def correlation_threshold(
     return keep
 
 
-def select_features(
+def select_gt_features(
     gt: np.ndarray,
-    pred: np.ndarray,
     freq_cut: float = DEFAULT_FREQ_CUT,
     unique_cut: float = DEFAULT_UNIQUE_CUT,
     corr_threshold: float = DEFAULT_CORR_THRESHOLD,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Pool ``(gt, pred)``, apply both filters in sequence, return filtered pair + mask.
+) -> np.ndarray:
+    """Select features on ground-truth cells alone, never on predictions.
 
-    Variance pruning happens first (cheap), correlation pruning second on the
-    survivors.
+    Variance pruning first (cheap), then correlation pruning on the survivors.
+    The fit set holds only GT rows, so the kept feature subset is a property of
+    the target and cannot move with the model being evaluated (pooling a
+    prediction into the fit is what used to give every model its own mask).
+    Used to build the per-target CP reference
+    (:mod:`dynacell.evaluation.cp_reference`).
 
     Parameters
     ----------
     gt : np.ndarray
-        Shape ``(n_gt, n_features)``, float64.
-    pred : np.ndarray
-        Shape ``(n_pred, n_features)``, float64.
+        Shape ``(n_gt, n_features)``, float64. Rows pooled across every
+        dataset the reference is fit on.
     freq_cut : float, optional
         Forwarded to :func:`variance_threshold`. Defaults to ``0.05``.
     unique_cut : float, optional
@@ -187,32 +190,11 @@ def select_features(
 
     Returns
     -------
-    gt_filtered : np.ndarray
-        Shape ``(n_gt, n_kept)``.
-    pred_filtered : np.ndarray
-        Shape ``(n_pred, n_kept)``.
-    keep_mask : np.ndarray
-        Boolean mask of shape ``(n_features,)``. Composition of variance +
-        correlation pruning.
-
-    Raises
-    ------
-    ValueError
-        If ``gt`` and ``pred`` disagree on the feature dimension.
+    np.ndarray
+        Boolean keep-mask of shape ``(n_features,)``.
     """
-    if gt.shape[1] != pred.shape[1]:
-        raise ValueError(f"feature dim mismatch: gt.shape[1]={gt.shape[1]} vs pred.shape[1]={pred.shape[1]}.")
-
-    n_features = gt.shape[1]
-    pooled = np.vstack([gt, pred])
-
-    mask_var = variance_threshold(pooled, freq_cut=freq_cut, unique_cut=unique_cut)
-    pooled2 = pooled[:, mask_var]
-
-    mask_corr_local = correlation_threshold(pooled2, threshold=corr_threshold, method="pearson")
-
-    keep_mask = np.zeros(n_features, dtype=bool)
-    var_indices = np.flatnonzero(mask_var)
-    keep_mask[var_indices[mask_corr_local]] = True
-
-    return gt[:, keep_mask], pred[:, keep_mask], keep_mask
+    mask_var = variance_threshold(gt, freq_cut=freq_cut, unique_cut=unique_cut)
+    mask_corr_local = correlation_threshold(gt[:, mask_var], threshold=corr_threshold, method="pearson")
+    keep_mask = np.zeros(gt.shape[1], dtype=bool)
+    keep_mask[np.flatnonzero(mask_var)[mask_corr_local]] = True
+    return keep_mask

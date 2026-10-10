@@ -155,4 +155,4 @@ data:
 
 launcher:
   job_name: CELLDiff_JOINT_SEC61B_SMOKE_4GPU
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/sec61b/celldiff_r2/smoke_4gpu
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/celldiff_r2/smoke_4gpu
