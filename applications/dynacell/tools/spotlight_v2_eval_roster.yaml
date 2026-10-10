@@ -72,6 +72,10 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # ... its A549 denv leg (predict 37187254 COMPLETED 2026-10-10 ~06:05). Generate with --wave wave3j.
+  wave3j:
+    membrane:
+      - {model: pix2pix3d_unetvit_segaux_seed1, leaves: [a549__denv]}
   # pix2pix3d MEMBRANE segaux draw 2 (fit 37115317, --ckpt last EMA): the A549 mock leg (predict
   # 37187244 COMPLETED 2026-10-10 05:08), scored while denv and zikv still predict. Generate with
   # --wave wave3g.
