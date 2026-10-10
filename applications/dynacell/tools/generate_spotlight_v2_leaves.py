@@ -346,6 +346,10 @@ ARMS: tuple[Arm, ...] = (
     *(Arm("fnet3d_vscyto3daug", s, THIN_ORGANELLES, a549=True) for s in ("segaux", *TOPOLOGY_ARGS)),
     # Second segaux draw on the thin organelles (2026-10-07): their iPSC Dice gain rests on one run.
     Arm("fnet3d_vscyto3daug", "segaux_seed1", THIN_ORGANELLES, a549=True),
+    # Loss-weight sweep on the out-of-domain seg gain (2026-10-10): A549 Dice beats both baseline
+    # draws on 3/3 legs for both segaux draws at w=4.5, while on fnet3d_paper nucleus both w/2
+    # and 2w lost the 1x arm's iPSC mAP gain (final table).
+    *(Arm("fnet3d_vscyto3daug", s, ("nucleus",), a549=True) for s in ("segaux_halfw", "segaux_doublew")),
     # Track H: CellDiff-2D trained on a background-low-passed target (H1; launched as H2).
     *(Arm("celldiff_2d", s, ORGANELLES, a549=True) for s in BG_TARGET_ARGS),
 )
