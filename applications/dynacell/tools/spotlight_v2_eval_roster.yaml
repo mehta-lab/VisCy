@@ -72,6 +72,10 @@ waves:
     membrane:
       - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
       - {model: celldiff_2d_seed1, leaves: [a549__denv]}
+  # ... and its zikv leg (predict finished 2026-10-10 after wave3h). Generate with --wave wave3i.
+  wave3i:
+    er:
+      - {model: fnet3d_vscyto3daug_segaux_seed1, leaves: [a549__zikv]}
   # Second draw of the FNet-3D vscyto3daug ER segaux arm (fit 37115303, step 200000, --ckpt best
   # epoch=88-step=195533), 2026-10-10: the iPSC, mock and denv legs, scored while zikv predicts.
   # Stage-matched to the ER baselines (epoch 90 / 68) and draw 1 (86). Generate with --wave wave3h.
