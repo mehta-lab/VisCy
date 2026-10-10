@@ -32,7 +32,7 @@ Arms (``<baseline>_<suffix>``):
   ``fnet3d_vscyto3daug`` (Phase 15 Arm B; nucleus, then ER and mito for the topology
   arms below): vanilla FNet fails out of domain, so the FNet verdict on A549 rests on
   this recipe, retrained on today's code.
-- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1}`` compose
+- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1,segaux_sauna}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
   allocation each): nucleus e96 00:39:27 -> e98 01:38:24 (2.04 ep/h), e98 ->
@@ -58,7 +58,8 @@ Arms (``<baseline>_<suffix>``):
   ``CondMaskSource`` (``Nuclei_prediction``, thresholded per window at Otsu) and
   set no ``fg_mask_key``.
 - ``segaux_sauna`` / ``segaux_cldice`` -- Stage 2 #5 on ``fnet3d_vscyto3daug`` nucleus, ER
-  and mito: the ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice
+  and mito (``segaux_sauna`` also on the UNeXt2-3D and pix2pix3d membrane arms): the
+  ``segaux`` recipe with one change to the Dice term (``TOPOLOGY_ARGS``): Dice
   sums weighted by the patch mask's SAUNA map, or mixed with soft-clDice. Each carries its
   own calibrated ``seg_aux_weight``, since the change rescales the term's gradient. The ER
   and mito arms (and their ``segaux`` arm) train on masks from the eval's classical
@@ -165,6 +166,13 @@ SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
     ("mito", "fnet3d_vscyto3daug_segaux"): 0.77,
     ("mito", "fnet3d_vscyto3daug_segaux_sauna"): 0.66,
     ("mito", "fnet3d_vscyto3daug_segaux_cldice"): 0.71,
+    # Membrane SAUNA arms (2026-10-10), on the same April baseline ckpts and val batches as their
+    # segaux weights (calibrate_variant.py; UNeXt2-3D epoch=136-step=42744 micro 2, pix2pix3d
+    # epoch=25-step=83200 generator_ema micro 1), whose plain-Dice rows reproduce 0.86 and 3.1
+    # (0.8609 [0.468-2.214], 3.1044 [2.304-6.118]): SAUNA 0.7450 [0.424-1.813], 2.946 [2.193-5.870].
+    # results/membrane__{fcmae_vscyto3d_scratch,pix2pix3d_unetvit}__variants.csv.
+    ("membrane", "fcmae_vscyto3d_scratch_segaux_sauna"): 0.75,
+    ("membrane", "pix2pix3d_unetvit_segaux_sauna"): 2.9,
 }
 # C-joint's mask Dice has no baseline to calibrate against (the baseline has no
 # mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
@@ -185,7 +193,12 @@ BG_TARGET_ARGS: dict[str, dict[str, float | int | None]] = {
 }
 JOINTSTEPS_MAX_EPOCHS = 320
 # Second draws (see SEED_SOURCES) inherit their source arm's wall.
-LONG_WALL_MODELS: frozenset[str] = frozenset({"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux"})
+# The SAUNA arm keeps its segaux source's wall: the membrane segaux fit ran 2.44 ep/h (epoch=125
+# 2026-09-27 13:44:58 -> epoch=154 2026-09-28 01:38:59), 82 h for 200 epochs, and SAUNA cost the
+# FNet-3D nucleus fit +7.6% (2-12:01:34 vs 2-07:46:14), ~88 h against the 96 h default.
+LONG_WALL_MODELS: frozenset[str] = frozenset(
+    {"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux", "fcmae_vscyto3d_scratch_segaux_sauna"}
+)
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
 SAFE_CROP_SIZE = [1, 384, 384]
@@ -350,6 +363,9 @@ ARMS: tuple[Arm, ...] = (
     # draws on 3/3 legs for both segaux draws at w=4.5, while on fnet3d_paper nucleus both w/2
     # and 2w lost the 1x arm's iPSC mAP gain (final table).
     *(Arm("fnet3d_vscyto3daug", s, ("nucleus",), a549=True) for s in ("segaux_halfw", "segaux_doublew")),
+    # SAUNA-weighted Dice on the two membrane arms whose seg gain holds on iPSC and A549 (2026-10-10):
+    # on ER it beat plain segaux on A549 FG_PCC on 3/3 legs (+.016/+.008/+.028, CIs > 0).
+    *(Arm(m, "segaux_sauna", ("membrane",), a549=True) for m in ("fcmae_vscyto3d_scratch", "pix2pix3d_unetvit")),
     # Track H: CellDiff-2D trained on a background-low-passed target (H1; launched as H2).
     *(Arm("celldiff_2d", s, ORGANELLES, a549=True) for s in BG_TARGET_ARGS),
 )
