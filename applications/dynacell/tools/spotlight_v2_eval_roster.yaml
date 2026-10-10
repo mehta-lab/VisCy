@@ -89,6 +89,11 @@ waves:
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__denv/prediction.zarr
           a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__zikv/prediction.zarr
+  # ... and its A549 zikv leg (predict 37187258 COMPLETED 2026-10-10 14:0x), the last draw-2 leg.
+  # Generate with --wave wave3l.
+  wave3l:
+    membrane:
+      - {model: pix2pix3d_unetvit_segaux_seed1, leaves: [a549__zikv]}
   # ... its A549 denv leg (predict 37187254 COMPLETED 2026-10-10 ~06:05). Generate with --wave wave3j.
   wave3j:
     membrane:
