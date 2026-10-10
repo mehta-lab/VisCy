@@ -97,6 +97,14 @@ def test_default_eval_scores_interior_only_foreground() -> None:
     assert _foreground_settings(cfg) == {"source": "smooth_otsu", "smooth_sigma_um": 1.0, "feather_sigma_um": 0.0}
 
 
+@pytest.mark.parametrize("target_name", ["nucleus", "membrane", "nucleoli", "lysosomes", "er", "mitochondria"])
+def test_default_foreground_resolves_for_every_eval_target(target_name: str) -> None:
+    """With FG on by default, every target the evaluator accepts needs a null-sigma default."""
+    settings = _foreground_settings(_compose_eval_cfg([f"target_name={target_name}"]))
+    assert settings["feather_sigma_um"] == 0.0
+    assert settings["smooth_sigma_um"] > 0
+
+
 def test_default_eval_pins_morphem_to_a_hub_commit() -> None:
     """The morphem group must carry a full commit SHA: the model is trust_remote_code."""
     cfg = _compose_eval_cfg([])
