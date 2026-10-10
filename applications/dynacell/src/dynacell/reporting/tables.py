@@ -39,7 +39,7 @@ FEATURE_METRICS = [
     "MorphEm_FID",
 ]
 
-# The foreground-limited ``FG_*`` columns (``pixel_metrics.foreground``, off by default)
+# The foreground-limited ``FG_*`` columns (``pixel_metrics.foreground``, on by default in eval.yaml)
 # are ranked here but stay out of PIXEL_METRICS: callers ask for them by name.
 HIGHER_IS_BETTER = {
     "PCC",
