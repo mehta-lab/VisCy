@@ -1960,9 +1960,9 @@ def test_dynacell_unet_channels_last_matches_default_layout(architecture, config
 def test_dynacell_unet_throughput_flags_keep_checkpoints_interchangeable(tmp_path):
     """A fit with both flags on writes a checkpoint a flags-off model loads unchanged.
 
-    The flags are not saved in the hyperparameters, compile is in place (no
-    ``_orig_mod.`` key prefix), and the channels-last weights load into the
-    default layout with identical values.
+    The flags are not saved in the hyperparameters, the compiled backbone is not
+    a registered submodule (no ``_orig_mod.`` keys), and the channels-last weights
+    load into the default layout with identical values.
     """
     seed_everything(0)
     module = DynacellUNet(
@@ -1986,9 +1986,17 @@ def test_dynacell_unet_throughput_flags_keep_checkpoints_interchangeable(tmp_pat
         enable_model_summary=False,
         limit_val_batches=0,
     )
+    compiled_during_fit: list[bool] = []
+
+    class _RecordCompiled(Callback):
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            compiled_during_fit.append("fit" in pl_module._compiled)
+
+    trainer.callbacks.append(_RecordCompiled())
     loader = torch.utils.data.DataLoader(_PairDataset(2, (1, 4, 16, 16)), batch_size=2)
     trainer.fit(module, train_dataloaders=loader)
-    assert module._model_compiled
+    assert compiled_during_fit == [True]
+    assert not module._compiled  # dropped when fit ends
     assert list(module.state_dict()) == reference_keys
 
     ckpt_path = tmp_path / "flags_on.ckpt"
@@ -2005,10 +2013,45 @@ def test_dynacell_unet_throughput_flags_keep_checkpoints_interchangeable(tmp_pat
     assert reloaded.channels_last is False and reloaded.compile_model is False
 
 
-def test_dynacell_unet_compile_model_skips_predict():
-    """compile_model only compiles for fit; predict keeps the eager backbone."""
-    module = DynacellUNet(architecture="FNet3D", model_config=FNET_TEST_CONFIG, compile_model=True)
-    trainer = Trainer(accelerator="cpu", devices=1, logger=False, enable_progress_bar=False)
+def test_dynacell_unet_compile_model_is_fit_scoped(monkeypatch):
+    """The compiled backbone exists only during fit: predict, alone or after a fit or a
+    failed fit on the same module, runs the eager backbone."""
+    monkeypatch.setattr(torch, "compile", lambda module, **kwargs: lambda x: module(x))  # fast stand-in
+    module = DynacellUNet(
+        architecture="FNet3D", model_config=FNET_TEST_CONFIG, compile_model=True, log_batches_per_epoch=0
+    )
     loader = torch.utils.data.DataLoader(_PairDataset(2, (1, 4, 16, 16)), batch_size=2)
-    trainer.predict(module, dataloaders=loader)
-    assert not module._model_compiled
+    compiled_at: list[tuple[str, bool]] = []
+
+    class _Record(Callback):
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            compiled_at.append(("fit", "fit" in pl_module._compiled))
+
+        def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+            compiled_at.append(("predict", "fit" in pl_module._compiled))
+
+    class _Fail(Callback):
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            raise RuntimeError("injected fit failure")
+
+    def trainer(*callbacks: Callback) -> Trainer:
+        return Trainer(
+            max_steps=1,
+            accelerator="cpu",
+            devices=1,
+            logger=False,
+            enable_checkpointing=False,
+            enable_progress_bar=False,
+            enable_model_summary=False,
+            limit_val_batches=0,
+            callbacks=[_Record(), *callbacks],
+        )
+
+    trainer().predict(module, dataloaders=loader)
+    trainer().fit(module, train_dataloaders=loader)
+    trainer().predict(module, dataloaders=loader)
+    with pytest.raises(RuntimeError, match="injected fit failure"):
+        trainer(_Fail()).fit(module, train_dataloaders=loader)
+    assert not module._compiled
+    trainer().predict(module, dataloaders=loader)
+    assert compiled_at == [("predict", False), ("fit", True), ("predict", False), ("fit", True), ("predict", False)]

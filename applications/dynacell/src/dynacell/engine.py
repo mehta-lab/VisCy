@@ -604,12 +604,13 @@ class DynacellUNet(LightningModule):
         gradient bucket views. Not saved in the hyperparameters, so a resumed
         fit takes the value from its own config.
     compile_model : bool, default False
-        Compile the backbone in place with :meth:`torch.nn.Module.compile`
-        for fit only (sliding-window predict varies the input shape). The
-        in-place call keeps the state-dict keys; ``torch.compile(module)``
-        would prefix them with ``_orig_mod.``. Applied in
-        :meth:`configure_model`, before the DDP wrap, as Lightning recommends
-        for a compiled LightningModule. Not saved in the hyperparameters.
+        During fit, run the backbone through ``torch.compile(self.model)``
+        kept in a plain-dict cache, not as a registered submodule, so the
+        state-dict keys never change. Every other stage (validate, predict)
+        and any later use of the same module run the eager backbone:
+        sliding-window predict varies the input shape. Built in
+        :meth:`configure_model`, before the DDP wrap, and dropped when fit
+        ends or raises. Not saved in the hyperparameters.
     """
 
     def __init__(
@@ -663,7 +664,8 @@ class DynacellUNet(LightningModule):
         self.seg_aux_weight = seg_aux_weight
         self.channels_last = channels_last
         self.compile_model = compile_model
-        self._model_compiled = False
+        # Fit-scoped compiled backbone; a plain dict keeps it out of the module tree.
+        self._compiled: dict[str, Callable[[Tensor], Tensor]] = {}
 
         self.training_step_outputs: list = []
         # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
@@ -716,9 +718,20 @@ class DynacellUNet(LightningModule):
                     param.data = param.data.contiguous(memory_format=torch.channels_last_3d)
                 elif param.ndim == 4:
                     param.data = param.data.contiguous(memory_format=torch.channels_last)
-        if self.compile_model and not self._model_compiled and self.trainer.state.fn == TrainerFn.FITTING:
-            self.model.compile()
-            self._model_compiled = True
+        if self.compile_model and self.trainer.state.fn == TrainerFn.FITTING and "fit" not in self._compiled:
+            self._compiled["fit"] = torch.compile(self.model)
+
+    def drop_compiled_model(self) -> None:
+        """Drop the fit-scoped compiled backbone, so later stages run the eager one."""
+        self._compiled.clear()
+
+    def configure_callbacks(self) -> list[Callback]:
+        """Attach the callback that drops the compiled backbone when a fit raises."""
+        return [_DropCompiledModelOnException()] if self.compile_model else []
+
+    def on_fit_end(self) -> None:
+        """Drop the fit-scoped compiled backbone."""
+        self.drop_compiled_model()
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
@@ -736,7 +749,7 @@ class DynacellUNet(LightningModule):
         """
         if self.channels_last and x.ndim == 5:
             x = x.contiguous(memory_format=torch.channels_last_3d)
-        return self.model(x)
+        return self._compiled.get("fit", self.model)(x)
 
     def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, dict[str, Tensor]]:
         """Compute loss, optionally passing fg_mask to the loss function.
@@ -964,6 +977,18 @@ class DynacellUNet(LightningModule):
             overlap_size,
             blend=self.predict_blend,
         )
+
+
+class _DropCompiledModelOnException(Callback):
+    """Drop :class:`DynacellUNet`'s fit-scoped compiled backbone when a Trainer run raises.
+
+    Lightning skips ``on_fit_end`` on an exception, so without this a later stage
+    on the same module would still run the compiled callable.
+    """
+
+    def on_exception(self, trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        """Drop the compiled backbone."""
+        pl_module.drop_compiled_model()
 
 
 class _DropCompiledNetOnException(Callback):
