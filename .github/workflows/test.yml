@@ -187,6 +187,7 @@ jobs:
             ../../packages/viscy-utils/tests/test_prediction_writer.py \
             ../../packages/viscy-utils/tests/test_prediction_metadata.py \
             ../../packages/viscy-utils/src/viscy_utils/callbacks/monitor_health_test.py \
+            ../../packages/viscy-utils/src/viscy_utils/callbacks/linear_lr_cooldown_test.py \
             -v
         working-directory: applications/dynacell
 

@@ -1902,3 +1902,156 @@ def test_flow_matching_generate_trajectory_fixed_grid(synth_celldiff_batch):
     # Midpoint takes 2 evaluations per step on the 8-point grid: 7 steps.
     assert len(calls) == 14
     torch.testing.assert_close(traj[-1], final)
+
+
+# ---------------------------------------------------------------------------
+# Opt-in throughput flags: channels_last and compile_model
+# ---------------------------------------------------------------------------
+
+
+class _PairDataset(torch.utils.data.Dataset):
+    """Fixed-shape (source, target) Sample dicts for short CPU fits."""
+
+    def __init__(self, n: int, shape: tuple[int, int, int, int]):
+        generator = torch.Generator().manual_seed(0)
+        self.source = torch.randn(n, *shape, generator=generator)
+        self.target = torch.randn(n, *shape, generator=generator)
+
+    def __len__(self) -> int:
+        return len(self.source)
+
+    def __getitem__(self, idx: int) -> dict:
+        return {"source": self.source[idx], "target": self.target[idx]}
+
+
+@pytest.mark.parametrize(
+    ("architecture", "config", "shape"),
+    [("FNet3D", FNET_TEST_CONFIG, (2, 1, 4, 16, 16)), ("UNeXt2", UNEXT2_TEST_CONFIG, (2, 1, 5, 64, 64))],
+)
+def test_dynacell_unet_channels_last_matches_default_layout(architecture, config, shape):
+    """channels_last changes strides only: same weights give the same output."""
+    seed_everything(0)
+    default = DynacellUNet(architecture=architecture, model_config=config).eval()
+    fast = DynacellUNet(architecture=architecture, model_config=config, channels_last=True).eval()
+    fast.load_state_dict(default.state_dict())
+    fast.configure_model()
+    fast.configure_model()  # Lightning may call the hook more than once.
+
+    # Only weights whose default layout is not already channels-last can show
+    # the conversion (C_in == 1 or 1x1 kernels satisfy both layouts).
+    formats = {5: torch.channels_last_3d, 4: torch.channels_last}
+    converted = {ndim: 0 for ndim in formats}
+    for before, after in zip(default.model.parameters(), fast.model.parameters(), strict=True):
+        if before.ndim in formats and not before.is_contiguous(memory_format=formats[before.ndim]):
+            assert after.is_contiguous(memory_format=formats[after.ndim])
+            converted[before.ndim] += 1
+    assert converted[5] > 0
+    if architecture == "UNeXt2":
+        # UNeXt2 mixes 2-D and 3-D layers; its 4-D weights go channels_last.
+        assert converted[4] > 0
+
+    x = torch.randn(shape)
+    with torch.no_grad():
+        expected = default(x)
+        actual = fast(x)
+    assert torch.allclose(actual, expected, atol=1e-5, rtol=1e-4)
+
+
+def test_dynacell_unet_throughput_flags_keep_checkpoints_interchangeable(tmp_path):
+    """A fit with both flags on writes a checkpoint a flags-off model loads unchanged.
+
+    The flags are not saved in the hyperparameters, the compiled backbone is not
+    a registered submodule (no ``_orig_mod.`` keys), and the channels-last weights
+    load into the default layout with identical values.
+    """
+    seed_everything(0)
+    module = DynacellUNet(
+        architecture="FNet3D",
+        model_config=FNET_TEST_CONFIG,
+        channels_last=True,
+        compile_model=True,
+        log_batches_per_epoch=0,
+    )
+    assert "channels_last" not in module.hparams
+    assert "compile_model" not in module.hparams
+    reference_keys = list(DynacellUNet(architecture="FNet3D", model_config=FNET_TEST_CONFIG).state_dict())
+
+    trainer = Trainer(
+        max_steps=1,
+        accelerator="cpu",
+        devices=1,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        limit_val_batches=0,
+    )
+    compiled_during_fit: list[bool] = []
+
+    class _RecordCompiled(Callback):
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            compiled_during_fit.append("fit" in pl_module._compiled)
+
+    trainer.callbacks.append(_RecordCompiled())
+    loader = torch.utils.data.DataLoader(_PairDataset(2, (1, 4, 16, 16)), batch_size=2)
+    trainer.fit(module, train_dataloaders=loader)
+    assert compiled_during_fit == [True]
+    assert not module._compiled  # dropped when fit ends
+    assert list(module.state_dict()) == reference_keys
+
+    ckpt_path = tmp_path / "flags_on.ckpt"
+    trainer.save_checkpoint(ckpt_path)
+    saved = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    assert "channels_last" not in saved["hyper_parameters"]
+    assert "compile_model" not in saved["hyper_parameters"]
+
+    restored = DynacellUNet(architecture="FNet3D", model_config=FNET_TEST_CONFIG, ckpt_path=str(ckpt_path))
+    trained = module.state_dict()
+    for key, value in restored.state_dict().items():
+        assert torch.equal(value, trained[key]), key
+    reloaded = DynacellUNet.load_from_checkpoint(ckpt_path, model_config=FNET_TEST_CONFIG)
+    assert reloaded.channels_last is False and reloaded.compile_model is False
+
+
+def test_dynacell_unet_compile_model_is_fit_scoped(monkeypatch):
+    """The compiled backbone exists only during fit: predict, alone or after a fit or a
+    failed fit on the same module, runs the eager backbone."""
+    monkeypatch.setattr(torch, "compile", lambda module, **kwargs: lambda x: module(x))  # fast stand-in
+    module = DynacellUNet(
+        architecture="FNet3D", model_config=FNET_TEST_CONFIG, compile_model=True, log_batches_per_epoch=0
+    )
+    loader = torch.utils.data.DataLoader(_PairDataset(2, (1, 4, 16, 16)), batch_size=2)
+    compiled_at: list[tuple[str, bool]] = []
+
+    class _Record(Callback):
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            compiled_at.append(("fit", "fit" in pl_module._compiled))
+
+        def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+            compiled_at.append(("predict", "fit" in pl_module._compiled))
+
+    class _Fail(Callback):
+        def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+            raise RuntimeError("injected fit failure")
+
+    def trainer(*callbacks: Callback) -> Trainer:
+        return Trainer(
+            max_steps=1,
+            accelerator="cpu",
+            devices=1,
+            logger=False,
+            enable_checkpointing=False,
+            enable_progress_bar=False,
+            enable_model_summary=False,
+            limit_val_batches=0,
+            callbacks=[_Record(), *callbacks],
+        )
+
+    trainer().predict(module, dataloaders=loader)
+    trainer().fit(module, train_dataloaders=loader)
+    trainer().predict(module, dataloaders=loader)
+    with pytest.raises(RuntimeError, match="injected fit failure"):
+        trainer(_Fail()).fit(module, train_dataloaders=loader)
+    assert not module._compiled
+    trainer().predict(module, dataloaders=loader)
+    assert compiled_at == [("predict", False), ("fit", True), ("predict", False), ("fit", True), ("predict", False)]
