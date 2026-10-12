@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import Callback, LightningModule
+from lightning.pytorch.trainer.states import TrainerFn
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
@@ -592,6 +593,23 @@ class DynacellUNet(LightningModule):
         must then carry ``fg_mask`` (set ``fg_mask_key`` on the datamodule).
     seg_aux_weight : float
         Weight of the ``seg_aux`` term. Must be ``0.0`` when ``seg_aux`` is None.
+    channels_last : bool, default False
+        Store the backbone's convolution weights in channels-last layout
+        (``torch.channels_last_3d`` for 5-D weights, ``torch.channels_last``
+        for 4-D ones, since UNeXt2 mixes 2-D and 3-D layers) and feed 5-D
+        inputs as ``channels_last_3d``. Only strides change, so outputs and
+        state-dict keys and values match the default layout. Applied in
+        :meth:`configure_model`, before the strategy moves the module to the
+        device and wraps it in DDP; converting after the DDP wrap breaks its
+        gradient bucket views. Not saved in the hyperparameters, so a resumed
+        fit takes the value from its own config.
+    compile_model : bool, default False
+        Compile the backbone in place with :meth:`torch.nn.Module.compile`
+        for fit only (sliding-window predict varies the input shape). The
+        in-place call keeps the state-dict keys; ``torch.compile(module)``
+        would prefix them with ``_orig_mod.``. Applied in
+        :meth:`configure_model`, before the DDP wrap, as Lightning recommends
+        for a compiled LightningModule. Not saved in the hyperparameters.
     """
 
     def __init__(
@@ -614,9 +632,16 @@ class DynacellUNet(LightningModule):
         encoder_only: bool = False,
         seg_aux: SegAuxDice | None = None,
         seg_aux_weight: float = 0.0,
+        channels_last: bool = False,
+        compile_model: bool = False,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["loss_function", "ckpt_path", "encoder_only", "seg_aux"])
+        # channels_last and compile_model change speed, not the model, so a
+        # resume takes them from its own config and older checkouts can still
+        # resume checkpoints written with them on.
+        self.save_hyperparameters(
+            ignore=["loss_function", "ckpt_path", "encoder_only", "seg_aux", "channels_last", "compile_model"]
+        )
         if model_config is None:
             model_config = {}
         net_class = _ARCHITECTURE.get(architecture)
@@ -636,6 +661,9 @@ class DynacellUNet(LightningModule):
         self.predict_phase_shifts = predict_phase_shifts
         self.seg_aux = seg_aux
         self.seg_aux_weight = seg_aux_weight
+        self.channels_last = channels_last
+        self.compile_model = compile_model
+        self._model_compiled = False
 
         self.training_step_outputs: list = []
         # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
@@ -675,19 +703,39 @@ class DynacellUNet(LightningModule):
         elif ckpt_path is not None:
             self.load_state_dict(_ckpt_state_dict(ckpt_path))
 
+    def configure_model(self) -> None:
+        """Apply the opt-in ``channels_last`` and ``compile_model`` settings.
+
+        Lightning calls this before the strategy moves the module to the device
+        and wraps it in DDP; both settings must precede the wrap. The hook may
+        run more than once, so both steps are idempotent.
+        """
+        if self.channels_last:
+            for param in self.model.parameters():
+                if param.ndim == 5:
+                    param.data = param.data.contiguous(memory_format=torch.channels_last_3d)
+                elif param.ndim == 4:
+                    param.data = param.data.contiguous(memory_format=torch.channels_last)
+        if self.compile_model and not self._model_compiled and self.trainer.state.fn == TrainerFn.FITTING:
+            self.model.compile()
+            self._model_compiled = True
+
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
 
         Parameters
         ----------
         x : Tensor
-            Input tensor of shape ``(B, C, D, H, W)``.
+            Input tensor of shape ``(B, C, D, H, W)``. Made
+            ``channels_last_3d`` when ``channels_last`` is set.
 
         Returns
         -------
         Tensor
             Model output.
         """
+        if self.channels_last and x.ndim == 5:
+            x = x.contiguous(memory_format=torch.channels_last_3d)
         return self.model(x)
 
     def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, dict[str, Tensor]]:
