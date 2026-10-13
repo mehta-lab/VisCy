@@ -335,6 +335,12 @@ PAPER_KEY: dict[str, str] = {
     # from latest-epoch=76-step=200000 instead of its best-val epoch=18, closer to the baselines'
     # epoch 62 / 65 (as draw 1's segaux_e76).
     "fnet3d_vscyto3daug_segaux_seed1_e76": "fnet3d_vscyto3daug_segaux_seed1_e76",
+    # Training-budget controls (speedup pilot P2): the nucleus vscyto3daug v2 baseline branched
+    # at 38 / 60 / 100% of its 200k-step constant-LR budget and linearly cooled to zero LR,
+    # predicted from each branch's final (cooled) weights.
+    "fnet3d_vscyto3daug_v2_cool38": "fnet3d_vscyto3daug_v2_cool38",
+    "fnet3d_vscyto3daug_v2_cool60": "fnet3d_vscyto3daug_v2_cool60",
+    "fnet3d_vscyto3daug_v2_cool100": "fnet3d_vscyto3daug_v2_cool100",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
