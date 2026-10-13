@@ -53,8 +53,9 @@ trainer:
       timeout: "3:00:00"  # h:m:s (jsonargparse parses timedelta from this string form)
   precision: 16-mixed
   max_epochs: 200
-  # cudnn.benchmark: 0.900 vs 4.322 s/step on one H200, loss within the replicate floor
-  # (2026-10-11, speedup RECOMMENDATIONS.md s7); no compile_model (slower under DDP).
+  # cudnn.benchmark: 0.900 vs 4.322 s/step on one H200; train-loss gap 1.25x the replicate
+  # floor over 400 warm-up steps, one pair (weak; speedup RECOMMENDATIONS.md s7).
+  # No compile_model: slower under DDP.
   # Fit-only by decision: predicts keep the defaults their stores were made with.
   benchmark: true
 # HCS data hparams (bs=32, z=20, yx=384, augs) live in
