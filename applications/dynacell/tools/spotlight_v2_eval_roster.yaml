@@ -89,6 +89,12 @@ waves:
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__denv/prediction.zarr
           a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__zikv/prediction.zarr
+  # pix2pix3d MEMBRANE SAUNA arm (Phase B1; fit epoch 39 / step 128000, --ckpt last, EMA, same
+  # rule as both segaux draws), predicts 37226914/24/28/32 COMPLETED 2026-10-12: all four legs.
+  # Generate with --wave wave3m.
+  wave3m:
+    membrane:
+      - pix2pix3d_unetvit_segaux_sauna
   # ... and its A549 zikv leg (predict 37187258 COMPLETED 2026-10-10 14:0x), the last draw-2 leg.
   # Generate with --wave wave3l.
   wave3l:
