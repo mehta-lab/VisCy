@@ -1,7 +1,10 @@
 # Hardware profile: single GPU, no vendor constraint, for CELL-Diff predict.
 # Pair with recipes/topology/single_gpu.yml.
 #
-# Identical to hardware_predict_any_gpu.yml except for `time`. CELL-Diff is
+# Identical to hardware_predict_any_gpu.yml except for `time`, including its
+# measured 16-core / 64G shape -- the CELL-Diff predict families top out at
+# 2.57 GiB RSS and 1.58 cores, so they are the least demanding of all, and the
+# wall time is the only thing that sets them apart. CELL-Diff is
 # iterative-diffusion inference, so it costs one to two orders of magnitude more
 # wall time per volume than the single-pass regressors and even than the
 # pix2pix3d GAN: measured 5.8-95.6 h for a completed A549-target predict, versus
@@ -22,8 +25,8 @@ launcher:
     partition: gpu
     nodes: 1
     ntasks_per_node: 1
-    cpus_per_task: 32
+    cpus_per_task: 16
     gpus: 1
-    mem: "256G"
+    mem: "64G"
     constraint: null
     time: "7-00:00:00"
