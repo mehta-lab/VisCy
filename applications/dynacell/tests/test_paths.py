@@ -95,6 +95,7 @@ _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "fnet3d_vscyto3daug_segaux_doublew",
     "fcmae_vscyto3d_scratch_segaux_sauna",
     "pix2pix3d_unetvit_segaux_sauna",
+    "pix2pix3d_unetvit_segaux_sauna_seed1",
     "celldiff_2d_bglp",
     "celldiff_2d_bgflat",
 )

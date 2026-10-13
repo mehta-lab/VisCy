@@ -366,11 +366,19 @@ ARMS: tuple[Arm, ...] = (
     # SAUNA-weighted Dice on the two membrane arms whose seg gain holds on iPSC and A549 (2026-10-10):
     # on ER it beat plain segaux on A549 FG_PCC on 3/3 legs (+.016/+.008/+.028, CIs > 0).
     *(Arm(m, "segaux_sauna", ("membrane",), a549=True) for m in ("fcmae_vscyto3d_scratch", "pix2pix3d_unetvit")),
+    # Second SAUNA draw on pix2pix3d membrane (2026-10-13): draw 1 passed B1 with an A549 FG_PCC gain
+    # over both baselines and both segaux draws, which rule R3 does not decide on one draw.
+    Arm("pix2pix3d_unetvit", "segaux_sauna_seed1", ("membrane",), a549=True),
     # Track H: CellDiff-2D trained on a background-low-passed target (H1; launched as H2).
     *(Arm("celldiff_2d", s, ORGANELLES, a549=True) for s in BG_TARGET_ARGS),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
-SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
+SEED_SOURCES: dict[str, str] = {
+    "segaux_seed1": "segaux",
+    "v2_seed1": "v2",
+    "l1seed1": "l1",
+    "segaux_sauna_seed1": "segaux_sauna",
+}
 # Loss-weight sweep arms: the segaux arm's recipe with seg_aux_weight scaled by this factor.
 WEIGHT_SCALES: dict[str, float] = {"segaux_halfw": 0.5, "segaux_doublew": 2.0}
 
@@ -394,6 +402,7 @@ _DESCRIPTION: dict[str, str] = {
     "v2_seed1": "seed_everything: 1 (a second draw of the v2 baseline)",
     "segaux_sauna": "the segaux arm's recipe + SegAuxDice weighting=sauna (Dice sums weighted by |SAUNA h map| "
     "of the patch mask, iPSC voxel size) at its own calibrated seg_aux_weight",
+    "segaux_sauna_seed1": "the segaux_sauna arm's recipe + seed_everything: 1 (a second draw of the arm)",
     "segaux_cldice": "the segaux arm's recipe + SegAuxDice topology=cldice (0.5 Dice + 0.5 soft-clDice, 5 "
     "skeleton iterations) at its own calibrated seg_aux_weight",
     "segaux_halfw": "the segaux arm's recipe with seg_aux_weight x0.5 (loss-weight sweep)",
