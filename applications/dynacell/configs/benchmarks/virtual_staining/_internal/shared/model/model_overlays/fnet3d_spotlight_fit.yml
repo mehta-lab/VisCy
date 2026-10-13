@@ -28,14 +28,8 @@ model:
         # — it is read from the store.
     lr: 0.001
     schedule: Constant
-    # channels_last_3d weights/inputs; excluded from save_hyperparameters, so
-    # checkpoints and predict leaves are unaffected. See the trainer note below.
-    channels_last: true
+    channels_last: true  # see fnet3d_paper_fit.yml
 trainer:
   precision: 32-true
   max_steps: 200000
-  # cudnn.benchmark: measured on H200 with the real dataloader (2026-10-11,
-  # spotlight-v2/speedup/RECOMMENDATIONS.md s7), with channels_last 0.493 vs 0.918
-  # s/step default; training-loss numerics within the replicate floor. Kernel
-  # choice only, so fit-only: predict keeps defaults.
-  benchmark: true
+  benchmark: true  # see fnet3d_paper_fit.yml
