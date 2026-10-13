@@ -1177,15 +1177,17 @@ def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
 # runtimes over Slurm's retention window. Keyed by profile rather than by leaf so
 # a leaf that composes the wrong profile fails loudly here.
 #
-# hardware_h200_single is shared with 40 *fit* leaves, so its 4-day value is not a
-# predict measurement and must not be re-tuned from one. The 41 predict leaves on
-# it are all FCMAE/VSCyto3D variants that complete in under an hour, so the loose
-# cap costs little -- a known gap, recorded rather than silently excluded.
+# hardware_h200_single is a FIT profile -- 48 fit leaves compose it -- and is
+# deliberately ABSENT from this table. The 41 predict leaves that used to inherit it
+# moved to hardware_predict_h200.yml, which carries the same 4-day wall but a
+# measured 16-core / 64G shape. Keeping the fit profile out means a predict leaf
+# pointed at it fails here instead of silently inheriting a wall nobody measured for
+# predict.
 _PREDICT_PROFILE_TIME: dict[str, str] = {
     "hardware_predict_any_gpu.yml": "2-00:00:00",
     "hardware_predict_celldiff.yml": "7-00:00:00",
     "hardware_predict_celldiff_lite.yml": "02:00:00",
-    "hardware_h200_single.yml": "4-00:00:00",
+    "hardware_predict_h200.yml": "4-00:00:00",
 }
 
 

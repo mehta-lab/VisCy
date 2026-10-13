@@ -23,7 +23,8 @@
 # GPUs. Same reasoning as hardware_predict_celldiff_lite.yml.
 #
 # This deliberately NO LONGER matches hardware_h200_single. That profile is
-# shared with 40 fit leaves, so it must not be re-tuned from predict data.
+# shared with 48 fit leaves, so it must not be re-tuned from predict data;
+# its predict leaves moved to hardware_predict_h200.yml for the same reason.
 #
 # `time` is sized from measurement, not habit: across every completed predict in
 # Slurm's retention window the longest single-pass run was 21.9 h (a pix2pix3d
