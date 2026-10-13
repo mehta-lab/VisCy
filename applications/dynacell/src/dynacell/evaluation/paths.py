@@ -341,6 +341,9 @@ PAPER_KEY: dict[str, str] = {
     "fnet3d_vscyto3daug_v2_cool38": "fnet3d_vscyto3daug_v2_cool38",
     "fnet3d_vscyto3daug_v2_cool60": "fnet3d_vscyto3daug_v2_cool60",
     "fnet3d_vscyto3daug_v2_cool100": "fnet3d_vscyto3daug_v2_cool100",
+    # Fork control (speedup pilot P3): the UNeXt2-3D membrane segaux_seed1 arm forked from the
+    # v2_seed1 baseline's epoch=123 checkpoint instead of trained from scratch.
+    "fcmae_vscyto3d_scratch_segaux_seed1_fork": "unext2_segaux_seed1_fork",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

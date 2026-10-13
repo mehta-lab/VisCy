@@ -89,6 +89,19 @@ waves:
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__denv/prediction.zarr
           a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/mito/fnet3d_vscyto3daug_segaux_seed1_e76/ipsc/a549__zikv/prediction.zarr
+  # Fork control (speedup pilot P3, 2026-10-13): UNeXt2-3D membrane segaux_seed1 forked from the
+  # v2_seed1 baseline's epoch=123 checkpoint (seg_aux_weight patched to 0.86), trained to epoch 199,
+  # predicted from its best-val epoch=149-step=46800 (full-run segaux_seed1 e164, v2_seed1 e123, v2
+  # e178). Stores and leaves are outside the generated tree (experiments/2026-09-24_spotlight-v2/
+  # speedup/p3_fork/). Generate with --wave ctrl7.
+  ctrl7:
+    membrane:
+      - model: fcmae_vscyto3d_scratch_segaux_seed1_fork
+        pred_paths:
+          ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/membrane/fcmae_vscyto3d_scratch_segaux_seed1_fork/ipsc/ipsc/prediction.zarr
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/membrane/fcmae_vscyto3d_scratch_segaux_seed1_fork/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/membrane/fcmae_vscyto3d_scratch_segaux_seed1_fork/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/membrane/fcmae_vscyto3d_scratch_segaux_seed1_fork/ipsc/a549__zikv/prediction.zarr
   # Training-budget controls (speedup pilot P2, 2026-10-13): the nucleus vscyto3daug v2 baseline
   # branched at 38 / 60 / 100% of its 200k constant-LR steps and cooled linearly to zero LR
   # (LinearLRCooldown), predicted from each branch's final weights. Stores and leaves are outside
