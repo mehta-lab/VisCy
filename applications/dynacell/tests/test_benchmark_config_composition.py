@@ -1353,3 +1353,59 @@ def test_only_measured_slow_fits_get_the_long_wall(leaf: Path) -> None:
             f"_LONG_WALL_TRAIN_LEAVES may use the 7-day wall; add one only with a measured "
             f"epochs/h rate showing it cannot finish in 4 days."
         )
+
+
+# Throughput flags measured on H200 with the real dataloader (2026-10-11,
+# experiments/2026-09-24_spotlight-v2/speedup/RECOMMENDATIONS.md section 7):
+# UNeXt2-3D (FCMAE) 4-GPU DDP with cudnn.benchmark 0.930 s/step vs 4.322 1-GPU
+# default; FNet-3D channels_last + benchmark 0.493 vs 0.918 s/step; training-loss
+# numerics within the replicate floor. Keyed by composed architecture rather than
+# by leaf path, so a new 3-D FCMAE / FNet3D fit picks the flags up and a 2-D arm
+# that reuses either architecture at in_stack_depth=1 (fnet2d, fcmae_vscyto2d)
+# does not. compile_model stays off: it slowed UNeXt2-3D under DDP (1.173 s/step).
+# None = key left unset (Lightning / DynacellUNet default).
+_SPEED_FLAGS_BY_ARCHITECTURE: dict[str, dict[str, bool | None]] = {
+    "fcmae": {"benchmark": True, "channels_last": None},
+    "FNet3D": {"benchmark": True, "channels_last": True},
+}
+_DEFAULT_SPEED_FLAGS: dict[str, bool | None] = {"benchmark": None, "channels_last": None}
+
+
+def _speed_flag_family(cfg: dict) -> str | None:
+    """Return the architecture key if ``cfg`` is a 3-D FCMAE or FNet3D model, else None."""
+    init_args = cfg["model"]["init_args"]
+    architecture = init_args.get("architecture")
+    if architecture not in _SPEED_FLAGS_BY_ARCHITECTURE:
+        return None
+    return architecture if init_args["model_config"]["in_stack_depth"] > 1 else None
+
+
+@pytest.mark.parametrize("leaf", _all_train_leaves(), ids=lambda p: str(p.relative_to(BENCHMARKS)))
+def test_3d_fcmae_and_fnet3d_fits_take_the_measured_speed_flags(leaf: Path) -> None:
+    """3-D FCMAE fits get cudnn.benchmark; 3-D FNet3D fits also get channels_last.
+
+    Every other train leaf keeps Lightning's defaults (benchmark unset,
+    channels_last unset), so the flags cannot leak into a family nobody measured.
+    """
+    cfg = load_composed_config(leaf)
+    family = _speed_flag_family(cfg)
+    expected = _SPEED_FLAGS_BY_ARCHITECTURE[family] if family else _DEFAULT_SPEED_FLAGS
+    composed = {
+        "benchmark": cfg["trainer"].get("benchmark"),
+        "channels_last": cfg["model"]["init_args"].get("channels_last"),
+    }
+    assert composed == expected, (
+        f"{leaf.relative_to(BENCHMARKS)}: family={family!r} composes {composed}, expected {expected}."
+    )
+
+
+@pytest.mark.parametrize("leaf", _all_predict_leaves(), ids=lambda p: str(p.relative_to(BENCHMARKS)))
+def test_3d_fcmae_and_fnet3d_predicts_keep_default_kernels(leaf: Path) -> None:
+    """The fit-only speed flags must not reach these families' predict leaves."""
+    cfg = load_composed_config(leaf)
+    if _speed_flag_family(cfg) is None:
+        pytest.skip(f"not a 3-D FCMAE / FNet3D predict: {leaf.relative_to(BENCHMARKS)}")
+    assert "benchmark" not in cfg["trainer"], f"{leaf.relative_to(BENCHMARKS)}: predict sets trainer.benchmark"
+    assert "channels_last" not in cfg["model"]["init_args"], (
+        f"{leaf.relative_to(BENCHMARKS)}: predict sets model.init_args.channels_last"
+    )

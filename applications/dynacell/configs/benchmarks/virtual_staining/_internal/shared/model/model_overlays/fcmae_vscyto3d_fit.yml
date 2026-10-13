@@ -53,6 +53,11 @@ trainer:
       timeout: "3:00:00"  # h:m:s (jsonargparse parses timedelta from this string form)
   precision: 16-mixed
   max_epochs: 200
+  # cudnn.benchmark: measured on H200 with the real dataloader (2026-10-11,
+  # spotlight-v2/speedup/RECOMMENDATIONS.md s7), 4-GPU DDP 0.930 s/step vs 4.322 1-GPU
+  # default. No compile_model: it slowed DDP to 1.173 s/step; training-loss numerics
+  # within the replicate floor. Kernel choice only, so fit-only: predict keeps defaults.
+  benchmark: true
 # HCS data hparams (bs=32, z=20, yx=384, augs) live in
 # data_overlays/fcmae_vscyto3d_fit.yml; single-store train leaves compose
 # both, joint (BatchedConcatDataModule) leaves compose only this one and
