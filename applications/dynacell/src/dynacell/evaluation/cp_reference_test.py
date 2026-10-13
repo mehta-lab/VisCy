@@ -24,7 +24,7 @@ from dynacell.evaluation.cp_reference import (
 )
 from dynacell.evaluation.feature_metrics import compute_feature_similarity_pairwise
 from dynacell.evaluation.feature_select import select_gt_features
-from dynacell.evaluation.paths import DATA_ROOT, LITE_DATA_ROOT
+from dynacell.evaluation.paths import DATA_ROOT, LITE_DATA_ROOT, cp_reference_path
 from dynacell.evaluation.pipeline import (
     _BackboneLists,
     _cp_row_features,
@@ -251,8 +251,12 @@ def test_write_is_atomic_and_refuses_a_different_reference(tmp_path: Path) -> No
 
 
 def test_load_refuses_missing_and_other_target(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="build_cp_reference.py --target er"):
+    with pytest.raises(FileNotFoundError, match="build_cp_reference.py --target er") as missing:
         load_cp_reference(tmp_path / "absent.json", target_name="er")
+    assert "--focus2d" not in str(missing.value)
+    # A 2D-benchmark reference is rebuilt with its own halfwidth, not as the 3D one.
+    with pytest.raises(FileNotFoundError, match="build_cp_reference.py --target er --focus2d 1"):
+        load_cp_reference(cp_reference_path("er", tmp_path, focus2d_halfwidth=1), target_name="er")
     _reference(tmp_path, [_fit("set-a", _gt())])
     with pytest.raises(ValueError, match="was fit for"):
         load_cp_reference(tmp_path / "er.json", target_name="nucleus")

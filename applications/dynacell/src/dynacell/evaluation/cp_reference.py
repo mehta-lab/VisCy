@@ -54,6 +54,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -172,9 +173,15 @@ def _hashed_fit(fit: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_command(target_name: str) -> str:
-    """Return the command that builds the registry reference for one target."""
-    return f"uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target {target_name}"
+def _build_command(target_name: str, reference_path: str | Path) -> str:
+    """Return the command that builds the registry reference at ``reference_path``.
+
+    A 2D-benchmark reference (``<target>__focus2d_h<h>.json``, named by
+    :func:`~dynacell.evaluation.paths.cp_reference_path`) is built with ``--focus2d <h>``.
+    """
+    command = f"uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target {target_name}"
+    focus2d = re.fullmatch(rf"{re.escape(target_name)}__focus2d_h(\d+)\.json", Path(reference_path).name)
+    return command if focus2d is None else f"{command} --focus2d {focus2d.group(1)}"
 
 
 def cp_space(config: DictConfig) -> tuple[dict[str, Any], tuple[str, ...]]:
@@ -863,7 +870,7 @@ class DatasetCPSpace:
             raise StaleCacheError(
                 f"{self.dataset}: the GT CP cells this eval scores differ from the CP reference fit in "
                 f"{self.reference_path}: {'; '.join(problems[:5])}. The GT CP cache changed since the reference "
-                f"was built; rebuild it:\n  {_build_command(self.target_name)} --force"
+                f"was built; rebuild it:\n  {_build_command(self.target_name, self.reference_path)} --force"
             )
 
 
@@ -895,7 +902,7 @@ class CPReference:
             raise KeyError(
                 f"CP reference {self.path} has no scaler for dataset {dataset!r} "
                 f"(scalers: {sorted(self.scalers)}, lite: {sorted(self.lite)}); rebuild it:\n"
-                f"  {_build_command(self.target_name)}"
+                f"  {_build_command(self.target_name, self.path)}"
             )
         scaler_dataset = self.lite[dataset]["parent"] if is_lite else dataset
         scaler = self.scalers[scaler_dataset]
@@ -971,7 +978,7 @@ def load_cp_reference(path: Path, *, target_name: str) -> CPReference:
         If the stored hash disagrees with the content, or the reference was fit
         for another target or schema.
     """
-    ref = _read_cp_reference(path, build_hint=_build_command(target_name))
+    ref = _read_cp_reference(path, build_hint=_build_command(target_name, path))
     if ref.target_name != target_name:
         raise ValueError(f"CP reference {path} was fit for {ref.target_name!r}, this eval is {target_name!r}")
     return ref
@@ -1096,7 +1103,7 @@ def eval_cp_space(config: DictConfig) -> DatasetCPSpace:
             f"CP reference {ref.path} was built for a different CP recipe.\n"
             f"  reference identity: {ref.cp_identity}\n  eval identity:      {identity}\n"
             f"  reference features: {len(ref.feature_names)}; eval features: {len(names)}\n"
-            f"Rebuild it from caches of the current recipe:\n  {_build_command(ref.target_name)}"
+            f"Rebuild it from caches of the current recipe:\n  {_build_command(ref.target_name, ref.path)}"
         )
     dataset = OmegaConf.select(config, "benchmark.dataset_ref.dataset", default=None)
     if dataset is None:
