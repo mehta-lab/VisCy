@@ -345,6 +345,9 @@ PAPER_KEY: dict[str, str] = {
     # Fork control (speedup pilot P3): the UNeXt2-3D membrane segaux_seed1 arm forked from the
     # v2_seed1 baseline's epoch=123 checkpoint instead of trained from scratch.
     "fcmae_vscyto3d_scratch_segaux_seed1_fork": "unext2_segaux_seed1_fork",
+    # Checkpoint-stage control: the nucleus vscyto3daug segaux_halfw arm re-predicted from
+    # latest-epoch=76-step=200000 instead of its best-val epoch=51, at the e74 stage-control floor.
+    "fnet3d_vscyto3daug_segaux_halfw_e76": "fnet3d_vscyto3daug_segaux_halfw_e76",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

@@ -104,6 +104,18 @@ waves:
         leaves: [a549__denv]
         pred_paths:
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_v2_cool100/ipsc/a549__denv/prediction.zarr
+  # Checkpoint-stage control for wave3n's halfw arm (2026-10-13): re-predicted from
+  # latest-epoch=76-step=200000 instead of its best-val epoch=51 (predicts 37262124/25/45/49), to
+  # test whether its A549 Dice loss is a checkpoint-stage artifact. Leaves are outside the generated
+  # tree (experiments/2026-09-24_spotlight-v2/e76_halfw_control/). Generate with --wave ctrl8.
+  ctrl8:
+    nucleus:
+      - model: fnet3d_vscyto3daug_segaux_halfw_e76
+        pred_paths:
+          ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_halfw_e76/ipsc/ipsc/prediction.zarr
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_halfw_e76/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_halfw_e76/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_halfw_e76/ipsc/a549__zikv/prediction.zarr
   # Fork control (speedup pilot P3, 2026-10-13): UNeXt2-3D membrane segaux_seed1 forked from the
   # v2_seed1 baseline's epoch=123 checkpoint (seg_aux_weight patched to 0.86), trained to epoch 199,
   # predicted from its best-val epoch=149-step=46800 (full-run segaux_seed1 e164, v2_seed1 e123, v2
