@@ -1608,6 +1608,20 @@ def evaluate_predictions(
                     "its dataset-metric columns would be dropped instead of NaN-filled"
                 )
 
+    # A plane-restricted prediction (HCSDataModule.predict_z_planes) holds zeros off its
+    # slab; refuse a full-volume eval of it before segmentation_results.zarr is truncated
+    # below and before MicroMS3IM fits on those zeros.
+    if focus2d is None:
+        with open_ome_zarr(pred_path, mode="r") as pred_plate:
+            restricted = [
+                n for n, p in pred_plate.positions() if predicted_z_planes(p, io_config.pred_channel_name) is not None
+            ]
+        if restricted:
+            raise ValueError(
+                f"{len(restricted)} FOVs of the prediction hold only some planes (a plane-restricted "
+                f"predict, e.g. {restricted[:3]}); score it with focus2d.halfwidth, not over the full volume"
+            )
+
     channel_names = ["prediction_seg", "target_seg"]
     with (
         open_ome_zarr(
@@ -1668,18 +1682,6 @@ def evaluate_predictions(
                 pred_positions = [(n, p) for n, p in pred_positions if _keep(n)]
                 gt_positions = [(n, p) for n, p in gt_positions if _keep(n)]
                 seg_positions = [(n, p) for n, p in seg_positions if _keep(n)]
-
-            # A plane-restricted prediction (HCSDataModule.predict_z_planes) holds zeros off
-            # its slab; refuse a full-volume eval of it before MicroMS3IM fits on those zeros.
-            if focus2d is None:
-                restricted = [
-                    n for n, p in pred_positions if predicted_z_planes(p, io_config.pred_channel_name) is not None
-                ]
-                if restricted:
-                    raise ValueError(
-                        f"{len(restricted)} FOVs of the prediction hold only some planes (a plane-restricted "
-                        f"predict, e.g. {restricted[:3]}); score it with focus2d.halfwidth, not over the full volume"
-                    )
 
             # Position-count alignment.
             #

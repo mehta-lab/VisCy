@@ -397,6 +397,8 @@ def test_precompute_plane_file_drives_a_predict_the_eval_accepts(stores, tmp_pat
 
     with pytest.raises(ValueError, match="plane-restricted predict"):
         live_pipeline_module().evaluate_predictions(eval_config("cut3d", cut))
+    # Refused before the eval dir's segmentation results are truncated (opened mode="w").
+    assert not (tmp_path / "cut3d" / "segmentation_results.zarr").exists()
     # The phase anchor scores other planes than the store holds: refused, not scored on zeros.
     with pytest.raises(ValueError, match="resolve the focus plane differently"):
         live_pipeline_module().evaluate_predictions(eval_config("anchor", cut, **_focus_kwargs("phase_midband")))
