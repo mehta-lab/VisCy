@@ -300,7 +300,6 @@ class HCSPredictionWriter(BasePredictionWriter):
                 overwritten: list[str] = []
                 mixed: list[str] = []
                 oversized: list[str] = []
-                foreign: list[str] = []
                 channel_orders: set[tuple[str, ...]] = set()
                 for name, pos in positions.items():
                     existing = set(pos.channel_names)
@@ -326,11 +325,11 @@ class HCSPredictionWriter(BasePredictionWriter):
                         overwritten.append(name)
                         if self._outruns_source(pos, name, dm.array_key):
                             oversized.append(name)
-                        # A plane-restricted run rewrites only its planes; any other run's
-                        # voxels would survive beside them (overwrite rewrites in place).
-                        if self._z_planes is not None and self._cannot_share(pos, prediction_channel):
-                            foreign.append(name)
-                    elif self._cannot_share(pos, prediction_channel):
+                    # A plane-restricted run rewrites only its planes, so it cannot share its
+                    # own FOVs with another run either (overwrite rewrites in place).
+                    if (name not in run_positions or self._z_planes is not None) and self._cannot_share(
+                        pos, prediction_channel
+                    ):
                         mixed.append(name)
                 if oversized:
                     self.plate.close()
@@ -340,20 +339,13 @@ class HCSPredictionWriter(BasePredictionWriter):
                         "planes would survive every rewrite yet the FOVs would be marked complete. "
                         "Predict into a new output store."
                     )
-                if foreign:
-                    self.plate.close()
-                    raise ValueError(
-                        f"{len(foreign)} FOVs in '{self.output_store}' hold {prediction_channel} from another "
-                        f"run (e.g. {foreign[:3]}); a plane-restricted predict writes only its planes, so the "
-                        "other run's planes would survive beside them. Remove the store or predict into a new one."
-                    )
                 if mixed:
                     self.plate.close()
                     raise ValueError(
-                        f"{len(mixed)} FOVs outside this run already hold {prediction_channel} "
-                        f"in '{self.output_store}' that were predicted before completion markers "
-                        f"existed or with a different checkpoint or settings (e.g. {mixed[:3]}); "
-                        "predict into a new output store instead of mixing them."
+                        f"{len(mixed)} FOVs {'' if self._z_planes is not None else 'outside this run '}already "
+                        f"hold {prediction_channel} in '{self.output_store}' that were predicted before completion "
+                        f"markers existed or with a different checkpoint, settings or plane selection "
+                        f"(e.g. {mixed[:3]}); predict into a new output store instead of mixing them."
                     )
                 if len(channel_orders) > 1:
                     self.plate.close()

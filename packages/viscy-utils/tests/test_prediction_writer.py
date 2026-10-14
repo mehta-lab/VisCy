@@ -483,7 +483,7 @@ def test_plane_restricted_predict_refuses_another_runs_store(tmp_path):
     planes_file.write_text(json.dumps({"positions": SLAB_PLANES}))
     output = tmp_path / "pred.zarr"
     _predict_planes(source, output)
-    with pytest.raises(ValueError, match="from another run"):
+    with pytest.raises(ValueError, match="plane selection"):
         _predict_planes(source, output, planes_file)
     # Discriminates: the same plane run into a fresh store, and its own rerun, pass.
     _predict_planes(source, tmp_path / "slab.zarr", planes_file)
