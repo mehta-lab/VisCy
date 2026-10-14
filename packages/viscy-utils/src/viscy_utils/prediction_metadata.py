@@ -20,6 +20,7 @@ __all__ = [
     "mark_started",
     "marker_identity",
     "outruns",
+    "plane_predict_unfinished",
     "predicted_z_planes",
     "prediction_complete",
     "prediction_run",
@@ -454,3 +455,26 @@ def predicted_z_planes(position: Position, channel: str) -> list[list[int]] | No
         prediction on every plane.
     """
     return position.zattrs.get(PREDICTED_Z_PLANES_KEY, {}).get(channel)
+
+
+def plane_predict_unfinished(position: Position, channel: str) -> bool:
+    """Return whether ``channel`` holds a plane-restricted predict that has not finished.
+
+    Such a run records its started marker (with ``z_planes_sha256_12``) before its
+    first write but its planes only on completion (:func:`record_z_planes`), so until
+    then :func:`predicted_z_planes` returns ``None`` as if every plane were predicted.
+
+    Parameters
+    ----------
+    position : Position
+        Prediction position to inspect.
+    channel : str
+        Prediction channel name.
+
+    Returns
+    -------
+    bool
+        True when the channel's marker names a plane selection but no planes are recorded.
+    """
+    marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(channel)
+    return isinstance(marker, dict) and "z_planes_sha256_12" in marker and predicted_z_planes(position, channel) is None

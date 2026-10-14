@@ -18,6 +18,7 @@ from viscy_utils.prediction_metadata import (
     completion_marker,
     mark_complete,
     mark_started,
+    plane_predict_unfinished,
     predicted_z_planes,
     prediction_complete,
     prediction_run,
@@ -493,6 +494,27 @@ def test_plane_restricted_predict_refuses_a_store_holding_other_planes(tmp_path)
     other_planes.write_text(json.dumps({"positions": {fov: [[2], [6]] for fov in SLAB_PLANES}}))
     with pytest.raises(ValueError, match="other planes"):
         _predict_planes(source, slab, other_planes, settings="cccccccccccc")
+
+
+def test_an_interrupted_plane_predict_is_unfinished(tmp_path):
+    """Until a plane run completes it records no planes, so only its marker tells it from a full predict."""
+    source = tmp_path / "source.zarr"
+    _write_stamped_source(source)
+    planes_file = tmp_path / "planes.json"
+    planes_file.write_text(json.dumps({"positions": SLAB_PLANES}))
+    full, slab = tmp_path / "full.zarr", tmp_path / "slab.zarr"
+    _predict_planes(source, full)
+    _predict_planes(source, slab, planes_file)
+    with open_ome_zarr(full, mode="r") as full_plate, open_ome_zarr(slab, mode="r+") as slab_plate:
+        assert not plane_predict_unfinished(full_plate["0/0/0"], "Nuclei_prediction")
+        position = slab_plate["0/0/0"]
+        assert not plane_predict_unfinished(position, "Nuclei_prediction")
+        marker = position.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"]
+        # The state a plane run leaves when interrupted: started marker, no planes yet.
+        mark_started(position, ["Nuclei_prediction"], {k: v for k, v in marker.items() if k != "source_shape"})
+        record_z_planes(position, ["Nuclei_prediction"], None)
+        assert predicted_z_planes(position, "Nuclei_prediction") is None
+        assert plane_predict_unfinished(position, "Nuclei_prediction")
 
 
 def test_record_z_planes_keeps_other_channels(tmp_path):

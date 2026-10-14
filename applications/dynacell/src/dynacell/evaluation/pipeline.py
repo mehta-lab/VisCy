@@ -95,7 +95,7 @@ from dynacell.evaluation.runtime import (
 )
 from dynacell.evaluation.segmentation import require_cubic_workflows
 from dynacell.evaluation.utils import plot_metrics
-from viscy_utils.prediction_metadata import predicted_z_planes
+from viscy_utils.prediction_metadata import plane_predict_unfinished, predicted_z_planes
 
 
 def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[slice | None]] | None:
@@ -1609,18 +1609,23 @@ def evaluate_predictions(
                 )
 
     # A plane-restricted prediction (HCSDataModule.predict_z_planes) holds zeros off its
-    # slab; refuse a full-volume eval of it before segmentation_results.zarr is truncated
-    # below and before MicroMS3IM fits on those zeros.
-    if focus2d is None:
-        with open_ome_zarr(pred_path, mode="r") as pred_plate:
-            restricted = [
-                n for n, p in pred_plate.positions() if predicted_z_planes(p, io_config.pred_channel_name) is not None
-            ]
-        if restricted:
-            raise ValueError(
-                f"{len(restricted)} FOVs of the prediction hold only some planes (a plane-restricted "
-                f"predict, e.g. {restricted[:3]}); score it with focus2d.halfwidth, not over the full volume"
-            )
+    # slab; refuse an unfinished one (its planes are not recorded yet, so it would read
+    # as full-volume), and a full-volume eval of a finished one, before
+    # segmentation_results.zarr is truncated below and before MicroMS3IM fits on zeros.
+    with open_ome_zarr(pred_path, mode="r") as pred_plate:
+        positions = list(pred_plate.positions())
+        unfinished = [n for n, p in positions if plane_predict_unfinished(p, io_config.pred_channel_name)]
+        restricted = [n for n, p in positions if predicted_z_planes(p, io_config.pred_channel_name) is not None]
+    if unfinished:
+        raise ValueError(
+            f"{len(unfinished)} FOVs of the prediction hold an unfinished plane-restricted predict "
+            f"(e.g. {unfinished[:3]}); finish it (--resume-predict) before scoring"
+        )
+    if focus2d is None and restricted:
+        raise ValueError(
+            f"{len(restricted)} FOVs of the prediction hold only some planes (a plane-restricted "
+            f"predict, e.g. {restricted[:3]}); score it with focus2d.halfwidth, not over the full volume"
+        )
 
     channel_names = ["prediction_seg", "target_seg"]
     with (

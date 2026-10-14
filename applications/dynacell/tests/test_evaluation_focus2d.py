@@ -12,6 +12,7 @@ isolation and the provenance stamp.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,7 @@ from scipy.ndimage import gaussian_filter
 from dynacell.evaluation.cache import prediction_sources, prediction_sources_sha256_12
 from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, mark_started, record_z_planes
 
 from ._eval_fixtures import build_eval_config, live_pipeline_module
 
@@ -402,3 +404,15 @@ def test_precompute_plane_file_drives_a_predict_the_eval_accepts(stores, tmp_pat
     # The phase anchor scores other planes than the store holds: refused, not scored on zeros.
     with pytest.raises(ValueError, match="resolve the focus plane differently"):
         live_pipeline_module().evaluate_predictions(eval_config("anchor", cut, **_focus_kwargs("phase_midband")))
+
+    # An interrupted slab predict (started marker, planes not yet recorded) reads as a
+    # full-volume store; both modes refuse it instead of scoring its unwritten planes.
+    interrupted = Path(shutil.copytree(cut, tmp_path / "interrupted_pred.zarr"))
+    with open_ome_zarr(interrupted, mode="r+") as plate:
+        position = plate[POSITIONS[0]]
+        marker = position.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"]
+        mark_started(position, ["Nuclei_prediction"], {k: v for k, v in marker.items() if k != "source_shape"})
+        record_z_planes(position, ["Nuclei_prediction"], None)
+    for name, overrides in (("interrupted3d", {}), ("interrupted2d", _focus_kwargs("nucleus_area"))):
+        with pytest.raises(ValueError, match="unfinished plane-restricted predict"):
+            live_pipeline_module().evaluate_predictions(eval_config(name, interrupted, **overrides))
