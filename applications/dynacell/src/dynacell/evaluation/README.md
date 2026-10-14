@@ -171,7 +171,7 @@ Defaults live in `_configs/eval.yaml`. `eval_grouped.yaml` adds `conditions`, an
 | `compute_instance_ap` | `false` | Instance segmentation and AP. On in the grouped nucleus/membrane leaves. |
 | `segmentation.backend` | `supermodel` | Nucleus/membrane segmenter. `cpdino` in the grouped leaves. |
 | `compute_cell_similarity` | `false` | Per-cell `PerCell_*` pixel similarity. |
-| `pixel_metrics.foreground.enabled` | `false` | Foreground-weighted `FG_*` pixel metrics. |
+| `pixel_metrics.foreground.{enabled,feather_sigma_um}` | `true`, `0.0` | Foreground-weighted `FG_*` pixel metrics on the hard GT interior mask; `feather_sigma_um: null` feathers it per target. |
 | `feature_metrics.compute_{fid,prc,mind}` | `true` | FID, precision/recall/F1, MIND. |
 | `feature_metrics.focus_slab.{enabled,halfwidth}` | `true`, `2` | Crop deep features from an in-focus slab of `2·halfwidth+1` planes. |
 | `use_gpu` | `true` | GPU for metrics, segmentation and extractors. |
@@ -215,7 +215,7 @@ Computed on each (FOV, timepoint) volume.
 | `Spectral_PCC` | Frequency-weighted PCC; `pixel_metrics.spectral_pcc`. |
 | `XY_FSC_Resolution`, `Z_FSC_Resolution` (3-D) / `FRC_Resolution` (2-D) | Fourier shell/ring correlation resolution; `pixel_metrics.fsc`. |
 | `MicroMS3IM` | MicroSSIM; `compute_microssim`. |
-| `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR`, `FG_frac` | Weighted by a soft foreground map derived from the GT; `pixel_metrics.foreground.enabled`. |
+| `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR`, `FG_frac` | Weighted by a foreground map derived from the GT: the hard interior mask by default, feathered when `feather_sigma_um` > 0 or null; `pixel_metrics.foreground`. |
 | `PerCell_{PCC,SSIM}_{mean,median}` | Per-cell similarity; `compute_cell_similarity`. |
 
 ### Mask (`mask_metrics.csv`)

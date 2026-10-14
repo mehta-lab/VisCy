@@ -62,7 +62,7 @@ def test_foreground_settings_resolution():
     assert resolve(cfg)["smooth_sigma_um"] == 0.5
     cfg.pixel_metrics.foreground.smooth_sigma_um = 2
     assert resolve(cfg) == {"source": "smooth_otsu", "smooth_sigma_um": 2.0, "feather_sigma_um": 0.5}
-    cfg.target_name = "lysosomes"
+    cfg.target_name = "golgi"  # a target with no FOREGROUND_SIGMAS_UM entry
     with pytest.raises(ValueError, match="feather_sigma_um is null"):
         resolve(cfg)
 
@@ -75,7 +75,7 @@ def test_otsu_source_resolves_no_smoothing_sigma():
     assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.5}
     cfg.pixel_metrics.foreground.smooth_sigma_um = 3.0
     assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.5}
-    cfg.target_name = "lysosomes"
+    cfg.target_name = "golgi"  # a target with no FOREGROUND_SIGMAS_UM entry
     cfg.pixel_metrics.foreground.feather_sigma_um = 0.25
     assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.25}
 

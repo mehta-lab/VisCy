@@ -26,7 +26,9 @@ from hydra import compose, initialize_config_module
 from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.pipeline import _merge_condition, _select_conditions
+from dynacell.evaluation.metrics import FOREGROUND_SIGMAS_UM
+from dynacell.evaluation.pipeline import _foreground_settings, _merge_condition, _select_conditions
+from dynacell.evaluation.segmentation import EVAL_TARGETS
 
 from ._eval_fixtures import make_hcs_plate
 
@@ -84,6 +86,20 @@ def _compose_eval_cfg(overrides: list[str], config_name: str = "eval") -> DictCo
     with initialize_config_module(config_module="dynacell.evaluation._configs", version_base="1.2"):
         cfg = compose(config_name=config_name, overrides=[*overrides, _searchpath_override()])
     return cfg
+
+
+@pytest.mark.parametrize("target_name", EVAL_TARGETS)
+def test_default_eval_scores_interior_only_foreground(target_name: str) -> None:
+    """eval.yaml turns the FG_* columns on with a hard GT interior mask, for every accepted target.
+
+    Hand-built test configs omit the block, so only the composed default can pin it.
+    """
+    smooth = FOREGROUND_SIGMAS_UM[target_name]["smooth_sigma_um"]
+    assert _foreground_settings(_compose_eval_cfg([f"target_name={target_name}"])) == {
+        "source": "smooth_otsu",
+        "smooth_sigma_um": smooth,
+        "feather_sigma_um": 0.0,
+    }
 
 
 def test_default_eval_pins_morphem_to_a_hub_commit() -> None:

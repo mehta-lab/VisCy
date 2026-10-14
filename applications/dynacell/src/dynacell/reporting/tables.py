@@ -39,8 +39,8 @@ FEATURE_METRICS = [
     "MorphEm_FID",
 ]
 
-# The foreground-limited ``FG_*`` columns (``pixel_metrics.foreground``, off by default)
-# are ranked here but stay out of PIXEL_METRICS: callers ask for them by name.
+# The foreground-limited ``FG_*`` columns (``pixel_metrics.foreground``) are ranked here
+# but stay out of PIXEL_METRICS: callers ask for them by name.
 HIGHER_IS_BETTER = {
     "PCC",
     "SSIM",
