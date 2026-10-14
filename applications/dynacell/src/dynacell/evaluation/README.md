@@ -215,7 +215,7 @@ Computed on each (FOV, timepoint) volume.
 | `Spectral_PCC` | Frequency-weighted PCC; `pixel_metrics.spectral_pcc`. |
 | `XY_FSC_Resolution`, `Z_FSC_Resolution` (3-D) / `FRC_Resolution` (2-D) | Fourier shell/ring correlation resolution; `pixel_metrics.fsc`. |
 | `MicroMS3IM` | MicroSSIM; `compute_microssim`. |
-| `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR`, `FG_frac` | Weighted by a soft foreground map derived from the GT; `pixel_metrics.foreground.enabled`. |
+| `FG_PCC`, `FG_SI_SSIM`, `FG_SI_NRMSE`, `FG_SI_PSNR`, `FG_frac` | Weighted by a foreground map derived from the GT: the hard interior mask by default, feathered when `feather_sigma_um` > 0 or null; `pixel_metrics.foreground`. |
 | `PerCell_{PCC,SSIM}_{mean,median}` | Per-cell similarity; `compute_cell_similarity`. |
 
 ### Mask (`mask_metrics.csv`)
