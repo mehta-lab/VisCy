@@ -460,9 +460,12 @@ def predicted_z_planes(position: Position, channel: str) -> list[list[int]] | No
 def plane_predict_unfinished(position: Position, channel: str) -> bool:
     """Return whether ``channel`` holds a plane-restricted predict that has not finished.
 
-    Such a run records its started marker (with ``z_planes_sha256_12``) before its
-    first write but its planes only on completion (:func:`record_z_planes`), so until
-    then :func:`predicted_z_planes` returns ``None`` as if every plane were predicted.
+    Such a run replaces the channel's marker with its started marker (which names the
+    plane selection, ``z_planes_sha256_12``) before its first write, and
+    :func:`completion_marker` adds ``source_shape`` only once every plane is written.
+    Until then the planes may be unwritten or another run's, while
+    :func:`predicted_z_planes` returns ``None`` (a fresh store) or the previous run's
+    planes (an interrupted re-predict of the same slab), so neither says "unfinished".
 
     Parameters
     ----------
@@ -474,7 +477,7 @@ def plane_predict_unfinished(position: Position, channel: str) -> bool:
     Returns
     -------
     bool
-        True when the channel's marker names a plane selection but no planes are recorded.
+        True when the channel's marker names a plane selection but no ``source_shape``.
     """
     marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(channel)
-    return isinstance(marker, dict) and "z_planes_sha256_12" in marker and predicted_z_planes(position, channel) is None
+    return isinstance(marker, dict) and "z_planes_sha256_12" in marker and "source_shape" not in marker

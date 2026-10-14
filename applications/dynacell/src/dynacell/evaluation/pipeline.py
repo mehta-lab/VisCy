@@ -1609,8 +1609,8 @@ def evaluate_predictions(
                 )
 
     # A plane-restricted prediction (HCSDataModule.predict_z_planes) holds zeros off its
-    # slab; refuse an unfinished one (its planes are not recorded yet, so it would read
-    # as full-volume), and a full-volume eval of a finished one, before
+    # slab; refuse an unfinished one (unwritten planes, or another run's on the same
+    # slab), and a full-volume eval of a finished one, before
     # segmentation_results.zarr is truncated below and before MicroMS3IM fits on zeros.
     with open_ome_zarr(pred_path, mode="r") as pred_plate:
         positions = list(pred_plate.positions())

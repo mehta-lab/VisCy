@@ -497,7 +497,7 @@ def test_plane_restricted_predict_refuses_a_store_holding_other_planes(tmp_path)
 
 
 def test_an_interrupted_plane_predict_is_unfinished(tmp_path):
-    """Until a plane run completes it records no planes, so only its marker tells it from a full predict."""
+    """Until a plane run completes its marker has no source_shape, whatever planes are recorded."""
     source = tmp_path / "source.zarr"
     _write_stamped_source(source)
     planes_file = tmp_path / "planes.json"
@@ -510,10 +510,12 @@ def test_an_interrupted_plane_predict_is_unfinished(tmp_path):
         position = slab_plate["0/0/0"]
         assert not plane_predict_unfinished(position, "Nuclei_prediction")
         marker = position.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"]
-        # The state a plane run leaves when interrupted: started marker, no planes yet.
+        # An interrupted re-predict of the same slab: started marker, the old planes still recorded.
         mark_started(position, ["Nuclei_prediction"], {k: v for k, v in marker.items() if k != "source_shape"})
+        assert predicted_z_planes(position, "Nuclei_prediction") == SLAB_PLANES["0/0/0"]
+        assert plane_predict_unfinished(position, "Nuclei_prediction")
+        # An interrupted first predict: started marker, no planes yet.
         record_z_planes(position, ["Nuclei_prediction"], None)
-        assert predicted_z_planes(position, "Nuclei_prediction") is None
         assert plane_predict_unfinished(position, "Nuclei_prediction")
 
 
