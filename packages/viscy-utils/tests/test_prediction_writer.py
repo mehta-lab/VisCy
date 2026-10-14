@@ -406,7 +406,7 @@ def _write_stamped_source(path) -> None:
             plate.create_position(*fov.split("/")).create_image("0", data)
 
 
-def _predict_planes(source, output, planes_file=None) -> HCSDataModule:
+def _predict_planes(source, output, planes_file=None, settings=None) -> HCSDataModule:
     data_module = HCSDataModule(
         data_path=str(source),
         source_channel=["Phase3D"],
@@ -423,7 +423,7 @@ def _predict_planes(source, output, planes_file=None) -> HCSDataModule:
         accelerator="cpu",
         logger=False,
         enable_progress_bar=False,
-        callbacks=[HCSPredictionWriter(str(output), overwrite=True)],
+        callbacks=[HCSPredictionWriter(str(output), overwrite=True, settings_sha256_12=settings)],
     ).predict(_SourcePlusOneModule(), datamodule=data_module, return_predictions=False)
     return data_module
 
@@ -475,19 +475,24 @@ def test_full_predict_over_a_plane_store_clears_the_recorded_planes(tmp_path):
             assert (np.asarray(plate[fov]["0"][:, 0]) > 0).all()
 
 
-def test_plane_restricted_predict_refuses_another_runs_store(tmp_path):
-    """A slab predict into a full-Z store would leave the full run's planes around the slab."""
+def test_plane_restricted_predict_refuses_a_store_holding_other_planes(tmp_path):
+    """A slab predict over another run's planes would leave them around the slab; over its own slab it may replace."""
     source = tmp_path / "source.zarr"
     _write_stamped_source(source)
     planes_file = tmp_path / "planes.json"
     planes_file.write_text(json.dumps({"positions": SLAB_PLANES}))
-    output = tmp_path / "pred.zarr"
-    _predict_planes(source, output)
-    with pytest.raises(ValueError, match="plane selection"):
-        _predict_planes(source, output, planes_file)
-    # Discriminates: the same plane run into a fresh store, and its own rerun, pass.
-    _predict_planes(source, tmp_path / "slab.zarr", planes_file)
-    _predict_planes(source, tmp_path / "slab.zarr", planes_file)
+    full = tmp_path / "full.zarr"
+    _predict_planes(source, full)
+    with pytest.raises(ValueError, match="other planes"):
+        _predict_planes(source, full, planes_file)
+    slab = tmp_path / "slab.zarr"
+    _predict_planes(source, slab, planes_file, settings="aaaaaaaaaaaa")
+    # The same slab from other weights or settings (e.g. --ckpt best) rewrites every plane it holds.
+    _predict_planes(source, slab, planes_file, settings="bbbbbbbbbbbb")
+    other_planes = tmp_path / "other_planes.json"
+    other_planes.write_text(json.dumps({"positions": {fov: [[2], [6]] for fov in SLAB_PLANES}}))
+    with pytest.raises(ValueError, match="other planes"):
+        _predict_planes(source, slab, other_planes, settings="cccccccccccc")
 
 
 def test_record_z_planes_keeps_other_channels(tmp_path):

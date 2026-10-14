@@ -19,11 +19,13 @@ from numpy.typing import DTypeLike, NDArray
 
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
+    canonical_z_planes,
     checkpoint_signature,
     completion_marker,
     mark_complete,
     mark_started,
     outruns,
+    predicted_z_planes,
     prediction_run,
     record_z_planes,
     same_run,
@@ -300,6 +302,7 @@ class HCSPredictionWriter(BasePredictionWriter):
                 overwritten: list[str] = []
                 mixed: list[str] = []
                 oversized: list[str] = []
+                foreign: list[str] = []
                 channel_orders: set[tuple[str, ...]] = set()
                 for name, pos in positions.items():
                     existing = set(pos.channel_names)
@@ -325,11 +328,9 @@ class HCSPredictionWriter(BasePredictionWriter):
                         overwritten.append(name)
                         if self._outruns_source(pos, name, dm.array_key):
                             oversized.append(name)
-                    # A plane-restricted run rewrites only its planes, so it cannot share its
-                    # own FOVs with another run either (overwrite rewrites in place).
-                    if (name not in run_positions or self._z_planes is not None) and self._cannot_share(
-                        pos, prediction_channel
-                    ):
+                        if self._holds_other_planes(pos, name, prediction_channel):
+                            foreign.append(name)
+                    elif self._cannot_share(pos, prediction_channel):
                         mixed.append(name)
                 if oversized:
                     self.plate.close()
@@ -339,13 +340,20 @@ class HCSPredictionWriter(BasePredictionWriter):
                         "planes would survive every rewrite yet the FOVs would be marked complete. "
                         "Predict into a new output store."
                     )
+                if foreign:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(foreign)} FOVs in '{self.output_store}' hold {prediction_channel} that another run "
+                        f"predicted on other planes (e.g. {foreign[:3]}); a plane-restricted predict rewrites only "
+                        "its own planes, so remove that store (or predict into a new one) first."
+                    )
                 if mixed:
                     self.plate.close()
                     raise ValueError(
-                        f"{len(mixed)} FOVs {'' if self._z_planes is not None else 'outside this run '}already "
-                        f"hold {prediction_channel} in '{self.output_store}' that were predicted before completion "
-                        f"markers existed or with a different checkpoint, settings or plane selection "
-                        f"(e.g. {mixed[:3]}); predict into a new output store instead of mixing them."
+                        f"{len(mixed)} FOVs outside this run already hold {prediction_channel} "
+                        f"in '{self.output_store}' that were predicted before completion markers "
+                        f"existed or with a different checkpoint or settings (e.g. {mixed[:3]}); "
+                        "predict into a new output store instead of mixing them."
                     )
                 if len(channel_orders) > 1:
                     self.plate.close()
@@ -538,8 +546,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         Parameters
         ----------
         position : Position
-            Existing output position outside this run (or, for a plane-restricted
-            run, inside it).
+            Existing output position outside this run.
         channels : list of str
             This run's prediction channels.
 
@@ -555,6 +562,21 @@ class HCSPredictionWriter(BasePredictionWriter):
         return any(
             channel in position.channel_names and not same_run(completed.get(channel), self._run)
             for channel in channels
+        )
+
+    def _holds_other_planes(self, position: Position, name: str, channels: list[str]) -> bool:
+        """Return whether a plane-restricted run would leave another run's planes in ``position``.
+
+        Overwrite rewrites in place and this run writes only its own planes, so a
+        channel another run wrote survives off them unless that run predicted exactly
+        these planes (e.g. the same slab with a new checkpoint). A full-volume run
+        rewrites every plane and never holds any.
+        """
+        if self._z_planes is None or not self._cannot_share(position, channels):
+            return False
+        planes = canonical_z_planes(self._z_planes[name])
+        return any(
+            predicted_z_planes(position, channel) != planes for channel in channels if channel in position.channel_names
         )
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):

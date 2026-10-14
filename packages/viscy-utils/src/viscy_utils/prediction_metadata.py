@@ -13,6 +13,7 @@ __all__ = [
     "PREDICTED_Z_PLANES_KEY",
     "PREDICTION_COMPLETE_KEY",
     "checkpoint_sha256_12",
+    "canonical_z_planes",
     "checkpoint_signature",
     "completion_marker",
     "mark_complete",
@@ -178,8 +179,8 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, memoize: bool = True) -> st
     return digest[:12]
 
 
-def _canonical_planes(per_t: Sequence[Sequence[int]]) -> list[list[int]]:
-    """Sorted, de-duplicated ``int`` planes of each timepoint."""
+def canonical_z_planes(per_t: Sequence[Sequence[int]]) -> list[list[int]]:
+    """Sorted, de-duplicated ``int`` planes of each timepoint, as :func:`record_z_planes` stores them."""
     return [sorted({int(z) for z in planes}) for planes in per_t]
 
 
@@ -196,7 +197,7 @@ def z_planes_sha256_12(z_planes: Mapping[str, Sequence[Sequence[int]]]) -> str:
     str
         First 12 hex digits of the SHA-256 of the canonical JSON.
     """
-    canonical = {name: _canonical_planes(per_t) for name, per_t in z_planes.items()}
+    canonical = {name: canonical_z_planes(per_t) for name, per_t in z_planes.items()}
     return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -429,7 +430,7 @@ def record_z_planes(position: Position, channels: Iterable[str], planes: Sequenc
         if planes is None:
             recorded.pop(channel, None)
         else:
-            recorded[channel] = _canonical_planes(planes)
+            recorded[channel] = canonical_z_planes(planes)
     if recorded:
         position.zattrs[PREDICTED_Z_PLANES_KEY] = recorded
     elif PREDICTED_Z_PLANES_KEY in position.zattrs:
