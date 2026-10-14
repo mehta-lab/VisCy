@@ -149,12 +149,11 @@ pixel_metrics:
   # smooth_otsu = Gaussian smooth -> Otsu -> Gaussian feather; otsu = raw Otsu
   # (Spotlight v1's mask, for comparison). Sigmas are physical (um); null takes the
   # target's default from metrics.FOREGROUND_SIGMAS_UM. On by default with a hard
-  # interior mask (feather_sigma_um: 0): only voxels inside the GT foreground are
-  # scored. Set feather_sigma_um: null for the per-target feathered recipe
-  # (metrics.FOREGROUND_SIGMAS_UM). The recipe (+ FG code version and spacing) is
-  # stamped in metrics_provenance.json, so the first run of an existing save dir
-  # under this default recomputes its final metrics once, as does any later recipe
-  # change; turning it off reuses a cache.
+  # interior mask (feather 0: only voxels inside the GT foreground are scored); a null
+  # feather gives the per-target feathered recipe. The recipe (+ FG code version and
+  # spacing) is stamped in metrics_provenance.json, so the first run of an existing
+  # save dir under this default recomputes its final metrics once, as does any later
+  # recipe change; turning it off reuses a cache.
   foreground:
     enabled: true
     source: smooth_otsu   # smooth_otsu | otsu
