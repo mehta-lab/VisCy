@@ -129,6 +129,13 @@ waves:
           ipsc: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_e76/ipsc/ipsc/prediction.zarr
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_e76/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_e76/ipsc/a549__denv/prediction.zarr
+  # ... and ctrl9's last leg: a549__zikv (predicted on the hold, 2026-10-14). Generate with --wave ctrl9b.
+  ctrl9b:
+    nucleus:
+      - model: fnet3d_vscyto3daug_segaux_e76
+        leaves: [a549__zikv]
+        pred_paths:
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_vscyto3daug_segaux_e76/ipsc/a549__zikv/prediction.zarr
   # Fork control (speedup pilot P3, 2026-10-13): UNeXt2-3D membrane segaux_seed1 forked from the
   # v2_seed1 baseline's epoch=123 checkpoint (seg_aux_weight patched to 0.86), trained to epoch 199,
   # predicted from its best-val epoch=149-step=46800 (full-run segaux_seed1 e164, v2_seed1 e123, v2
