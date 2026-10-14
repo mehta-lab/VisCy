@@ -75,7 +75,7 @@ def test_otsu_source_resolves_no_smoothing_sigma():
     assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.5}
     cfg.pixel_metrics.foreground.smooth_sigma_um = 3.0
     assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.5}
-    cfg.target_name = "lysosomes"
+    cfg.target_name = "golgi"  # a target with no FOREGROUND_SIGMAS_UM entry
     cfg.pixel_metrics.foreground.feather_sigma_um = 0.25
     assert resolve(cfg) == {"source": "otsu", "feather_sigma_um": 0.25}
 
