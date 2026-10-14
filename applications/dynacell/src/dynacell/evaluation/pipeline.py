@@ -1541,6 +1541,7 @@ def evaluate_predictions(
     pred_path = Path(io_config.pred_path)
     gt_path = Path(io_config.gt_path)
     save_dir = Path(config.save.save_dir)
+    focus2d = read_focus2d_config(config)
     save_dir.mkdir(parents=True, exist_ok=True)
 
     needs_segmentation = config.compute_feature_metrics or bool(
@@ -1670,7 +1671,7 @@ def evaluate_predictions(
 
             # A plane-restricted prediction (HCSDataModule.predict_z_planes) holds zeros off
             # its slab; refuse a full-volume eval of it before MicroMS3IM fits on those zeros.
-            if read_focus2d_config(config) is None:
+            if focus2d is None:
                 restricted = [
                     n for n, p in pred_positions if predicted_z_planes(p, io_config.pred_channel_name) is not None
                 ]
@@ -1778,7 +1779,7 @@ def evaluate_predictions(
                 seed = int(OmegaConf.select(config, "microssim.calibration.seed", default=42))
                 cache_reads = bool(OmegaConf.select(config, "microssim.calibration.cache", default=False))
                 focus_planes = None
-                if read_focus2d_config(config) is not None:
+                if focus2d is not None:
 
                     def focus_planes(pos_name: str, pos_gt, target: np.ndarray) -> list[int]:
                         pos_nuclei = nuclei_by_name[pos_name] if nuclei_by_name is not None else None
@@ -1823,7 +1824,7 @@ def evaluate_predictions(
                     side_channels["pred"] = io_config.pred_channel_name
                 # focus2d slabs need the GT nuclei per FOV; the per-FOV path fills the
                 # caches itself, so the batched warm pass is skipped there.
-                if sides_for_precompute and read_focus2d_config(config) is None:
+                if sides_for_precompute and focus2d is None:
                     # In-focus slabs (GT-derived, keyed by pos_name) so the
                     # batched warm pass builds the same slab crops the per-FOV
                     # path expects — else the cache would be poisoned with
