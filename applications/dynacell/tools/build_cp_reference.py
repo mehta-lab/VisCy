@@ -32,12 +32,20 @@ each feature's raw mean and std within the recorded moments' tolerance
 difference is reported as information only, since GPU CP extraction is not
 bit-reproducible (differences around 1e-15).
 
+``--focus2d H`` builds the 2D benchmark's reference instead (``<target>__focus2d_hH``):
+its CP cells are the focus-plane regionprops in each dataset's ``focus2d_hH`` GT cache.
+The datasets and each one's plane recipe (``segmentation.focus_anchor`` and the nuclei
+or phase channel) come from the grouped leaves with ``focus2d.halfwidth: H`` -- the
+condition's override over the leaf's top level, as the eval merges them -- since the
+cache is keyed by that recipe. Plain runs read only the leaves without ``focus2d``.
+
 Run::
 
     uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er --dry-run
     uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er   # registry path
     uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er --out /tmp/er.json
     uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er --verify
+    uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er --focus2d 1
 """
 
 from __future__ import annotations
@@ -73,10 +81,19 @@ _LEAVES_ROOT = Path(__file__).resolve().parents[1] / "configs/benchmarks/virtual
 
 Ref = tuple[str, str]
 
+#: The segmentation settings that place the focus2d plane, merged per dataset from the leaves.
+_FOCUS2D_SEGMENTATION_KEYS = ("focus_anchor", "nuclei_channel_name", "focus_channel_name")
 
-def eval_config_for(target_name: str, ref: Ref) -> DictConfig:
-    """Return the packaged eval defaults resolved for one dataset ref, cache reads mandatory."""
+
+def eval_config_for(target_name: str, ref: Ref, overrides: dict[str, Any] | None = None) -> DictConfig:
+    """Return the packaged eval defaults resolved for one dataset ref, cache reads mandatory.
+
+    ``overrides`` (the focus2d plane recipe from :func:`leaf_dataset_refs`) is merged
+    before the dataset ref resolves, as a grouped eval merges a condition.
+    """
     config = OmegaConf.load(_EVAL_YAML)
+    if overrides:
+        config = OmegaConf.merge(config, overrides)
     config.target_name = target_name
     config.benchmark = {"dataset_ref": {"dataset": ref[0], "target": ref[1]}}
     config.io.require_complete_cache = True
@@ -84,22 +101,45 @@ def eval_config_for(target_name: str, ref: Ref) -> DictConfig:
     return config
 
 
-def leaf_dataset_refs(target_name: str, leaves_root: Path) -> set[Ref]:
+def leaf_dataset_refs(
+    target_name: str, leaves_root: Path, focus2d_halfwidth: int | None = None
+) -> dict[Ref, dict[str, Any]]:
     """Return every ``(dataset, manifest target)`` a grouped leaf of ``target_name`` evaluates on.
+
+    Only leaves of the requested benchmark count: ``focus2d.halfwidth`` absent/null for
+    the 3D one, equal to ``focus2d_halfwidth`` for the 2D one. Each ref maps to the eval
+    overrides that place its focus2d plane (empty for the 3D benchmark).
 
     Raises
     ------
     ValueError
-        If no grouped leaf of the target is found.
+        If no grouped leaf of the target is found, or two focus2d leaves place one
+        dataset's plane differently.
     """
-    refs: set[Ref] = set()
+    refs: dict[Ref, dict[str, Any]] = {}
     for leaf in sorted(leaves_root.glob("*/eval_grouped.yaml")):
         doc = yaml.safe_load(leaf.read_text())
         if doc.get("target_name") != target_name:
             continue
+        leaf_halfwidth = (doc.get("focus2d") or {}).get("halfwidth")
+        if leaf_halfwidth != focus2d_halfwidth:
+            continue
         for cond in doc["conditions"]:
-            ref = cond["benchmark"]["dataset_ref"]
-            refs.add((ref["dataset"], ref["target"]))
+            ref_doc = cond["benchmark"]["dataset_ref"]
+            ref = (ref_doc["dataset"], ref_doc["target"])
+            overrides: dict[str, Any] = {}
+            if focus2d_halfwidth is not None:
+                segmentation = {**(doc.get("segmentation") or {}), **(cond.get("segmentation") or {})}
+                overrides = {
+                    "focus2d": {"halfwidth": focus2d_halfwidth},
+                    "segmentation": {k: segmentation[k] for k in _FOCUS2D_SEGMENTATION_KEYS if k in segmentation},
+                }
+                # The phase_midband estimator params also place the plane (read_focus2d_config).
+                focus = {**(doc.get("focus") or {}), **(cond.get("focus") or {})}
+                if focus:
+                    overrides["focus"] = focus
+            if refs.setdefault(ref, overrides) != overrides:
+                raise ValueError(f"{leaf}: {ref[0]} is placed by {overrides}, another leaf by {refs[ref]}")
     if not refs:
         raise ValueError(f"no grouped leaf under {leaves_root} evaluates target {target_name!r}")
     return refs
@@ -119,7 +159,12 @@ def lite_parent(ref: Ref) -> str | None:
 
 
 def read_dataset_fit(
-    target_name: str, ref: Ref, feature_names: tuple[str, ...], in_mask_fit: bool, parent: str | None = None
+    target_name: str,
+    ref: Ref,
+    feature_names: tuple[str, ...],
+    in_mask_fit: bool,
+    parent: str | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> DatasetFit:
     """Read every finite GT CP cell of one dataset from its cache, read-only, in canonical order.
 
@@ -136,7 +181,7 @@ def read_dataset_fit(
     ValueError
         If a GT position is not a 3-D volume.
     """
-    config = eval_config_for(target_name, ref)
+    config = eval_config_for(target_name, ref, overrides)
     ctx = init_cache_context(config, side="gt")
     check_cp_cache_feature_names(ctx, feature_names)
     cells, read = read_gt_cp_cells(ctx, Path(config.io.gt_path), len(feature_names))
@@ -153,35 +198,42 @@ def read_dataset_fit(
     return DatasetFit(dataset=ref[0], cells=cells, record=record, in_mask_fit=in_mask_fit, parent=parent)
 
 
-def build(target_name: str, leaves_root: Path) -> dict[str, Any]:
+def build(target_name: str, leaves_root: Path, focus2d_halfwidth: int | None = None) -> dict[str, Any]:
     """Read every dataset of the target and return the fitted reference payload.
 
     Raises
     ------
     ValueError
         If the datasets resolve different CP recipes, a lite parent has no scaler,
-        or a lite store holds a position its parent's does not.
+        a lite store holds a position its parent's does not, or (focus2d) a mask-fit
+        dataset has no focus2d leaf to place its plane.
     """
     mask_refs = set(MASK_FIT_DATASETS[target_name])
-    leaf_refs = leaf_dataset_refs(target_name, leaves_root)
-    parents = {ref: lite_parent(ref) for ref in sorted(leaf_refs | mask_refs)}
+    leaf_refs = leaf_dataset_refs(target_name, leaves_root, focus2d_halfwidth)
+    if focus2d_halfwidth is not None and mask_refs - set(leaf_refs):
+        raise ValueError(
+            f"no focus2d_h{focus2d_halfwidth} leaf places the plane of {sorted(mask_refs - set(leaf_refs))}"
+        )
+    parents = {ref: lite_parent(ref) for ref in sorted(set(leaf_refs) | mask_refs)}
     scaler_refs = sorted(ref for ref, parent in parents.items() if parent is None)
     lite_refs = sorted(ref for ref, parent in parents.items() if parent is not None)
     if mask_refs - set(scaler_refs):
         raise ValueError(f"mask-fit datasets {sorted(mask_refs - set(scaler_refs))} are lite")
 
-    identity, names = cp_space(eval_config_for(target_name, scaler_refs[0]))
+    identity, names = cp_space(eval_config_for(target_name, scaler_refs[0], leaf_refs.get(scaler_refs[0])))
     for ref in [*scaler_refs[1:], *lite_refs]:
-        if cp_space(eval_config_for(target_name, ref)) != (identity, names):
+        if cp_space(eval_config_for(target_name, ref, leaf_refs.get(ref))) != (identity, names):
             raise ValueError(f"{ref[0]} resolves a different CP recipe than {scaler_refs[0][0]}")
 
-    fits = [read_dataset_fit(target_name, ref, names, ref in mask_refs) for ref in scaler_refs]
+    fits = [
+        read_dataset_fit(target_name, ref, names, ref in mask_refs, overrides=leaf_refs.get(ref)) for ref in scaler_refs
+    ]
     positions = {fit.dataset: set(fit.record["positions"]) for fit in fits}
     for ref in lite_refs:
         parent = parents[ref]
         if parent not in positions:
             raise ValueError(f"lite {ref[0]} reuses {parent}, which no grouped leaf or mask fit evaluates")
-        lite = read_dataset_fit(target_name, ref, names, False, parent=parent)
+        lite = read_dataset_fit(target_name, ref, names, False, parent=parent, overrides=leaf_refs.get(ref))
         extra = set(lite.record["positions"]) - positions[parent]
         if extra:
             raise ValueError(f"lite {ref[0]} has positions outside its parent {parent}: {sorted(extra)[:5]}")
@@ -189,7 +241,9 @@ def build(target_name: str, leaves_root: Path) -> dict[str, Any]:
     return fit_cp_reference(fits, target_name=target_name, feature_names=names, cp_identity=identity)
 
 
-def verify(target_name: str, path: Path) -> list[str]:
+def verify(
+    target_name: str, path: Path, leaves_root: Path = _LEAVES_ROOT, focus2d_halfwidth: int | None = None
+) -> list[str]:
     """Re-read every dataset's (lite included) GT CP cells from the caches and apply the content gate.
 
     The same gate the eval applies (exact position set and cell count, per-feature GT
@@ -210,9 +264,13 @@ def verify(target_name: str, path: Path) -> list[str]:
         One message per dataset that fails the gate; empty when all pass.
     """
     ref = load_cp_reference(path, target_name=target_name)
+    placements = leaf_dataset_refs(target_name, leaves_root, focus2d_halfwidth) if focus2d_halfwidth is not None else {}
     mismatches = []
     for name, record in sorted({**ref.fit["datasets"], **ref.fit["lite"]}.items()):
-        fit = read_dataset_fit(target_name, (name, record["target"]), ref.feature_names, record["in_mask_fit"])
+        dataset_ref = (name, record["target"])
+        fit = read_dataset_fit(
+            target_name, dataset_ref, ref.feature_names, record["in_mask_fit"], overrides=placements.get(dataset_ref)
+        )
         space = ref.for_dataset(name)
         problems = space.gt_cells_problems(fit.cells)
         if set(fit.record["positions"]) != space.fit_positions:
@@ -257,21 +315,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="read and fit; write nothing")
     parser.add_argument("--force", action="store_true", help="replace an existing reference with a different hash")
     parser.add_argument(
+        "--focus2d",
+        type=int,
+        default=None,
+        metavar="H",
+        help="build the 2D benchmark reference from the focus2d.halfwidth=H leaves and focus2d_hH GT caches",
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="recompute each dataset's GT-matrix sha256 from the caches; exit 1 on mismatch",
     )
     args = parser.parse_args(argv)
 
-    out = args.out if args.out is not None else cp_reference_path(args.target)
+    out = args.out if args.out is not None else cp_reference_path(args.target, focus2d_halfwidth=args.focus2d)
     if args.verify:
-        mismatches = verify(args.target, out)
+        mismatches = verify(args.target, out, args.leaves_root, args.focus2d)
         for line in mismatches:
             print(f"MISMATCH {line}")
         print(f"verify {out}: {'FAILED' if mismatches else 'OK'}")
         return 1 if mismatches else 0
     start = time.perf_counter()
-    payload = build(args.target, args.leaves_root)
+    payload = build(args.target, args.leaves_root, args.focus2d)
     print(_summary(payload))
     elapsed = time.perf_counter() - start
     if args.dry_run:

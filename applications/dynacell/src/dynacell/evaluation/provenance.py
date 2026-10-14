@@ -57,10 +57,10 @@ depend on all three, so a cache scored with another recipe, code or spacing -- o
 without a recipe -- is refused. A run with the columns off needs nothing from the
 stamp and reuses a cache scored with them. With the columns off the key is absent and the payload is unchanged.
 
-Focus-plane semantic masks (``segmentation.semantic_focus_halfwidth``) are stamped
-under ``semantic_focus`` with the plane recipe. Unlike the ``FG_*`` columns they
-replace values rather than add columns, so the gate compares the stamp both ways:
-a whole-volume run refuses a focus-plane cache and vice versa. Off writes no key.
+The 2D benchmark (``focus2d.halfwidth``) is stamped under ``focus2d`` with the plane
+recipe. Unlike the ``FG_*`` columns it replaces values rather than adds columns -- every
+metric moves to the focus plane -- so the gate compares the stamp both ways: a
+full-volume run refuses a focus-plane cache and vice versa. Off writes no key.
 """
 
 import json
@@ -209,7 +209,7 @@ def write_metrics_provenance(
     prediction_digest: str,
     pixel_foreground: dict[str, Any] | None = None,
     compute_fid: bool = False,
-    semantic_focus: dict[str, Any] | None = None,
+    focus2d: dict[str, Any] | None = None,
 ) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
@@ -236,9 +236,9 @@ def write_metrics_provenance(
     compute_fid : bool
         Whether feature FID was requested. When True, record the implementation
         under ``fid_implementation``; False writes no key.
-    semantic_focus : dict or None
-        Focus-plane recipe the semantic masks were scored with, stored under
-        ``semantic_focus``; ``None`` (whole-volume masks) writes no key.
+    focus2d : dict or None
+        2D-benchmark plane recipe the metrics were scored with, stored under
+        ``focus2d``; ``None`` (the full-volume 3D benchmark) writes no key.
 
     Raises
     ------
@@ -257,8 +257,8 @@ def write_metrics_provenance(
         payload["pixel_foreground"] = pixel_foreground
     if compute_fid:
         payload["fid_implementation"] = FID_IMPLEMENTATION_VERSION
-    if semantic_focus is not None:
-        payload["semantic_focus"] = semantic_focus
+    if focus2d is not None:
+        payload["focus2d"] = focus2d
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
@@ -269,7 +269,7 @@ def metrics_provenance_matches(
     prediction_sources: dict[str, dict[str, Any]],
     pixel_foreground: dict[str, Any] | None = None,
     compute_fid: bool = False,
-    semantic_focus: dict[str, Any] | None = None,
+    focus2d: dict[str, Any] | None = None,
 ) -> bool:
     """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference, from this prediction.
 
@@ -312,9 +312,9 @@ def metrics_provenance_matches(
         A missing identity denotes the legacy torch-fidelity implementation;
         unknown explicit identities are refused. False reuses no FID value and
         ignores its solver identity.
-    semantic_focus : dict or None
-        Focus-plane mask recipe the current run would score with, ``None`` for
-        whole-volume masks. Must equal the recorded one (absent = ``None``) in both
+    focus2d : dict or None
+        2D-benchmark plane recipe the current run would score with, ``None`` for the
+        full volume. Must equal the recorded one (absent = ``None``) in both
         directions, since the two modes write different values into the same columns.
 
     Returns
@@ -324,7 +324,7 @@ def metrics_provenance_matches(
         are the declared pin or listed under it in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`),
         if ``cp_space_sha256`` is given the recorded binding equals it, if
         ``pixel_foreground`` is given the recorded recipe equals it, the recorded
-        ``semantic_focus`` equals the current one, and the prediction check above
+        ``focus2d`` equals the current one, and the prediction check above
         passes. When ``compute_fid`` is True the recorded
         FID solver must also be current or measured-equivalent.
     """
@@ -341,7 +341,7 @@ def metrics_provenance_matches(
         return False
     if pixel_foreground is not None and payload.get("pixel_foreground") != pixel_foreground:
         return False
-    if payload.get("semantic_focus") != semantic_focus:
+    if payload.get("focus2d") != focus2d:
         return False
     if compute_fid:
         fid_implementation = payload.get("fid_implementation", _LEGACY_FID_IMPLEMENTATION)

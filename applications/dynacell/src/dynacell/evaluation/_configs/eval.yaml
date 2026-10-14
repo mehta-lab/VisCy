@@ -49,13 +49,6 @@ segmentation:
   focus_slab_halfwidth: 1
   focus_channel_name: Phase3D
   nuclei_channel_name: null  # GT nucleus channel; required for membrane with cpdino (nucleus carve) or cellpose_watershed (seeds)
-  # Semantic targets (ER, mitochondria, ...): null scores the masks over the whole volume
-  # (3D benchmark). An integer h segments the 2h+1 planes centered on the focus plane as
-  # one small volume and scores only the focus plane of the mask; h=1 is the 2D
-  # benchmark's slab3. The plane follows focus_anchor above (nucleus_area also needs
-  # nuclei_channel_name; use phase_midband for GT stores without nuclei, e.g. A549
-  # SEC61B/TOMM20). Not cached, and stamped in metrics_provenance.json.
-  semantic_focus_halfwidth: null
   # Cellpose-DINO (cpdino) params — the recommended instance backend for both nucleus
   # (direct) and whole-cell (membrane + nucleus carve). Faithful to the cpv4 validation:
   # the raw in-focus slice is passed to cellpose with normalize=true (its own percentile
@@ -111,6 +104,22 @@ io:
                         # GT membrane (A549: membrane in CAAX_*.ozx, nuclei in H2B_*.ozx);
                         # positions are matched by name, so the stores must share FOV names.
   require_complete_cache: false  # if true, eval raises on configured cache misses instead of filling
+
+# 2D benchmark. null = the 3D benchmark: every metric over the full volume. An integer h
+# scores each timepoint's in-focus plane instead, chosen from the GT by
+# segmentation.focus_anchor (nucleus_area also needs segmentation.nuclei_channel_name
+# unless the target is nucleus; use phase_midband for GT stores without nuclei, e.g.
+# A549 SEC61B/TOMM20). Pixel metrics, MicroMS3IM and CP features use the plane itself
+# (2D SSIM / Spectral PCC; FRC_Resolution replaces the XY/Z FSC columns); deep features
+# and per-cell similarity use the 2h+1 slab around it (feature_metrics.focus_slab is
+# ignored); semantic masks segment that slab and keep its plane; instance targets need
+# segmentation.dimension=2d, slice_selection=focus, focus_slab_halfwidth=h. h=1 is slab3.
+# A plane-restricted prediction (HCSDataModule.predict_z_planes) must hold the slab, and
+# one is refused without focus2d. GT/pred caches move to <cache_dir>/focus2d_h<h>/, CP
+# uses the <target>__focus2d_h<h> reference, and the recipe is stamped in
+# metrics_provenance.json.
+focus2d:
+  halfwidth: null
 
 # Phase-channel focus-plane estimation, shared by the deep-feature slab
 # (feature_metrics.focus_slab) and instance-seg slice_selection=focus. The plane is

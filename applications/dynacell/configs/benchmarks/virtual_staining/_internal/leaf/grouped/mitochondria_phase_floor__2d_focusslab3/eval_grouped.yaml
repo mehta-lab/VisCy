@@ -14,8 +14,9 @@ io:
 pixel_metrics:
   fsc: null
   spectral_pcc: null
+focus2d:
+  halfwidth: 1
 segmentation:
-  semantic_focus_halfwidth: 1
   focus_anchor: nucleus_area
   nuclei_channel_name: Nuclei
 runtime:

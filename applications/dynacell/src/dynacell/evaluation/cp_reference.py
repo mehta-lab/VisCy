@@ -70,8 +70,9 @@ from dynacell.evaluation.feature_select import (
     DEFAULT_UNIQUE_CUT,
     select_gt_features,
 )
+from dynacell.evaluation.focus import read_focus2d_config
 from dynacell.evaluation.metrics import CP_FEATURE_VERSION, active_cp_feature_names, round_device_dependent_cp_columns
-from dynacell.evaluation.paths import cp_reference_path
+from dynacell.evaluation.paths import cp_reference_focus2d_halfwidth, cp_reference_path
 from dynacell.evaluation.pipeline_cache import cached_cp_feature_names, cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
@@ -171,9 +172,15 @@ def _hashed_fit(fit: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_command(target_name: str) -> str:
-    """Return the command that builds the registry reference for one target."""
-    return f"uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target {target_name}"
+def _build_command(target_name: str, reference_path: str | Path) -> str:
+    """Return the command that builds the registry reference at ``reference_path``.
+
+    A 2D-benchmark reference (``<target>__focus2d_h<h>.json``, named by
+    :func:`~dynacell.evaluation.paths.cp_reference_path`) is built with ``--focus2d <h>``.
+    """
+    command = f"uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target {target_name}"
+    halfwidth = cp_reference_focus2d_halfwidth(reference_path, target_name)
+    return command if halfwidth is None else f"{command} --focus2d {halfwidth}"
 
 
 def cp_space(config: DictConfig) -> tuple[dict[str, Any], tuple[str, ...]]:
@@ -862,7 +869,7 @@ class DatasetCPSpace:
             raise StaleCacheError(
                 f"{self.dataset}: the GT CP cells this eval scores differ from the CP reference fit in "
                 f"{self.reference_path}: {'; '.join(problems[:5])}. The GT CP cache changed since the reference "
-                f"was built; rebuild it:\n  {_build_command(self.target_name)} --force"
+                f"was built; rebuild it:\n  {_build_command(self.target_name, self.reference_path)} --force"
             )
 
 
@@ -894,7 +901,7 @@ class CPReference:
             raise KeyError(
                 f"CP reference {self.path} has no scaler for dataset {dataset!r} "
                 f"(scalers: {sorted(self.scalers)}, lite: {sorted(self.lite)}); rebuild it:\n"
-                f"  {_build_command(self.target_name)}"
+                f"  {_build_command(self.target_name, self.path)}"
             )
         scaler_dataset = self.lite[dataset]["parent"] if is_lite else dataset
         scaler = self.scalers[scaler_dataset]
@@ -970,7 +977,7 @@ def load_cp_reference(path: Path, *, target_name: str) -> CPReference:
         If the stored hash disagrees with the content, or the reference was fit
         for another target or schema.
     """
-    ref = _read_cp_reference(path, build_hint=_build_command(target_name))
+    ref = _read_cp_reference(path, build_hint=_build_command(target_name, path))
     if ref.target_name != target_name:
         raise ValueError(f"CP reference {path} was fit for {ref.target_name!r}, this eval is {target_name!r}")
     return ref
@@ -1059,7 +1066,8 @@ def resolve_cp_reference_path(config: DictConfig) -> Path:
         return Path(override).resolve()
     if config.target_name not in MASK_FIT_DATASETS:
         raise ValueError(f"no CP reference for target {config.target_name!r}; expected {sorted(MASK_FIT_DATASETS)}")
-    return cp_reference_path(config.target_name)
+    focus2d = read_focus2d_config(config)
+    return cp_reference_path(config.target_name, focus2d_halfwidth=None if focus2d is None else focus2d["halfwidth"])
 
 
 def eval_cp_space(config: DictConfig) -> DatasetCPSpace:
@@ -1094,7 +1102,7 @@ def eval_cp_space(config: DictConfig) -> DatasetCPSpace:
             f"CP reference {ref.path} was built for a different CP recipe.\n"
             f"  reference identity: {ref.cp_identity}\n  eval identity:      {identity}\n"
             f"  reference features: {len(ref.feature_names)}; eval features: {len(names)}\n"
-            f"Rebuild it from caches of the current recipe:\n  {_build_command(ref.target_name)}"
+            f"Rebuild it from caches of the current recipe:\n  {_build_command(ref.target_name, ref.path)}"
         )
     dataset = OmegaConf.select(config, "benchmark.dataset_ref.dataset", default=None)
     if dataset is None:
