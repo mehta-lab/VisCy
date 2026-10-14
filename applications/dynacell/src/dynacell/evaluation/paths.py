@@ -1001,6 +1001,17 @@ def cp_reference_path(
     return Path(data_root) / "cp_reference" / f"{target_name}{suffix}.json"
 
 
+def cp_reference_focus2d_halfwidth(path: str | Path, target_name: str) -> int | None:
+    """Inverse of :func:`cp_reference_path`: the ``focus2d`` halfwidth a reference's name encodes.
+
+    ``None`` for the 3D benchmark's ``<target_name>.json`` and for any other name.
+    """
+    stem = Path(path).name.removesuffix(".json")
+    prefix = f"{target_name}__focus2d_h"
+    halfwidth = stem.removeprefix(prefix)
+    return int(halfwidth) if stem.startswith(prefix) and halfwidth.isdigit() else None
+
+
 def metrics_repo_dir(
     organelle: str,
     model: str,

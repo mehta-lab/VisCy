@@ -54,7 +54,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,7 +72,7 @@ from dynacell.evaluation.feature_select import (
 )
 from dynacell.evaluation.focus import read_focus2d_config
 from dynacell.evaluation.metrics import CP_FEATURE_VERSION, active_cp_feature_names, round_device_dependent_cp_columns
-from dynacell.evaluation.paths import cp_reference_path
+from dynacell.evaluation.paths import cp_reference_focus2d_halfwidth, cp_reference_path
 from dynacell.evaluation.pipeline_cache import cached_cp_feature_names, cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
@@ -180,8 +179,8 @@ def _build_command(target_name: str, reference_path: str | Path) -> str:
     :func:`~dynacell.evaluation.paths.cp_reference_path`) is built with ``--focus2d <h>``.
     """
     command = f"uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target {target_name}"
-    focus2d = re.fullmatch(rf"{re.escape(target_name)}__focus2d_h(\d+)\.json", Path(reference_path).name)
-    return command if focus2d is None else f"{command} --focus2d {focus2d.group(1)}"
+    halfwidth = cp_reference_focus2d_halfwidth(reference_path, target_name)
+    return command if halfwidth is None else f"{command} --focus2d {halfwidth}"
 
 
 def cp_space(config: DictConfig) -> tuple[dict[str, Any], tuple[str, ...]]:
