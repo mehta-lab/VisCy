@@ -307,6 +307,10 @@ PAPER_KEY: dict[str, str] = {
     # ... and its nucleus loss-weight sweep: the segaux arm at 0.5x and 2x seg_aux_weight.
     "fnet3d_vscyto3daug_segaux_halfw": "fnet3d_vscyto3daug_segaux_halfw",
     "fnet3d_vscyto3daug_segaux_doublew": "fnet3d_vscyto3daug_segaux_doublew",
+    # SAUNA-weighted Dice on the UNeXt2-3D and pix2pix3d membrane segaux recipes.
+    "fcmae_vscyto3d_scratch_segaux_sauna": "unext2_segaux_sauna",
+    "pix2pix3d_unetvit_segaux_sauna": "pix2pix3d_segaux_sauna",
+    "pix2pix3d_unetvit_segaux_sauna_seed1": "pix2pix3d_segaux_sauna_seed1",
     # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
     # histogram-matched per volume to its segaux arm's (spatial structure kept).
     "fnet3d_paper_histmatch": "fnet3d_histmatch",
@@ -328,6 +332,22 @@ PAPER_KEY: dict[str, str] = {
     # retained epoch=68-step=179400 instead of its best-val epoch=38, closer to the baselines'
     # epoch 62 / 65.
     "fnet3d_vscyto3daug_segaux_cldice_e68": "fnet3d_vscyto3daug_segaux_cldice_e68",
+    # Checkpoint-stage control: the mito vscyto3daug segaux DRAW 2 (segaux_seed1) re-predicted
+    # from latest-epoch=76-step=200000 instead of its best-val epoch=18, closer to the baselines'
+    # epoch 62 / 65 (as draw 1's segaux_e76).
+    "fnet3d_vscyto3daug_segaux_seed1_e76": "fnet3d_vscyto3daug_segaux_seed1_e76",
+    # Training-budget controls (speedup pilot P2): the nucleus vscyto3daug v2 baseline branched
+    # at 38 / 60 / 100% of its 200k-step constant-LR budget and linearly cooled to zero LR,
+    # predicted from each branch's final (cooled) weights.
+    "fnet3d_vscyto3daug_v2_cool38": "fnet3d_vscyto3daug_v2_cool38",
+    "fnet3d_vscyto3daug_v2_cool60": "fnet3d_vscyto3daug_v2_cool60",
+    "fnet3d_vscyto3daug_v2_cool100": "fnet3d_vscyto3daug_v2_cool100",
+    # Fork control (speedup pilot P3): the UNeXt2-3D membrane segaux_seed1 arm forked from the
+    # v2_seed1 baseline's epoch=123 checkpoint instead of trained from scratch.
+    "fcmae_vscyto3d_scratch_segaux_seed1_fork": "unext2_segaux_seed1_fork",
+    # Checkpoint-stage control: the nucleus vscyto3daug segaux_halfw arm re-predicted from
+    # latest-epoch=76-step=200000 instead of its best-val epoch=51, at the e74 stage-control floor.
+    "fnet3d_vscyto3daug_segaux_halfw_e76": "fnet3d_vscyto3daug_segaux_halfw_e76",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
@@ -971,10 +991,14 @@ def pred_cache_dir(
     return Path(data_root) / test_set / subroot / organelle / model / train_set / leaf
 
 
-def cp_reference_path(target_name: str, data_root: str | Path = DATA_ROOT) -> Path:
+def cp_reference_path(
+    target_name: str, data_root: str | Path = DATA_ROOT, *, focus2d_halfwidth: int | None = None
+) -> Path:
     """Return the registry path of a target's CP (GLCM+) reference.
 
-    ``DATA_ROOT/cp_reference/<target_name>.json``. Keyed by the eval
+    ``DATA_ROOT/cp_reference/<target_name>.json``, or
+    ``<target_name>__focus2d_h<h>.json`` for the 2D benchmark, whose CP cells are the
+    focus-plane regionprops of a ``focus2d`` GT cache rather than 3D ones. Keyed by the eval
     ``target_name`` (``mitochondria``, not the grammar's ``mito``), since that is
     what an eval config carries. Lite evals use this same ``DATA_ROOT`` path, never
     ``LITE_DATA_ROOT``: one reference holds the mask and every test set's scaler,
@@ -988,13 +1012,27 @@ def cp_reference_path(target_name: str, data_root: str | Path = DATA_ROOT) -> Pa
         Eval target (``nucleus``/``membrane``/``er``/``mitochondria``).
     data_root : str or pathlib.Path, optional
         Registry root. Defaults to :data:`DATA_ROOT`.
+    focus2d_halfwidth : int or None, optional
+        ``focus2d.halfwidth`` of a 2D-benchmark eval; ``None`` for the 3D benchmark.
 
     Returns
     -------
     pathlib.Path
         The reference JSON path.
     """
-    return Path(data_root) / "cp_reference" / f"{target_name}.json"
+    suffix = "" if focus2d_halfwidth is None else f"__focus2d_h{int(focus2d_halfwidth)}"
+    return Path(data_root) / "cp_reference" / f"{target_name}{suffix}.json"
+
+
+def cp_reference_focus2d_halfwidth(path: str | Path, target_name: str) -> int | None:
+    """Inverse of :func:`cp_reference_path`: the ``focus2d`` halfwidth a reference's name encodes.
+
+    ``None`` for the 3D benchmark's ``<target_name>.json`` and for any other name.
+    """
+    stem = Path(path).name.removesuffix(".json")
+    prefix = f"{target_name}__focus2d_h"
+    halfwidth = stem.removeprefix(prefix)
+    return int(halfwidth) if stem.startswith(prefix) and halfwidth.isdigit() else None
 
 
 def metrics_repo_dir(

@@ -964,6 +964,8 @@ def test_prediction_settings_hash_tracks_only_what_shapes_the_voxels():
     assert (
         variant("data", data_path="/moved.zarr", batch_size=8, num_workers=4, exclude_fov_names=["0/0/1"]) == reference
     )
+    # The plane file's content is hashed into the run identity (z_planes_sha256_12), not its path.
+    assert variant("data", predict_z_planes="/moved/planes.json") == reference
     assert variant("model", num_generate_steps=50) != reference
     assert variant("data", normalizations=[]) != reference
     assert sbj.prediction_settings_sha256_12({**base, "trainer": {"precision": "bf16-mixed"}}) != reference

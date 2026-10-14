@@ -53,10 +53,23 @@ dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
 ```
 
 - **Location:** `configs/benchmarks/virtual_staining/_internal/leaf/grouped/<bucket>/eval_grouped.yaml`.
-- **Generated, mostly:** most buckets are written by `tools/generate_grouped_eval_configs.py`, `tools/generate_spotlight_v2_eval_configs.py` or `tools/generate_lite_benchmark_configs.py`; regenerate those rather than hand-editing them. The HEK, `celldiff_r2` and `fcmae3d_rescore` buckets are hand-written.
+- **Generated, mostly:** most buckets are written by `tools/generate_grouped_eval_configs.py`, `tools/generate_spotlight_v2_eval_configs.py` or `tools/generate_lite_benchmark_configs.py`; regenerate those rather than hand-editing them. The HEK and `celldiff_r2` buckets are hand-written.
 - **Suffixes** mark variants of a bucket, e.g. `__2d`, `__lite`, `__temporal`.
 - **`conditions` entries** may override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, `benchmark.dataset_ref` and `name`. Changing any field that affects model loading or segmentation raises an error.
 - **Always re-scored:** grouped leaves set `force_recompute.final_metrics: true`. To add a condition to a finished bucket without re-scoring the others, pass `force_recompute.final_metrics=false`.
+- **After a re-predict, narrow the parent — do not fork the bucket.** A re-predict does not invalidate the eval caches by itself, so `force_recompute.final_metrics` alone rescores stale masks and embeddings derived from the OLD predictions. Pass every `pred_*` flag and restrict the run to the re-predicted conditions:
+
+  ```bash
+  # from the repository root
+  sbatch applications/dynacell/tools/run_eval_direct.slurm grouped/<parent>/eval_grouped \
+    'only_conditions=[<name>,...]' \
+    force_recompute.pred_masks=true force_recompute.pred_cp=true \
+    force_recompute.pred_dinov3=true force_recompute.pred_dynaclr=true \
+    force_recompute.pred_celldino=true force_recompute.pred_morphem=true \
+    force_recompute.pred_instances=true
+  ```
+
+  The brackets must be single-quoted — `[` and `]` are shell globs. GT-side caches stay warm, since the ground truth did not change. Six `*__fcmae3d_rescore` buckets existed as hand-written forks of their parents for exactly this purpose; they were deleted once `only_conditions` made them redundant, so narrow the parent instead of adding another.
 
 To score only some conditions of a bucket, pass their names: `only_conditions=[<name>,...]`. An unknown name, or a bare name without brackets, raises an error. The cross-condition probe pairs mock with each infected condition of the same model and test set (its probe group), so a subset run keeps those pairs consistent:
 

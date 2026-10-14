@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 from viscy_data._typing import Sample
 from viscy_data._utils import _collate_samples, _ensure_channel_list
 from viscy_data.foreground_masks import ForegroundMaskSupport
-from viscy_data.sliding_window import MaskTestDataset, SlidingWindowDataset
+from viscy_data.sliding_window import MaskTestDataset, SlidingWindowDataset, read_z_planes
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -119,6 +119,12 @@ class HCSDataModule(LightningDataModule):
         ``include_fov_names``. Stored as a ``set`` for O(1) lookup.
         Honored during fit/validate (including mmap staging) and predict.
         Test stage uses all plate positions.
+    predict_z_planes : str or Path or None, optional
+        Plane file (see :func:`viscy_data.sliding_window.read_z_planes`) that
+        restricts predict to the listed Z planes per position and timepoint, e.g.
+        the in-focus slab of a 2D model. Requires ``z_window_size == 1``. The
+        prediction writer allocates the full source shape and records the planes
+        on each position. Default None predicts every plane. Predict only.
     """
 
     def __init__(
@@ -151,6 +157,7 @@ class HCSDataModule(LightningDataModule):
         val_gpu_augmentations: list[MapTransform] | None = None,
         include_fov_names: Iterable[str] | None = None,
         exclude_fov_names: Iterable[str] | None = None,
+        predict_z_planes: str | Path | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -185,6 +192,7 @@ class HCSDataModule(LightningDataModule):
         self.val_augmentations = val_augmentations or []
         self.include_fov_names = set(include_fov_names) if include_fov_names is not None else None
         self.exclude_fov_names = set(exclude_fov_names) if exclude_fov_names is not None else None
+        self.predict_z_planes = Path(predict_z_planes) if predict_z_planes is not None else None
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         if val_gpu_augmentations and self.fg_mask_key is not None:
@@ -670,9 +678,11 @@ class HCSDataModule(LightningDataModule):
         # never reads it, and inference datasets may not have the array.
         dataset_settings.pop("fg_mask_key", None)
         predict_transform = Compose(self.normalizations)
+        z_planes = read_z_planes(self.predict_z_planes) if self.predict_z_planes is not None else None
         self.predict_dataset = SlidingWindowDataset(
             positions=self._positions_maybe_single(),
             transform=predict_transform,
+            z_planes=z_planes,
             **dataset_settings,
         )
 

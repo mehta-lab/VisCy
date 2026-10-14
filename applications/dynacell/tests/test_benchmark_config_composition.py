@@ -1177,15 +1177,17 @@ def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
 # runtimes over Slurm's retention window. Keyed by profile rather than by leaf so
 # a leaf that composes the wrong profile fails loudly here.
 #
-# hardware_h200_single is shared with 40 *fit* leaves, so its 4-day value is not a
-# predict measurement and must not be re-tuned from one. The 41 predict leaves on
-# it are all FCMAE/VSCyto3D variants that complete in under an hour, so the loose
-# cap costs little -- a known gap, recorded rather than silently excluded.
+# hardware_h200_single is a FIT profile -- 48 fit leaves compose it -- and is
+# deliberately ABSENT from this table. The 41 predict leaves that used to inherit it
+# moved to hardware_predict_h200.yml, which carries the same 4-day wall but a
+# measured 16-core / 64G shape. Keeping the fit profile out means a predict leaf
+# pointed at it fails here instead of silently inheriting a wall nobody measured for
+# predict.
 _PREDICT_PROFILE_TIME: dict[str, str] = {
     "hardware_predict_any_gpu.yml": "2-00:00:00",
     "hardware_predict_celldiff.yml": "7-00:00:00",
     "hardware_predict_celldiff_lite.yml": "02:00:00",
-    "hardware_h200_single.yml": "4-00:00:00",
+    "hardware_predict_h200.yml": "4-00:00:00",
 }
 
 
@@ -1293,21 +1295,30 @@ def test_celldiff_lite_leaf_takes_the_fast_overlay(leaf: Path) -> None:
 # all eight sit on hardware_4gpu_long.yml (7 days) instead. Every other 4-GPU
 # leaf finishes inside 4 days; a 7-day 4-GPU H100/H200 allocation backfills far
 # worse, so this list should grow only on evidence.
-_LONG_WALL_TRAIN_LEAVES = frozenset(
-    f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
-    for organelle in ("er", "mito", "nucleus", "membrane")
-    for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
-) | frozenset(
-    # Spotlight-v2 UNeXt2-3D iPSC fits from scratch (fresh v2 baseline + its segaux arm).
-    # Measured on the April iPSC runs of the same 4-GPU recipe, consecutive checkpoint
-    # mtimes within one allocation (2026-04-30): nucleus e96 00:39:27 -> e98 01:38:24
-    # = 2.04 ep/h, e98 -> e111 08:09:59 = 1.99 ep/h; membrane e134 09:21:15 -> e136
-    # 10:21:36 = 1.99 ep/h, e146 15:52:49 -> e147 16:22:49 = 2.00 ep/h. 200 epochs at
-    # ~2.0 ep/h is ~100 h, over the 96 h default. The `_seed1` second draws are the same
-    # recipe with seed_everything: 1, so the same rate applies.
-    f"{organelle}/fcmae_vscyto3d_scratch_{suffix}/ipsc_confocal/train.yml"
-    for organelle in ("nucleus", "membrane")
-    for suffix in ("v2", "segaux", "v2_seed1", "segaux_seed1")
+_LONG_WALL_TRAIN_LEAVES = (
+    frozenset(
+        f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
+        for organelle in ("er", "mito", "nucleus", "membrane")
+        for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
+    )
+    | frozenset(
+        # Spotlight-v2 UNeXt2-3D iPSC fits from scratch (fresh v2 baseline + its segaux arm).
+        # Measured on the April iPSC runs of the same 4-GPU recipe, consecutive checkpoint
+        # mtimes within one allocation (2026-04-30): nucleus e96 00:39:27 -> e98 01:38:24
+        # = 2.04 ep/h, e98 -> e111 08:09:59 = 1.99 ep/h; membrane e134 09:21:15 -> e136
+        # 10:21:36 = 1.99 ep/h, e146 15:52:49 -> e147 16:22:49 = 2.00 ep/h. 200 epochs at
+        # ~2.0 ep/h is ~100 h, over the 96 h default. The `_seed1` second draws are the same
+        # recipe with seed_everything: 1, so the same rate applies.
+        f"{organelle}/fcmae_vscyto3d_scratch_{suffix}/ipsc_confocal/train.yml"
+        for organelle in ("nucleus", "membrane")
+        for suffix in ("v2", "segaux", "v2_seed1", "segaux_seed1")
+    )
+    | frozenset(
+        # The membrane SAUNA arm of the same recipe: its segaux source ran 2.44 ep/h (epoch=125
+        # 2026-09-27 13:44:58 -> epoch=154 2026-09-28 01:38:59), 82 h for 200 epochs, and SAUNA
+        # cost the FNet-3D nucleus fit +7.6%, ~88 h against the 96 h default.
+        {"membrane/fcmae_vscyto3d_scratch_segaux_sauna/ipsc_confocal/train.yml"}
+    )
 )
 _LONG_WALL_TIME = "7-00:00:00"
 _DEFAULT_4GPU_TIME = "4-00:00:00"
@@ -1342,3 +1353,33 @@ def test_only_measured_slow_fits_get_the_long_wall(leaf: Path) -> None:
             f"_LONG_WALL_TRAIN_LEAVES may use the 7-day wall; add one only with a measured "
             f"epochs/h rate showing it cannot finish in 4 days."
         )
+
+
+# Fit-only throughput flags (2026-10-11, speedup RECOMMENDATIONS.md s7). Keyed by the
+# composed architecture, not the leaf path, so a new 3-D FCMAE (not the timm UNeXt2) or
+# FNet3D fit picks them up and the 2-D arms that reuse both nets (in_stack_depth 1) do not.
+_SPEED_FLAGS: dict[str, dict[str, bool]] = {
+    "fcmae": {"benchmark": True},
+    "FNet3D": {"benchmark": True, "channels_last": True},
+}
+
+
+def _expected_speed_flags(cfg: dict) -> dict[str, bool]:
+    """Return the flags a composed fit config must set: its 3-D family's, else none."""
+    init_args = cfg["model"]["init_args"]
+    if init_args.get("architecture") not in _SPEED_FLAGS or init_args["model_config"]["in_stack_depth"] == 1:
+        return {}
+    return _SPEED_FLAGS[init_args["architecture"]]
+
+
+@pytest.mark.parametrize("leaf", _all_train_leaves(), ids=lambda p: str(p.relative_to(BENCHMARKS)))
+def test_3d_fcmae_and_fnet3d_fits_take_the_measured_speed_flags(leaf: Path) -> None:
+    """3-D FCMAE fits set cudnn.benchmark, 3-D FNet3D fits also channels_last, others neither."""
+    cfg = load_composed_config(leaf)
+    expected = _expected_speed_flags(cfg)
+    raw = {
+        "benchmark": cfg["trainer"].get("benchmark"),
+        "channels_last": cfg["model"]["init_args"].get("channels_last"),
+    }
+    composed = {k: v for k, v in raw.items() if v is not None}
+    assert composed == expected, f"{leaf.relative_to(BENCHMARKS)}: composes {composed}, expected {expected}."

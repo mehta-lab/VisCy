@@ -28,6 +28,8 @@ model:
         # — it is read from the store.
     lr: 0.001
     schedule: Constant
+    channels_last: true  # see fnet3d_paper_fit.yml
 trainer:
   precision: 32-true
   max_steps: 200000
+  benchmark: true  # see fnet3d_paper_fit.yml
