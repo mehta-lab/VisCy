@@ -1,0 +1,41 @@
+temporal_forecast:
+  # Raw X is intentional for the first patch-size comparison. Each fold fits
+  # its own feature standardizer, avoiding the differently fitted p160 PCA80 pool.
+  feature_key: X
+  marker: Phase3D
+  datasets:
+    - experiment: 2026_04_21_A549_G3BP1_DENV
+      annotation: /hpc/projects/organelle_phenotyping/datasets/annotations/2026_04_21_G3BP1_DENV/2026_04_21_G3BP1_DENV_combined_annotations.csv
+    - experiment: 2026_04_28_A549_SEC61B_DENV
+      annotation: /hpc/projects/organelle_phenotyping/datasets/annotations/2026_04_28_SEC61B_DENV/2026_04_28_SEC61B_DENV_combined_annotations.csv
+
+  events:
+    - {name: infection, column: infection_state, negative: uninfected, positive: infected}
+    - {name: remodeling, column: organelle_state, negative: noremodel, positive: remodel}
+    - {name: division, column: cell_division_state, negative: interphase, positive: mitosis}
+    - {name: death, column: cell_death_state, negative: alive, positive: dead}
+
+  # The same exact nonblank cell keys are used for p160 and p224.
+  cohort_intersection_paths:
+    - /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_21_A549_G3BP1_DENV/2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800/embeddings/Phase3D.zarr
+    - /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_21_A549_G3BP1_DENV/2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800-p224/embeddings/Phase3D.zarr
+    - /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_28_A549_SEC61B_DENV/2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800/embeddings/Phase3D.zarr
+    - /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_04_28_A549_SEC61B_DENV/2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800-p224/embeddings/Phase3D.zarr
+
+  window_observations: 5
+  require_full_context: true
+  horizons_hours: [1.0, 2.0, 4.0, 8.0]
+  n_folds: 5
+  random_seed: 42
+  models:
+    names: [tcn, rope_transformer]
+    epochs: 15
+    batch_size: 512
+    learning_rate: 0.001
+    tcn_hidden: 64
+    tcn_dilations: [1, 2]
+    dropout: 0.3
+    rope_d_model: 128
+    rope_heads: 4
+    rope_layers: 2
+    rope_ff_multiplier: 2

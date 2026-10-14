@@ -89,6 +89,22 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="temporal-forecast",
+        import_path="dynaclr.evaluation.temporal.forecast.main",
+        short_help="Predict future event onset from causal embedding histories",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="dynaformer",
+        import_path="dynaclr.evaluation.temporal.dynaformer.main",
+        short_help="Train the DynaFormer temporal head on frozen embeddings and evaluate the baseline ladder.",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="compare-models",
         import_path="dynaclr.evaluation.benchmarking.smoothness.compare_models.main",
         short_help="Compare previously saved smoothness results",

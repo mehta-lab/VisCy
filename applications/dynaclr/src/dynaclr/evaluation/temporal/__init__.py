@@ -1,6 +1,10 @@
 """Stable temporal evaluation building blocks."""
 
-from dynaclr.evaluation.temporal.model import CausalTCN, CausalTransformer
+from dynaclr.evaluation.temporal.model import (
+    BidirectionalRoPETransformer,
+    CausalTCN,
+    CausalTransformer,
+)
 from dynaclr.evaluation.temporal.multitask import (
     CompactTCNConfig,
     MultitaskTCNFit,
@@ -14,6 +18,7 @@ from dynaclr.evaluation.temporal.sequences import (
 __all__ = [
     "CausalTCN",
     "CausalTransformer",
+    "BidirectionalRoPETransformer",
     "CausalSequences",
     "CompactTCNConfig",
     "MultitaskTCNFit",
