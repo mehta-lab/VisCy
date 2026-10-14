@@ -45,6 +45,9 @@ aicssegmentation workflows)."""
 
 _CUBIC_WORKFLOWS = {"er": "workflow_sec61b", "mitochondria": "workflow_tomm20"}
 
+#: Every ``target_name`` the evaluator accepts.
+EVAL_TARGETS = ("nucleus", "membrane", "nucleoli", "lysosomes", "er", "mitochondria")
+
 
 def require_cubic_workflows(target_name: str) -> None:
     """Require the cubic workflow used by this target before loading models or data."""
@@ -187,14 +190,7 @@ def prepare_segmentation_model(config):
     ``require_complete_cache`` short-circuit is therefore suppressed for them.
     """
     require_complete = bool(getattr(config.io, "require_complete_cache", False))
-    if config.target_name not in [
-        "nucleus",
-        "membrane",
-        "nucleoli",
-        "lysosomes",
-        "er",
-        "mitochondria",
-    ]:
+    if config.target_name not in EVAL_TARGETS:
         raise ValueError(f"Invalid target_name in config: {config.target_name!r}")
     compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
     if require_complete and not compute_instance_ap:

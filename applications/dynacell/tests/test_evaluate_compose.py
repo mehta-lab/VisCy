@@ -26,7 +26,9 @@ from hydra import compose, initialize_config_module
 from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.pipeline import _merge_condition, _select_conditions
+from dynacell.evaluation.metrics import FOREGROUND_SIGMAS_UM
+from dynacell.evaluation.pipeline import _foreground_settings, _merge_condition, _select_conditions
+from dynacell.evaluation.segmentation import EVAL_TARGETS
 
 from ._eval_fixtures import make_hcs_plate
 
@@ -84,6 +86,20 @@ def _compose_eval_cfg(overrides: list[str], config_name: str = "eval") -> DictCo
     with initialize_config_module(config_module="dynacell.evaluation._configs", version_base="1.2"):
         cfg = compose(config_name=config_name, overrides=[*overrides, _searchpath_override()])
     return cfg
+
+
+@pytest.mark.parametrize("target_name", EVAL_TARGETS)
+def test_default_eval_scores_interior_only_foreground(target_name: str) -> None:
+    """eval.yaml turns the FG_* columns on with a hard GT interior mask, for every accepted target.
+
+    Hand-built test configs omit the block, so only the composed default can pin it.
+    """
+    smooth = FOREGROUND_SIGMAS_UM[target_name]["smooth_sigma_um"]
+    assert _foreground_settings(_compose_eval_cfg([f"target_name={target_name}"])) == {
+        "source": "smooth_otsu",
+        "smooth_sigma_um": smooth,
+        "feather_sigma_um": 0.0,
+    }
 
 
 def test_default_eval_pins_morphem_to_a_hub_commit() -> None:
@@ -359,69 +375,59 @@ _HAND_WRITTEN_BUCKETS = frozenset(
     {
         "_probe",
         "er_a549_trained__2d",
+        "er_a549_trained__2d_focus2d",
         "er_a549_trained__2d_focusslab3",
         "er_a549_trained__temporal",
-        "er_a549_trained__temporal_rescore",
         "er_celldiff_r2_a549trained",
         "er_ipsc_trained__2d",
+        "er_ipsc_trained__2d_focus2d",
         "er_ipsc_trained__2d_focusslab3",
         "er_ipsc_trained__2d_samplematched",
-        "er_ipsc_trained__2d_samplematched_final",
         "er_ipsc_trained__2d_voxelmatched",
-        "er_ipsc_trained__2d_voxelmatched_step200k",
-        "er_ipsc_trained__fnet3d_step8400",
-        "er_ipsc_trained__unext2_final",
         "er_joint__2d",
+        "er_joint__2d_focus2d",
         "er_joint__2d_focusslab3",
+        "er_phase_floor__2d_focus2d",
         "er_phase_floor__2d_focusslab3",
         "membrane_a549_trained__2d",
-        "membrane_a549_trained__a549only",
-        "membrane_a549_trained__ipsconly",
+        "membrane_a549_trained__2d_focus2d",
         "membrane_celldiff_r2_a549trained",
-        "membrane_celldiff_r2_a549trained_later",
         "membrane_hek_a549xy",
         "membrane_hek_a549xy_celldiff",
         "membrane_hek_a549xy_pix2pix",
         "membrane_ipsc_trained__2d",
-        "membrane_ipsc_trained__a549only",
-        "membrane_ipsc_trained__ipsconly",
+        "membrane_ipsc_trained__2d_focus2d",
         "membrane_joint__2d",
-        "membrane_joint__a549only",
-        "membrane_joint__ipsconly",
+        "membrane_joint__2d_focus2d",
+        "membrane_phase_floor__2d_focus2d",
         "mitochondria_a549_trained__2d",
+        "mitochondria_a549_trained__2d_focus2d",
         "mitochondria_a549_trained__2d_focusslab3",
         "mitochondria_celldiff_r2_a549trained",
-        "mitochondria_celldiff_r2_a549trained_later",
         "mitochondria_hek_a549xy",
         "mitochondria_hek_a549xy_celldiff",
         "mitochondria_hek_a549xy_pix2pix",
         "mitochondria_ipsc_trained__2d",
+        "mitochondria_ipsc_trained__2d_focus2d",
         "mitochondria_ipsc_trained__2d_focusslab3",
         "mitochondria_joint__2d",
+        "mitochondria_joint__2d_focus2d",
         "mitochondria_joint__2d_focusslab3",
+        "mitochondria_phase_floor__2d_focus2d",
         "mitochondria_phase_floor__2d_focusslab3",
         "nucleus_a549_trained__2d",
-        "nucleus_a549_trained__a549only",
-        "nucleus_a549_trained__ipsconly",
+        "nucleus_a549_trained__2d_focus2d",
         "nucleus_a549_trained__temporal",
         "nucleus_celldiff_r2_a549trained",
-        "nucleus_celldiff_r2_a549trained_later",
-        "nucleus_celldiff_r2_iterative_a549_rerun",
         "nucleus_ipsc_bf_trained__patchaug",
         "nucleus_ipsc_trained__2d",
+        "nucleus_ipsc_trained__2d_focus2d",
         "nucleus_ipsc_trained__2d_samplematched",
-        "nucleus_ipsc_trained__2d_samplematched_final",
         "nucleus_ipsc_trained__2d_voxelmatched",
-        "nucleus_ipsc_trained__2d_voxelmatched_step200k",
-        "nucleus_ipsc_trained__a549only",
-        "nucleus_ipsc_trained__fnet3d_step11k",
-        "nucleus_ipsc_trained__fnet3d_step11k_ipsc",
-        "nucleus_ipsc_trained__ipsconly",
         "nucleus_ipsc_trained__patchaug",
-        "nucleus_ipsc_trained__unext2_final",
         "nucleus_joint__2d",
-        "nucleus_joint__a549only",
-        "nucleus_joint__ipsconly",
+        "nucleus_joint__2d_focus2d",
+        "nucleus_phase_floor__2d_focus2d",
     }
 )
 
