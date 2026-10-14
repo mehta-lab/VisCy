@@ -292,7 +292,8 @@ FOREGROUND_SIGMAS_UM: dict[str, dict[str, float]] = {
     "er": {"smooth_sigma_um": 1.0, "feather_sigma_um": 0.5},
     "mitochondria": {"smooth_sigma_um": 0.5, "feather_sigma_um": 0.5},
 }
-FOREGROUND_SIGMAS_UM["nucleoli"] = FOREGROUND_SIGMAS_UM["lysosomes"] = FOREGROUND_SIGMAS_UM["mitochondria"]
+FOREGROUND_SIGMAS_UM["nucleoli"] = dict(FOREGROUND_SIGMAS_UM["mitochondria"])
+FOREGROUND_SIGMAS_UM["lysosomes"] = dict(FOREGROUND_SIGMAS_UM["mitochondria"])
 
 # The SSIM window of the whole-image ``SI_SSIM``: skimage's ``gaussian_weights=True``
 # (sigma 1.5, truncate 3.5 -> an 11-voxel window, K1/K2 defaults). ``FG_SI_SSIM``
