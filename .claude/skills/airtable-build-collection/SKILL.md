@@ -32,6 +32,7 @@ Key fields in the Datasets table:
 | `channel_0_marker` .. `channel_N_marker` | Protein marker for each channel |
 | `t_shape`, `c_shape`, `z_shape`, `y_shape`, `x_shape` | Array dimensions |
 | `pixel_size_xy_um`, `pixel_size_z_um` | Physical pixel sizes |
+| `microscope` | Acquisition platform (e.g. `mantis_v1`, `mantis_v2`); derive from pixel size if absent |
 
 ## Usage
 
@@ -155,6 +156,7 @@ experiments:
     moi: <moi or 0.0>
     pixel_size_xy_um: <from airtable>
     pixel_size_z_um: <from airtable>
+    microscope: <from airtable microscope field; else derive: mantis_v1 / mantis_v2>
 ```
 
 Key notes:
@@ -162,6 +164,10 @@ Key notes:
 - `perturbation_wells` uses `uninfected` / `<perturbation>` keys inferred from the `perturbation` field
 - `channels` lists only the channels needed for training (not all channels in the zarr)
 - `marker` at the experiment level is the primary marker for this experiment entry
+- `microscope` labels the acquisition platform — always populate it. Use the Airtable microscope
+  field when present; otherwise derive from acquisition grid: `pixel_size_xy_um == 0.1494` →
+  `mantis_v1`, `0.1133` → `mantis_v2`. Downstream QC (embedding-consistency-qc) partitions
+  datasets by `obs["microscope"]`, so a missing/empty value silently collapses the v1/v2 split.
 
 ### Step 7: Save and Validate
 

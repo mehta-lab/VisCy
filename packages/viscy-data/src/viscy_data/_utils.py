@@ -171,6 +171,24 @@ def _read_norm_meta(fov: Position) -> NormMeta | None:
 read_norm_meta = _read_norm_meta
 
 
+def _resolve_timepoint_norm_meta(norm_meta: NormMeta | None, t: int) -> NormMeta | None:
+    """Select the per-timepoint entry inside any ``timepoint_statistics`` level.
+
+    ``NormalizeSampled(level='timepoint_statistics')`` expects a flat
+    ``{stat_name: Tensor}`` dict. The zattrs layout stores a nested
+    ``{tp_idx: {stat_name: Tensor}}``, so the dataset must pick the
+    current-sample's timepoint before the transform runs.
+    """
+    if norm_meta is None:
+        return None
+    resolved = {}
+    for ch, levels in norm_meta.items():
+        resolved[ch] = {
+            name: values[str(t)] if name == "timepoint_statistics" else values for name, values in levels.items()
+        }
+    return resolved
+
+
 def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
     """Stack per-sample norm_meta dicts into batched tensors.
 
@@ -178,6 +196,10 @@ def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
     ``{channel: {level: {stat: scalar_tensor, ...}, ...}, ...}``.
     Returns the same structure but with ``(B,)`` tensors so that
     ``_match_image`` broadcasts them against ``(B, 1, Z, Y, X)`` patches.
+
+    ``timepoint_statistics`` is pre-resolved to the sample's timepoint by
+    :func:`_resolve_timepoint_norm_meta` before collation, so every level here
+    is already a flat ``{stat: scalar_tensor}`` dict.
     """
     ref = norm_metas[0]
     result: NormMeta = {}

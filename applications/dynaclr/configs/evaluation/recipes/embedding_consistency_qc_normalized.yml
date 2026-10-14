@@ -1,0 +1,14 @@
+# Matrix-evaluation recipe: compare raw X with the globally fitted representation
+# selected by `run-matrix-eval`. No second normalization/PCA pass is applied.
+base:
+  - mmd_defaults.yml
+
+metrics: [pearson]
+save_plots: true
+obs_filter:
+  perturbation: uninfected
+obs_filter_aliases:
+  perturbation: [uninfected, mock]
+pearson_hpi_bin_hours: 2.0
+pearson_normalization: null
+pearson_compare_raw: true

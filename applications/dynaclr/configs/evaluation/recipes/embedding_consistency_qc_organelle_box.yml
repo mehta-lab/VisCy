@@ -1,0 +1,45 @@
+# Embedding-consistency QC — organelle-box cohort, split by microscope (mantis v1/v2).
+# =============================================================================
+# Pools every organelle-box dataset's control-cell embeddings for the DynaCLR
+# single-marker model and reports per-marker dataset x dataset consistency
+# matrices, PARTITIONED by acquisition platform (obs["microscope"]):
+#   - within_mantis_v2/  : the nine 0.1133 um/px (2026) datasets among themselves
+#   - within_mantis_v1/  : the lone 0.1494 um/px dataset (2024_11_07) — skipped
+#                          (degenerate: needs >=2 datasets)
+#   - cross_mantis_v1__mantis_v2/ : v1 vs v2 (only SEC61B is on both platforms) —
+#                          this block IS the cross-platform batch effect LOT corrects.
+#
+# Requires obs["microscope"] on the embeddings (enrich-obs-from-collection from a
+# collection that carries the microscope field). Detects/reports only; LOT corrects.
+#
+# Run:
+#   dynaclr embedding-consistency-qc -c recipes/embedding_consistency_qc_organelle_box.yml
+
+base:
+  - mmd_defaults.yml
+
+# DynaCLR single-marker model, as embedded by the organelle_remodeling matrix.
+model_family: DynaCLR-2D-MIP-BagOfChannels
+run: 2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler
+ckpt_name: epoch105-step84800
+
+output_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/qc_embeddings
+
+# Partition datasets by acquisition platform: within-v1, within-v2, and v1 x v2 cross.
+split_by: microscope
+
+# Start with the cheap, readable mean-only matrix. MMD (full-distribution) and
+# Fréchet (mean+covariance) stay available — add them to this list to compute them.
+metrics: [pearson]
+
+# Time-pool the Pearson matrix: mean per 2 h hours_post_perturbation bin, then
+# average the bin-means. Each HPI bin counts equally, so datasets with different
+# intervals / frame counts can't look like a batch effect purely from time sampling.
+pearson_hpi_bin_hours: 2.0
+
+# Control cells only, so perturbation biology cannot masquerade as a batch effect.
+obs_filter:
+  perturbation: uninfected
+
+# Residual batch effects independent of a global mean offset.
+center_per_experiment: true

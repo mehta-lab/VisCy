@@ -1,8 +1,67 @@
-"""Maximum Mean Discrepancy (MMD) with Gaussian RBF kernel and permutation test."""
+"""Maximum Mean Discrepancy (MMD) with Gaussian RBF kernel and permutation test.
+
+GPU-accelerated via PyTorch: kernel matrices are built on the available device
+(CUDA if present, otherwise CPU). The public API is device-agnostic — inputs and
+outputs are NumPy arrays / Python floats — so callers do not need to manage
+tensors or devices.
+"""
 
 import numpy as np
+import torch
 from numpy.typing import NDArray
-from scipy.spatial.distance import cdist
+
+_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def subsample(X: NDArray, max_n: int | None, rng: np.random.Generator) -> NDArray:
+    """Randomly subsample rows of ``X`` to at most ``max_n`` (no-op if None/small)."""
+    if max_n is None or len(X) <= max_n:
+        return X
+    idx = rng.choice(len(X), max_n, replace=False)
+    return X[idx]
+
+
+def _sq_dists(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    """Pairwise squared Euclidean distances via the (a-b)^2 = a^2 + b^2 - 2ab expansion.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        Shape (n, d).
+    B : torch.Tensor
+        Shape (m, d).
+
+    Returns
+    -------
+    torch.Tensor
+        Squared distances, shape (n, m). Clamped at 0 to absorb the small
+        negative values the expansion can produce from floating-point error.
+    """
+    A2 = (A * A).sum(1, keepdim=True)
+    B2 = (B * B).sum(1, keepdim=True).T
+    return (A2 + B2 - 2.0 * (A @ B.T)).clamp_min_(0.0)
+
+
+def _rbf_kernel(A: torch.Tensor, B: torch.Tensor, bandwidth: float) -> torch.Tensor:
+    """Gaussian RBF kernel matrix on the device of ``A``.
+
+    K(a, b) = exp(-||a - b||^2 / (2 * bandwidth))
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        Shape (n, d).
+    B : torch.Tensor
+        Shape (m, d).
+    bandwidth : float
+        Kernel bandwidth (sigma^2). Must be > 0.
+
+    Returns
+    -------
+    torch.Tensor
+        Kernel matrix, shape (n, m).
+    """
+    return torch.exp(-_sq_dists(A, B) / (2.0 * bandwidth))
 
 
 def median_heuristic(X: NDArray, Y: NDArray, subsample: int = 1000) -> float:
@@ -31,32 +90,12 @@ def median_heuristic(X: NDArray, Y: NDArray, subsample: int = 1000) -> float:
     if len(pool) > subsample:
         idx = rng.choice(len(pool), subsample, replace=False)
         pool = pool[idx]
-    sq_dists = cdist(pool, pool, metric="sqeuclidean")
-    upper = sq_dists[np.triu_indices_from(sq_dists, k=1)]
-    return float(np.median(upper)) + 1e-12
-
-
-def gaussian_rbf_kernel(X: NDArray, Y: NDArray, bandwidth: float) -> NDArray:
-    """Compute Gaussian RBF kernel matrix K(X, Y) in float32.
-
-    K(x, y) = exp(-||x - y||^2 / (2 * bandwidth))
-
-    Parameters
-    ----------
-    X : NDArray
-        Shape (n, d).
-    Y : NDArray
-        Shape (m, d).
-    bandwidth : float
-        Kernel bandwidth (sigma^2). Must be > 0.
-
-    Returns
-    -------
-    NDArray
-        Kernel matrix, shape (n, m), float32.
-    """
-    sq_dists = cdist(X.astype(np.float32), Y.astype(np.float32), metric="sqeuclidean")
-    return np.exp(-sq_dists / (2.0 * bandwidth), dtype=np.float32)
+    device = _DEVICE
+    P = torch.from_numpy(pool).to(device)
+    d2 = _sq_dists(P, P)
+    n = d2.shape[0]
+    mask = torch.triu(torch.ones(n, n, dtype=torch.bool, device=device), diagonal=1)
+    return float(d2[mask].median().item()) + 1e-12
 
 
 def compute_mmd_unbiased(X: NDArray, Y: NDArray, bandwidth: float | None = None) -> float:
@@ -82,15 +121,20 @@ def compute_mmd_unbiased(X: NDArray, Y: NDArray, bandwidth: float | None = None)
     """
     if bandwidth is None:
         bandwidth = median_heuristic(X, Y)
+    device = _DEVICE
+    Xt = torch.from_numpy(np.asarray(X, dtype=np.float32)).to(device)
+    Yt = torch.from_numpy(np.asarray(Y, dtype=np.float32)).to(device)
     n = len(X)
     m = len(Y)
-    K_XX = gaussian_rbf_kernel(X, X, bandwidth)
-    K_YY = gaussian_rbf_kernel(Y, Y, bandwidth)
-    K_XY = gaussian_rbf_kernel(X, Y, bandwidth)
-    np.fill_diagonal(K_XX, 0.0)
-    np.fill_diagonal(K_YY, 0.0)
-    mmd2 = K_XX.sum() / (n * (n - 1)) + K_YY.sum() / (m * (m - 1)) - 2.0 * K_XY.mean()
-    return float(mmd2)
+    K_XX = _rbf_kernel(Xt, Xt, bandwidth)
+    K_YY = _rbf_kernel(Yt, Yt, bandwidth)
+    K_XY = _rbf_kernel(Xt, Yt, bandwidth)
+    K_XX.fill_diagonal_(0.0)
+    K_YY.fill_diagonal_(0.0)
+    # Reduce in float64 so the estimate is symmetric in (X, Y) to machine
+    # precision despite the float32 kernel.
+    mmd2 = K_XX.double().sum() / (n * (n - 1)) + K_YY.double().sum() / (m * (m - 1)) - 2.0 * K_XY.double().mean()
+    return float(mmd2.item())
 
 
 _MMD_PERM_MAX_N = 20_000
@@ -105,14 +149,16 @@ def mmd_permutation_test(
 ) -> tuple[float, float, NDArray]:
     """MMD^2 with vectorized permutation test for significance.
 
-    Precomputes the pooled kernel matrix K_pool once, then all permutations
-    are evaluated via vectorized row/column sums — no repeated cdist calls
-    and no Python loop over individual permutations.
+    Builds the pooled RBF kernel matrix K once on the available device, then
+    evaluates the observed split and all permutations in a single batch of
+    matrix multiplications — no per-permutation Python loop and no repeated
+    distance computations.
 
-    Strategy: for each permutation p, MMD^2 = sum_X/n(n-1) + sum_Y/m(m-1) - 2*mean_XY
-    where sum_X = sum of K_pool[ix,ix] off-diagonal = (K_pool[ix,:] * one_hot_X).sum().
-    We represent each permutation as a binary label vector z in {0,1}^(n+m),
-    then use K_pool @ z and K_pool @ (1-z) to get row sums in O(n_perm * N) ops.
+    Strategy: represent each permutation as a binary label vector z in
+    {0,1}^(n+m) (1 = assigned to X group), then for a batch of P permutations
+    stacked as Z (P, N), the within-X / within-Y / cross kernel sums follow from
+    K @ Z.T and K @ (1 - Z).T. With the kernel diagonal zeroed, this gives the
+    unbiased MMD^2 for every permutation at once in O(P * N^2) GEMM ops.
 
     Parameters
     ----------
@@ -142,58 +188,99 @@ def mmd_permutation_test(
     m = len(Y)
     N = n + m
     # The pooled kernel matrix is (N, N) float32 — quadratic in N. Cap N
-    # explicitly so callers see a clear error rather than an OOM when they
-    # forget to subsample (50k => 10 GB; 100k => 40 GB).
+    # explicitly so callers see a clear error rather than an OOM (host or GPU)
+    # when they forget to subsample (50k => 10 GB; 100k => 40 GB).
     if N > _MMD_PERM_MAX_N:
         raise ValueError(
             f"mmd_permutation_test pooled kernel would be ({N}, {N}) float32 "
             f"≈ {(N * N * 4) / 1e9:.1f} GB. Subsample X and/or Y so that "
             f"len(X) + len(Y) <= {_MMD_PERM_MAX_N}."
         )
+    device = _DEVICE
     pool = np.concatenate([X, Y], axis=0).astype(np.float32)
-    # Compute full pooled kernel matrix once: (N, N) float32
-    K = gaussian_rbf_kernel(pool, pool, bandwidth)
-    np.fill_diagonal(K, 0.0)
+    P = torch.from_numpy(pool).to(device)
+    # Compute full pooled kernel matrix once: (N, N)
+    K = _rbf_kernel(P, P, bandwidth)
+    K.fill_diagonal_(0.0)
 
-    def _mmd2_from_labels(z: NDArray) -> NDArray:
-        """Vectorized MMD^2 for a batch of label vectors.
-
-        Parameters
-        ----------
-        z : NDArray
-            Shape (n_perm, N), float32, 1 = assigned to X group.
-
-        Returns
-        -------
-        NDArray
-            MMD^2 values, shape (n_perm,).
-        """
-        nz = z.sum(axis=1)  # actual n per permutation (n_perm,)
-        mz = N - nz  # actual m per permutation
-        # Row sums of K restricted to X-group and Y-group
-        # K @ z.T -> (N, n_perm), then z @ (K @ z.T) -> (n_perm, n_perm) diagonal = sum_XX
-        KzT = K @ z.T  # (N, n_perm)
-        sum_XX = (z * KzT.T).sum(axis=1)  # (n_perm,) — within-X kernel sums (diagonal zeroed)
-        sum_YY = ((1 - z) * (K @ (1 - z).T).T).sum(axis=1)  # (n_perm,) — within-Y
-        sum_XY = (z * (K @ (1 - z).T).T).sum(axis=1)  # (n_perm,) — cross
-        kxx = sum_XX / (nz * (nz - 1))
-        kyy = sum_YY / (mz * (mz - 1))
-        kxy = sum_XY / (nz * mz)
-        return kxx + kyy - 2.0 * kxy
-
-    # Observed: original split (first n are X)
-    z_obs = np.zeros((1, N), dtype=np.float32)
-    z_obs[0, :n] = 1.0
-    observed = float(_mmd2_from_labels(z_obs)[0])
-
-    # Null: random permutations as binary label vectors
+    # Label matrix: row 0 = observed split (first n are X), rows 1: = random
+    # permutations. Every row has exactly n ones, so group sizes are preserved.
     rng = np.random.default_rng(seed)
-    # Generate all permutation indices at once
-    perms = np.stack([rng.permutation(N) for _ in range(n_permutations)])  # (n_perm, N)
-    z_null = np.zeros((n_permutations, N), dtype=np.float32)
+    perms = np.stack([rng.permutation(N) for _ in range(n_permutations)])  # (P, N)
+    labels = np.zeros((n_permutations + 1, N), dtype=np.float32)
+    labels[0, :n] = 1.0
     row_idx = np.arange(n_permutations)[:, None]
-    z_null[row_idx, perms[:, :n]] = 1.0
+    labels[1:][row_idx, perms[:, :n]] = 1.0
+    z = torch.from_numpy(labels).to(device)  # (P+1, N)
+    one_minus_z = 1.0 - z
 
-    null = _mmd2_from_labels(z_null)
+    # Vectorized kernel sums for every split at once
+    KzX = (K @ z.T).T  # (P+1, N) row sums restricted to X group
+    KzY = (K @ one_minus_z.T).T  # (P+1, N) row sums restricted to Y group
+    sum_XX = (z * KzX).sum(1)  # within-X (diagonal zeroed)
+    sum_YY = (one_minus_z * KzY).sum(1)  # within-Y
+    sum_XY = (z * KzY).sum(1)  # cross
+    mmd2_all = sum_XX / (n * (n - 1)) + sum_YY / (m * (m - 1)) - 2.0 * sum_XY / (n * m)
+    mmd2_all = mmd2_all.cpu().numpy()
+
+    observed = float(mmd2_all[0])
+    null = mmd2_all[1:]
     p_value = float((np.sum(null >= observed) + 1) / (n_permutations + 1))
     return observed, p_value, null
+
+
+def witness_function(
+    query: NDArray,
+    X: NDArray,
+    Y: NDArray,
+    bandwidth: float | None = None,
+    chunk_size: int = 500,
+) -> NDArray:
+    """Evaluate the empirical MMD witness function at query points.
+
+    The witness function is the RKHS direction along which distributions P
+    (sampled by ``X``) and Q (sampled by ``Y``) differ most. Evaluated at a
+    point z with the Gaussian RBF kernel k:
+
+        w(z) = (1/n) sum_i k(z, x_i) - (1/m) sum_j k(z, y_j)
+
+    A positive score means z looks more like X (P); a negative score means it
+    looks more like Y (Q). The squared MMD equals the difference in mean witness
+    score between the two samples, so this is the per-point contribution to the
+    MMD.
+
+    Query points are processed in chunks so the intermediate kernel matrices
+    stay bounded regardless of ``len(query)``.
+
+    Parameters
+    ----------
+    query : NDArray
+        Points at which to evaluate the witness function, shape (q, d).
+    X : NDArray
+        Samples from distribution P, shape (n, d). Positive scores lean toward X.
+    Y : NDArray
+        Samples from distribution Q, shape (m, d). Negative scores lean toward Y.
+    bandwidth : float or None
+        Gaussian RBF bandwidth (sigma^2). None = median heuristic on (X, Y).
+    chunk_size : int
+        Number of query points evaluated per batch.
+
+    Returns
+    -------
+    NDArray
+        Witness scores, shape (q,), float64.
+    """
+    if bandwidth is None:
+        bandwidth = median_heuristic(X, Y)
+    device = _DEVICE
+    Xt = torch.from_numpy(np.asarray(X, dtype=np.float32)).to(device)
+    Yt = torch.from_numpy(np.asarray(Y, dtype=np.float32)).to(device)
+    q = np.asarray(query, dtype=np.float32)
+    scores = np.empty(len(q), dtype=np.float64)
+    for start in range(0, len(q), chunk_size):
+        sl = slice(start, start + chunk_size)
+        Qc = torch.from_numpy(q[sl]).to(device)
+        k_x = _rbf_kernel(Qc, Xt, bandwidth).mean(dim=1)
+        k_y = _rbf_kernel(Qc, Yt, bandwidth).mean(dim=1)
+        scores[sl] = (k_x - k_y).double().cpu().numpy()
+    return scores

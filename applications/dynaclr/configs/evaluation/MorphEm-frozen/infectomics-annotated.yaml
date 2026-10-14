@@ -1,0 +1,36 @@
+# Evaluation config: MorphEm-frozen × infectomics-annotated (Wave 1, baseline).
+#
+# MorphEm-frozen uses the ViT-S/16 DINO weights pretrained on microscopy images
+# (CaicedoLab/MorphEm) — biology-trained but *non-temporal* and *non-DynaCLR*.
+# Tests whether microscopy SSL pretraining alone matches DynaCLR's contrastive
+# recipe. Sibling baseline to CELL-DINO-frozen / DINOv3-frozen.
+#
+# `ckpt_path: null` — MorphEm weights load from HuggingFace in
+# MorphEmModel.__init__ (trust_remote_code; needs network on the GPU node).
+# The eval orchestrator omits `ckpt_path` from the generated predict YAML so
+# Lightning skips checkpoint restoration.
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/MorphEm-frozen/run_infectomics_annotated.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/evaluation/MorphEm-frozen/training_config_morphem_frozen.yaml
+ckpt_path: null
+output_dir: /hpc/projects/organelle_phenotyping/models/MorphEm-frozen/evaluations/infectomics-annotated/
+
+# MorphEm ViT-S/16 is ~44M params; 384-dim cls embeddings (same as DINOv3-S).
+predict:
+  batch_size: 128
+  num_workers: 4
+  precision: 32-true
+  devices: 1
+
+# Publish to its own sub-registry so the LC bundle is identifiable.
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/MorphEm-frozen/infectomics/

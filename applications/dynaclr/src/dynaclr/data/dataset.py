@@ -822,13 +822,12 @@ class MultiExperimentTripletDataset(Dataset):
             channel_names_to_read = exp.channel_names
         channel_indices = [exp.channel_names.index(name) for name in channel_names_to_read]
 
-        # Per-experiment z_range (scale-adjusted window size centered on z_range center)
-        z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
-        z_window_size = z_end_base - z_start_base
-        z_count = round(z_window_size * scale_z)
-        z_focus = (z_start_base + z_end_base) // 2
-        z_start = z_focus - z_count // 2
-        z_end = z_start + z_count
+        # Per-experiment z_range is already resolved in native slice coordinates
+        # by ExperimentRegistry. With a reference Z sampling, different
+        # experiments therefore read different native counts for the same
+        # physical depth and are resampled to a common reference grid below.
+        z_start, z_end = self.index.registry.z_ranges[exp_name]
+        z_window_size = z_end - z_start
         patch = image.oindex[
             t,
             [int(c) for c in channel_indices],
@@ -845,7 +844,7 @@ class MultiExperimentTripletDataset(Dataset):
         # in a mixed-experiment batch rescale to the same Z depth.
         # The random/center crop in on_after_batch_transfer then crops
         # to the final z_window.
-        z_target = self.index.registry.z_extraction_window or z_window_size
+        z_target = self.index.registry.z_extraction_window or self.index.registry.z_window or z_window_size
         target_size = (
             z_target,
             self.index.yx_patch_size[0],

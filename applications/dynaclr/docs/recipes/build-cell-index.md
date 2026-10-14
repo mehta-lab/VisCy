@@ -1,87 +1,62 @@
-# Recipe: Build a Cell Index Parquet
+# Build a training-ready cell index
 
-## Goal
+The cell index is one parquet row per cell, timepoint, and selected channel.
+Build it from a collection, then preprocess it before training.
 
-Pre-build a **cell index parquet** once, then point the training config at it.
-The parquet contains one row per cell observation per timepoint with all
-metadata already computed (lineage, conditions, HPI). Training startup drops
-from minutes (opening every zarr + reading every CSV) to a single
-`read_parquet` call.
+## Inputs
 
-## Prerequisites
+- A collection YAML with valid `data_path`, `tracks_path`, channels, wells, and
+  acquisition timing for every experiment.
+- One tracking CSV under each included FOV:
+  `{tracks_path}/{row}/{column}/{fov}/*.csv`.
+- AI-ready image metadata for the focus and normalization steps; see
+  [AI-ready datasets](../DAGs/ai_ready_datasets.md).
 
-- DynaCLR installed (`uv pip install -e applications/dynaclr`)
-- A collection YAML (see `train-multi-experiment.md` Step 1)
+## Build and preprocess
 
-## Step 1: Build the parquet
+```sh
+uv run dynaclr build-cell-index \
+  applications/dynaclr/configs/collections/<collection>.yml \
+  /path/to/collections/<collection>.parquet \
+  --num-workers 8
 
-```bash
-dynaclr build-cell-index my_collection.yml cell_index.parquet
+uv run dynaclr preprocess-cell-index \
+  /path/to/collections/<collection>.parquet \
+  --focus-channel Phase3D
 ```
 
-You'll see per-experiment progress in the logs:
+`preprocess-cell-index` updates the parquet in place unless `--output` is set.
+It attaches focus and normalization fields and removes empty frames.
 
-```
-INFO: Building cell index for experiment: 2025_01_28_A549_G3BP1_ZIKV_DENV
-INFO: Building cell index for experiment: 2025_07_24_SEC61_TOMM20_G3BP1
-INFO: Cell index built: 42 FOVs across 2 experiments
-```
+To build a subset, repeat either filter as needed:
 
-Optional filters:
-
-```bash
-# Only include specific wells
-dynaclr build-cell-index my_collection.yml cell_index.parquet \
-    --include-wells A/1 --include-wells A/2
-
-# Exclude problematic FOVs
-dynaclr build-cell-index my_collection.yml cell_index.parquet \
-    --exclude-fovs B/1/0
+```sh
+uv run dynaclr build-cell-index collection.yml cells.parquet \
+  --include-wells A/1 \
+  --include-wells B/1 \
+  --exclude-fovs A/1/000003
 ```
 
-## Step 2: Inspect the parquet
+For the recommended Nextflow wrapper, use the
+[training runbook](../DAGs/training.md).
+
+## Validate
 
 ```python
 import pandas as pd
-df = pd.read_parquet("cell_index.parquet")
-print(df["experiment"].value_counts())
-print(df["condition"].value_counts())
-print(df.shape)
+
+df = pd.read_parquet("/path/to/collections/<collection>.parquet")
+print(df.groupby(["experiment", "marker"]).size())
+print(df[["z_focus_mean", "norm_mean", "norm_std"]].notna().all())
 ```
 
-## Step 3: Wire into training config
+Before training, confirm that:
 
-```yaml
-data:
-  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
-  init_args:
-    collection_path: /path/to/my_collection.yml
-    cell_index_path: /path/to/cell_index.parquet  # <-- add this
-    z_window: 30
-    # ... rest of config unchanged
-```
+- every requested experiment and marker is present;
+- `perturbation`, `hours_post_perturbation`, and tracking identifiers are
+  populated;
+- focus and normalization columns are not missing;
+- excluded wells and FOVs are absent.
 
-> **Note:** When `cell_index_path` is provided, `collection_path` is optional.
-> The registry can be built directly from the parquet + zarr metadata via
-> `ExperimentRegistry.from_cell_index()`. If `collection_path` is also
-> provided, it takes precedence.
-
-## How it works
-
-```
-Without parquet (slow — minutes):
-  collection.yml → open every zarr → read every tracking CSV
-               → reconstruct lineage → enrich metadata
-
-With parquet (fast — seconds):
-  cell_index.parquet → read_parquet → open only the unique zarr/FOV pairs needed
-```
-
-## Tips
-
-- **Rebuild when data changes.** If you add experiments, re-track, or change
-  condition assignments, rebuild the parquet.
-- **One parquet per collection.** Train/val filtering happens at runtime based
-  on `val_experiments`, so one parquet covers all splits.
-- **Store it with the collection.** Keep the parquet next to the collection YAML
-  in `configs/cell_index/` for reproducibility. Collection YAMLs live in `configs/collections/`.
+Rebuild after changing the collection, tracking results, channel-to-marker
+mapping, or included wells.

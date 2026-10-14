@@ -1,0 +1,41 @@
+name: organelle-box-2026_04_21_A549_G3BP1_DENV
+description: "Embed-only collection: 2026_04_21 A549 G3BP1 DENV (single-marker organelle box).
+  Channels embedded as bag-of-channels samples: G3BP1 (GFP), viral_sensor (mCherry), Phase3D.
+  Source zarrs are the intracellular_dashboard preprocess outputs (5-assemble data +
+  4-track ultrack labels); no prepared VAST copy exists. Predict uses fov_statistics
+  normalization, so timepoint_statistics is not required. Annotations exist (infection,
+  organelle, cell_division, cell_death)."
+datasets_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "SEARCH(\"2026_04_21_A549_G3BP1_DENV\", {dataset})"
+  created_by: "eduardo.hirata"
+
+experiments:
+  - name: 2026_04_21_A549_G3BP1_DENV
+    data_path: ${datasets_root}/2026_04_21_A549_G3BP1_DENV/1-preprocess/5-assemble/2026_04_21_G3BP1_DENV.zarr
+    tracks_path: ${datasets_root}/2026_04_21_A549_G3BP1_DENV/1-preprocess/4-track/2026_04_21_G3BP1_DENV.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - A/1
+      DENV:
+        - A/2
+        - A/3
+        - B/1
+        - B/2
+        - B/3
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995

@@ -615,11 +615,13 @@ def test_resolve_timepoint_norm_meta_flattens_requested_index():
             },
         },
     }
-    resolved = SlidingWindowDataset._resolve_timepoint_norm_meta(meta, t=1)
+    from viscy_data._utils import _resolve_timepoint_norm_meta
+
+    resolved = _resolve_timepoint_norm_meta(meta, t=1)
     assert resolved["Phase"]["fov_statistics"]["mean"].item() == 0.5
     assert resolved["Phase"]["timepoint_statistics"]["mean"].item() == 1000.0
     assert resolved["Phase"]["timepoint_statistics"]["std"].item() == 100.0
-    assert SlidingWindowDataset._resolve_timepoint_norm_meta(None, t=0) is None
+    assert _resolve_timepoint_norm_meta(None, t=0) is None
 
 
 @fixture(scope="function")

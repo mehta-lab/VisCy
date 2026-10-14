@@ -1,0 +1,38 @@
+name: organelle-box-2026_04_10_A549_TOMM20_ZIKV
+description: "Embed-only collection: 2026_04_10 A549 TOMM20 ZIKV (single-marker organelle box).
+  Channels embedded as bag-of-channels samples: TOMM20 (GFP), viral_sensor (mCherry), Phase3D.
+  Prepared zarr on VAST with timepoint_statistics + focus_slice. No annotations."
+datasets_root: /hpc/projects/organelle_phenotyping/datasets
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "SEARCH(\"2026_04_10_A549_TOMM20_ZIKV\", {dataset})"
+  created_by: "eduardo.hirata"
+
+experiments:
+  - name: 2026_04_10_A549_TOMM20_ZIKV
+    data_path: ${datasets_root}/2026_04_10_A549_TOMM20_ZIKV/2026_04_10_A549_TOMM20_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_04_10_A549_TOMM20_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - A/2
+      ZIKV:
+        - A/3
+        - A/4
+        - B/2
+        - B/3
+        - B/4
+    interval_minutes: 30.0
+    start_hpi: 5.0
+    marker: TOMM20
+    organelle: mitochondria
+    moi: 5.0
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995

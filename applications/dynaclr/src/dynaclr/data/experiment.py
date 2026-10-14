@@ -47,9 +47,11 @@ class ExperimentRegistry:
     collection : Collection
         Validated collection of experiment configurations.
     z_window : int or None
-        Number of Z slices the model consumes (final crop size).
+        Number of reference-grid Z slices the model consumes (final crop size)
+        when ``reference_pixel_size_z_um`` is set; otherwise native slices.
     z_extraction_window : int or None
-        Number of Z slices to extract from zarr (before random crop).
+        Number of reference-grid Z slices to extract before random crop when
+        ``reference_pixel_size_z_um`` is set; otherwise native slices.
         Must be >= ``z_window``. When None, falls back to ``z_window``
         (no random Z crop). When larger than ``z_window``, enables
         random Z cropping during training for focus-plane invariance.
@@ -63,7 +65,9 @@ class ExperimentRegistry:
     reference_pixel_size_xy_um : float or None
         Reference pixel size in XY (micrometers). None = no rescaling.
     reference_pixel_size_z_um : float or None
-        Reference voxel size in Z (micrometers). None = no rescaling.
+        Reference Z sampling (micrometers per slice). When set, Z window sizes
+        are interpreted on this reference grid and native slice counts are
+        adjusted per experiment before resampling. None = no rescaling.
     """
 
     collection: Collection
@@ -99,6 +103,15 @@ class ExperimentRegistry:
 
         # Per-experiment validation + z-range resolution (single zarr open each)
         z_extract = self.z_extraction_window or self.z_window
+        if z_extract is not None and z_extract <= 0:
+            raise ValueError("z_window and z_extraction_window must be positive.")
+        if self.z_window is not None and self.z_extraction_window is not None:
+            if self.z_extraction_window < self.z_window:
+                raise ValueError(
+                    f"z_extraction_window ({self.z_extraction_window}) must be >= z_window ({self.z_window})."
+                )
+        if self.reference_pixel_size_z_um is not None and self.reference_pixel_size_z_um <= 0:
+            raise ValueError("reference_pixel_size_z_um must be positive.")
         z_ranges: dict[str, tuple[int, int]] = {}
 
         for exp in experiments:
@@ -129,13 +142,37 @@ class ExperimentRegistry:
             if z_extract is None:
                 z_ranges[exp.name] = (0, z_total)
             else:
+                native_z_extract = z_extract
+                if self.reference_pixel_size_z_um is not None:
+                    if exp.pixel_size_z_um is None:
+                        raise ValueError(
+                            f"reference_pixel_size_z_um set but experiment '{exp.name}' is missing pixel_size_z_um."
+                        )
+                    if exp.pixel_size_z_um <= 0:
+                        raise ValueError(
+                            f"Experiment '{exp.name}' has non-positive pixel_size_z_um={exp.pixel_size_z_um}."
+                        )
+                    native_z_extract = max(
+                        1,
+                        round(z_extract * self.reference_pixel_size_z_um / exp.pixel_size_z_um),
+                    )
+                if native_z_extract > z_total:
+                    if self.reference_pixel_size_z_um is None:
+                        raise ValueError(
+                            f"Experiment '{exp.name}' has Z={z_total} < z_extraction_window={native_z_extract}."
+                        )
+                    raise ValueError(
+                        f"Experiment '{exp.name}' has Z={z_total}, but the requested "
+                        f"{z_extract}-slice reference window requires {native_z_extract} native slices "
+                        f"at pixel_size_z_um={exp.pixel_size_z_um}."
+                    )
                 focus_ch = self.focus_channel or (exp.channels[0].name if exp.channels else None)
                 ch_focus = focus_data.get(focus_ch, {}) if focus_ch else {}
                 ds_stats = ch_focus.get("dataset_statistics", {})
                 z_focus_mean = ds_stats.get("z_focus_mean")
 
                 z_center = int(round(z_focus_mean)) if z_focus_mean is not None else z_total // 2
-                effective_extract = min(z_extract, z_total)
+                effective_extract = native_z_extract
                 z_below = int(effective_extract * self.z_focus_offset)
                 z_start = max(0, z_center - z_below)
                 z_end = min(z_total, z_start + effective_extract)
@@ -143,16 +180,17 @@ class ExperimentRegistry:
 
                 z_ranges[exp.name] = (z_start, z_end)
                 _logger.info(
-                    "Experiment '%s': z_range=(%d, %d), z_total=%d, z_extraction_window=%d",
+                    "Experiment '%s': native z_range=(%d, %d), z_total=%d, configured_window=%d, native_window=%d",
                     exp.name,
                     z_start,
                     z_end,
                     z_total,
+                    z_extract,
                     effective_extract,
                 )
 
         # Validate extraction windows >= z_window
-        if self.z_window is not None and z_ranges:
+        if self.reference_pixel_size_z_um is None and self.z_window is not None and z_ranges:
             for name, (z_s, z_e) in z_ranges.items():
                 if z_e - z_s < self.z_window:
                     raise ValueError(
@@ -164,13 +202,23 @@ class ExperimentRegistry:
 
         # Validate pixel sizes and compute scale factors
         if self.reference_pixel_size_xy_um is not None:
+            if self.reference_pixel_size_xy_um <= 0:
+                raise ValueError("reference_pixel_size_xy_um must be positive.")
             missing = [e.name for e in experiments if e.pixel_size_xy_um is None]
             if missing:
                 raise ValueError(f"reference_pixel_size_xy_um set but experiments missing pixel_size_xy_um: {missing}")
+            non_positive = [e.name for e in experiments if e.pixel_size_xy_um is not None and e.pixel_size_xy_um <= 0]
+            if non_positive:
+                raise ValueError(f"Experiments have non-positive pixel_size_xy_um: {non_positive}")
         if self.reference_pixel_size_z_um is not None:
+            if self.reference_pixel_size_z_um <= 0:
+                raise ValueError("reference_pixel_size_z_um must be positive.")
             missing = [e.name for e in experiments if e.pixel_size_z_um is None]
             if missing:
                 raise ValueError(f"reference_pixel_size_z_um set but experiments missing pixel_size_z_um: {missing}")
+            non_positive = [e.name for e in experiments if e.pixel_size_z_um is not None and e.pixel_size_z_um <= 0]
+            if non_positive:
+                raise ValueError(f"Experiments have non-positive pixel_size_z_um: {non_positive}")
         self.scale_factors = self._compute_scale_factors()
 
     @property
@@ -318,12 +366,14 @@ class ExperimentRegistry:
         # so we open one FOV directly (store_path/well/fov) instead of
         # iterating all positions.
         channel_names_cache: dict[str, list[str]] = {}
+        pixel_sizes_cache: dict[str, tuple[float, float]] = {}
 
         for store_path, group in df.groupby("store_path"):
             first = group.iloc[0]
             fov_path = f"{store_path}/{first['well']}/{first['fov']}"
             with open_ome_zarr(fov_path, mode="r") as pos:
                 channel_names_cache[str(store_path)] = list(pos.channel_names)
+                pixel_sizes_cache[str(store_path)] = (float(pos.scale[-1]), float(pos.scale[-3]))
 
         # Step 2: Derive per-experiment channels from flat (marker, channel_name) columns.
         exp_channels: dict[str, list[ChannelEntry]] = defaultdict(list)
@@ -376,12 +426,16 @@ class ExperimentRegistry:
                 ps = exp_group["pixel_size_xy_um"].dropna()
                 if not ps.empty:
                     pixel_size_xy_um = float(ps.iloc[0])
+            if pixel_size_xy_um is None:
+                pixel_size_xy_um = pixel_sizes_cache[store_path][0]
 
             pixel_size_z_um = None
             if "pixel_size_z_um" in exp_group.columns:
                 ps = exp_group["pixel_size_z_um"].dropna()
                 if not ps.empty:
                     pixel_size_z_um = float(ps.iloc[0])
+            if pixel_size_z_um is None:
+                pixel_size_z_um = pixel_sizes_cache[store_path][1]
 
             experiments.append(
                 ExperimentEntry(

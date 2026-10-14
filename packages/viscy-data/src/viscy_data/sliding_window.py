@@ -12,7 +12,12 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from viscy_data._typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
-from viscy_data._utils import _ensure_channel_list, _read_norm_meta, _search_int_in_str
+from viscy_data._utils import (
+    _ensure_channel_list,
+    _read_norm_meta,
+    _resolve_timepoint_norm_meta,
+    _search_int_in_str,
+)
 from viscy_data.foreground_masks import ForegroundMaskSupport
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -145,24 +150,6 @@ class SlidingWindowDataset(Dataset):
         tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
         return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)
 
-    @staticmethod
-    def _resolve_timepoint_norm_meta(norm_meta: NormMeta | None, t: int) -> NormMeta | None:
-        """Select the per-timepoint entry inside any ``timepoint_statistics`` level.
-
-        ``NormalizeSampled(level='timepoint_statistics')`` expects a flat
-        ``{stat_name: Tensor}`` dict. The zattrs layout stores a nested
-        ``{tp_idx: {stat_name: Tensor}}``, so the dataset must pick the
-        current-sample's timepoint before the transform runs.
-        """
-        if norm_meta is None:
-            return None
-        resolved = {}
-        for ch, levels in norm_meta.items():
-            resolved[ch] = {
-                name: values[str(t)] if name == "timepoint_statistics" else values for name, values in levels.items()
-            }
-        return resolved
-
     def _read_img_window(
         self,
         img: ImageArray,
@@ -267,7 +254,7 @@ class SlidingWindowDataset(Dataset):
             # spatial transform co-alignment. This does not copy the tensor.
             sample_images["weight"] = sample_images[self.channels["target"][0]]
         if norm_meta is not None:
-            norm_meta = self._resolve_timepoint_norm_meta(norm_meta, sample_index[1])
+            norm_meta = _resolve_timepoint_norm_meta(norm_meta, sample_index[1])
             sample_images["norm_meta"] = norm_meta
         if self.transform:
             sample_images = self.transform(sample_images)
