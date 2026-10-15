@@ -82,9 +82,52 @@ def test_sparse_track_labels_verified_from_centroids_not_encoded_id():
     swapped[["y", "x"]] = swapped[["y", "x"]].iloc[::-1].to_numpy()
     with pytest.raises(FrameSkip, match="unverified"):
         resolve_track_labels(nuclei, swapped)
-    nuclei[1, 1] = 777
+    nuclei[1, 1] = 777  # an untracked footprint no longer rejects the frame
+    assert resolve_track_labels(nuclei, track_rows()).nucleus_label.tolist() == [9, 44]
+
+
+def test_untracked_nuclear_footprint_resolves_and_counts_in_cell():
+    cells, nuclei = masks()
+    nuclei[11:13, 14:16] = 5  # labeled nucleus without a track row
+    verified = resolve_track_labels(nuclei, track_rows())
+    assert verified.nucleus_status.tolist() == ["verified", "verified"]
+    assert verified.centroid_in_footprint.tolist() == [True, True]
+    mapped = map_nuclei_to_cells(cells, nuclei, verified)
+    assert mapped.nuclei_in_cell.tolist() == [2, 2]
+    assert mapped.nuclear_footprints_in_cell.tolist() == [3, 3]
+    assert not cytoplasm_labels(cells, nuclei)[nuclei == 5].any()
+    half = cells.copy()
+    half[11, 14:16] = 0  # exactly half of the untracked footprint is not a strict majority
+    assert map_nuclei_to_cells(half, nuclei, verified).nuclear_footprints_in_cell.tolist() == [2, 2]
+    outside = cells.copy()
+    outside[8:10, 10:12] = 0  # track 44 has no cell
+    mapped = map_nuclei_to_cells(outside, nuclei, verified)
+    assert mapped.assignment_status.tolist() == ["matched", "unmatched"]
+    assert mapped.nuclear_footprints_in_cell.tolist() == [2, 0]
+
+
+def test_concave_centroid_on_background_stays_verified():
+    _, nuclei = masks()
+    nuclei[8:11, 10:13] = 44
+    nuclei[9, 11] = 0  # ring footprint whose centroid is background
+    rows = track_rows()
+    rows.loc[1, ["y", "x"]] = [9.0, 11.0]
+    verified = resolve_track_labels(nuclei, rows)
+    assert verified.nucleus_label.tolist() == [9, 44]
+    assert verified.nucleus_status.tolist() == ["verified", "verified"]
+    assert verified.centroid_in_footprint.tolist() == [True, False]
+    rows.loc[0, ["y", "x"]] = [0.0, 0.0]  # no centroid lands on its own label
     with pytest.raises(FrameSkip, match="unverified"):
-        resolve_track_labels(nuclei, track_rows())
+        resolve_track_labels(nuclei, rows)
+
+
+def test_centroid_on_another_label_rejects_encoding():
+    _, nuclei = masks()
+    nuclei[11:13, 14:16] = 5
+    rows = track_rows()
+    rows.loc[1, ["y", "x"]] = [11.0, 14.0]  # track 44 lands on untracked label 5
+    with pytest.raises(FrameSkip, match="track_label_encoding_unverified"):
+        resolve_track_labels(nuclei, rows)
 
 
 def test_detection_modulo_only_when_time_prefix_verified():
@@ -250,6 +293,7 @@ def dataset(tmp_path):
     )
     labeldata = np.zeros((4, 1, 1, 16, 20), np.uint32)
     labeldata[1:3, 0, 0] = nuclei
+    labeldata[1:3, 0, 0, 11:13, 14:16] = 5  # untracked nucleus inside the cell
     _write_position(tracking / fov, labeldata, ["nuclei_prediction_labels"], scale_t=1)
     tracks = pd.concat([track_rows(t) for t in range(4)], ignore_index=True)
     tracks.to_csv(tracking / fov / "tracks.csv", index=False)
@@ -342,6 +386,11 @@ def test_staged_pipeline_completion_resume_skip_status_and_provenance(dataset):
 
     labels = zarr.open_group(str(output / "segmentations.ome.zarr"), mode="r")["A/1/0000/0"]
     np.testing.assert_array_equal(labels[1, 0, 0], cells)
+    cytoplasm = zarr.open_group(str(output / "segmentations.ome.zarr"), mode="r")["A/1/0000/labels/cytoplasm/0"]
+    assert cytoplasm[1:3, 0, 0].any() and not cytoplasm[1:3, 0, 0, 11:13, 14:16].any()
+    membership = pd.read_parquet(output / "membership.parquet").sort_values(["t", "track_id"])
+    assert membership.nuclei_in_cell.tolist() == [0, 0, 2, 2, 2, 2, 0, 0]
+    assert membership.nuclear_footprints_in_cell.tolist() == [0, 0, 3, 3, 3, 3, 0, 0]
     assert (output / "provenance/source/pipeline.py").exists()
     assert run_pipeline(config, resume=True, segmenter_factory=FakeSegmenter)["full_dataset_complete"]
     assert FakeSegmenter.calls == 2

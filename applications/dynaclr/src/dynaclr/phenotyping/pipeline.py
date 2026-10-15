@@ -185,6 +185,7 @@ def _skipped_observations(config, fov, rows, reason):
     membership["assignment_status"] = "missing"
     membership["frame_skip_reason"] = reason
     membership["nuclei_in_cell"] = 0
+    membership["nuclear_footprints_in_cell"] = 0
     obs = observation_measurements(membership, pd.DataFrame(), pd.DataFrame(), channels_for_fov(config, fov))
     return membership, obs
 

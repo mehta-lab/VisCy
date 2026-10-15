@@ -70,11 +70,16 @@ def resolve_track_labels(
 ) -> pd.DataFrame:
     """Choose label encoding with pixel evidence, never just matching integer sets.
 
-    Require every existing expected footprint to contain its rounded CSV centroid.
-    Absent labels are retained as missing observations. Multiple encodings that
-    produce the exact same row labels are equivalent; differing valid encodings
-    are rejected. A concave footprint whose centroid falls outside is skipped for
-    review rather than silently assigned to a nearby object.
+    A candidate encoding is valid when its labels are positive and unique, at
+    least one row's rounded CSV centroid lands on its own label, and no row's
+    centroid lands on a different nonzero label; in particular a row whose label
+    is absent from the frame must have a background centroid. Absent labels are
+    retained as missing observations. A row whose label exists but whose centroid
+    is background (concave footprint) stays ``verified`` with
+    ``centroid_in_footprint`` False. Labeled nuclei without a track row are
+    allowed; they stay in the nuclear label image. Multiple encodings that produce
+    the exact same row labels are equivalent; differing valid encodings are
+    rejected.
     """
     result = tracks.copy()
     if result.empty:
@@ -83,6 +88,7 @@ def resolve_track_labels(
         result["nucleus_label"] = pd.Series(dtype="int64")
         result["label_encoding"] = pd.Series(dtype="str")
         result["nucleus_status"] = pd.Series(dtype="str")
+        result["centroid_in_footprint"] = pd.Series(dtype="bool")
         return result
     present = np.unique(nuclei)
     present = present[present > 0]
@@ -103,17 +109,16 @@ def resolve_track_labels(
         candidates = {key: value for key, value in candidates.items() if key == mode}
     valid: list[tuple[str, np.ndarray]] = []
     for name, labels in candidates.items():
-        exists = np.isin(labels, present)
         if np.any(labels <= 0) or len(np.unique(labels)) != len(labels):
             continue
-        if not set(present).issubset(set(labels)):
-            continue  # must account for every nuclear footprint
-        if len(present) and np.all(observed[exists] == labels[exists]) and np.all(observed[~exists] == 0):
+        hits = observed == labels
+        if hits.any() and np.all(hits | (observed == 0)):
             valid.append((name, labels))
     if not len(present):
         result["nucleus_label"] = pd.array([pd.NA] * len(result), dtype="Int64")
         result["label_encoding"] = "unverified_empty_mask"
         result["nucleus_status"] = "missing_nuclear_footprint"
+        result["centroid_in_footprint"] = False
         return result
     if not valid:
         raise FrameSkip("track_label_encoding_unverified")
@@ -123,11 +128,16 @@ def resolve_track_labels(
     result["nucleus_label"] = labels
     result["label_encoding"] = name
     result["nucleus_status"] = np.where(np.isin(labels, present), "verified", "missing_nuclear_footprint")
+    result["centroid_in_footprint"] = observed == labels
     return result
 
 
 def map_nuclei_to_cells(cells: np.ndarray, nuclei: np.ndarray, tracks: pd.DataFrame) -> pd.DataFrame:
-    """Assign each verified nuclear footprint to a cell with strict majority overlap."""
+    """Assign each verified nuclear footprint to a cell with strict majority overlap.
+
+    ``nuclei_in_cell`` counts matched track rows per cell. ``nuclear_footprints_in_cell``
+    counts every nuclear label, tracked or not, whose strict majority lies in the row's cell.
+    """
     if cells.shape != nuclei.shape:
         raise FrameSkip("nuclear_cell_shape_mismatch")
     records = []
@@ -172,6 +182,12 @@ def map_nuclei_to_cells(cells: np.ndarray, nuclei: np.ndarray, tracks: pd.DataFr
     result["cell_id"] = pd.array(result["cell_id"], dtype="Int64")
     counts = result.loc[result.assignment_status == "matched", "cell_id"].value_counts()
     result["nuclei_in_cell"] = result.cell_id.map(counts).fillna(0).astype(int)
+    inside = nuclei > 0
+    ids, areas = np.unique(nuclei[inside], return_counts=True)
+    pairs, overlap = np.unique(np.stack([nuclei[inside], cells[inside]], axis=1), axis=0, return_counts=True)
+    owned = (pairs[:, 1] > 0) & (2 * overlap > areas[np.searchsorted(ids, pairs[:, 0])])
+    footprints = pd.Series(pairs[owned, 1].astype(np.int64)).value_counts()
+    result["nuclear_footprints_in_cell"] = result.cell_id.map(footprints).fillna(0).astype(int)
     return result
 
 
