@@ -311,6 +311,8 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_scratch_segaux_sauna": "unext2_segaux_sauna",
     "pix2pix3d_unetvit_segaux_sauna": "pix2pix3d_segaux_sauna",
     "pix2pix3d_unetvit_segaux_sauna_seed1": "pix2pix3d_segaux_sauna_seed1",
+    # B3b: the UNeXt2-3D membrane segaux recipe on a thin-wall (cpdino outer-outline) Dice target.
+    "fcmae_vscyto3d_scratch_segaux_cpout": "unext2_segaux_cpout",
     # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
     # histogram-matched per volume to its segaux arm's (spatial structure kept).
     "fnet3d_paper_histmatch": "fnet3d_histmatch",

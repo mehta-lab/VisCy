@@ -32,7 +32,7 @@ Arms (``<baseline>_<suffix>``):
   ``fnet3d_vscyto3daug`` (Phase 15 Arm B; nucleus, then ER and mito for the topology
   arms below): vanilla FNet fails out of domain, so the FNet verdict on A549 rests on
   this recipe, retrained on today's code.
-- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1,segaux_sauna}`` compose
+- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1,segaux_sauna,segaux_cpout}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
   allocation each): nucleus e96 00:39:27 -> e98 01:38:24 (2.04 ep/h), e98 ->
@@ -64,6 +64,13 @@ Arms (``<baseline>_<suffix>``):
   own calibrated ``seg_aux_weight``, since the change rescales the term's gradient. The ER
   and mito arms (and their ``segaux`` arm) train on masks from the eval's classical
   binarizer, written by ``write_classical_fg_masks.py``.
+- ``segaux_cpout`` -- B3b on the UNeXt2-3D membrane arm: the ``segaux`` recipe with a
+  thin-wall Dice target (``fg_mask_key: fg_mask_cpout``). The mask lives in a derived
+  training store (:data:`CPOUT_TRAIN_STORE`) that mirrors the iPSC ``cell.zarr`` (same
+  positions, image arrays symlinked) plus the new array, so the fit leaf disables the
+  manifest resolver (``dataset_ref: null``) and declares ``data_path`` and both channels
+  inline, as the 2D focus-slab leaves do. Its predict leaves are the baseline's test sets.
+  It carries its own calibrated ``seg_aux_weight``.
 - ``bglp`` / ``bgflat`` -- Track H on ``celldiff_2d`` nucleus/membrane: data gains
   ``fg_mask_key: fg_mask`` and the model ``target_bg_lowpass: BackgroundLowPass`` with the
   arm's ``BG_TARGET_ARGS``, a training-only target transform that keeps the target inside
@@ -114,7 +121,8 @@ SEG_AUX_T0 = 0.7
 # physical voxel size (read from the train set's manifest); segaux_cldice mixes in soft-clDice.
 # Each is calibrated on its own, like any other arm (SEG_AUX_WEIGHTS).
 _IPSC_MANIFEST = Path(__file__).resolve().parents[1] / "src/dynacell/_manifests/aics-hipsc/manifest.yaml"
-_IPSC_SPACING = [yaml.safe_load(_IPSC_MANIFEST.read_text())["spacing"][k] for k in "zyx"]
+_IPSC_MANIFEST_DATA = yaml.safe_load(_IPSC_MANIFEST.read_text())
+_IPSC_SPACING = [_IPSC_MANIFEST_DATA["spacing"][k] for k in "zyx"]
 TOPOLOGY_ARGS: dict[str, dict[str, Any]] = {
     "segaux_sauna": {"weighting": "sauna", "spacing": _IPSC_SPACING},
     # 5 skeleton iterations (the official default is 10): ER/mito tubules are ~1-3 voxels in radius,
@@ -173,7 +181,19 @@ SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
     # results/membrane__{fcmae_vscyto3d_scratch,pix2pix3d_unetvit}__variants.csv.
     ("membrane", "fcmae_vscyto3d_scratch_segaux_sauna"): 0.75,
     ("membrane", "pix2pix3d_unetvit_segaux_sauna"): 2.9,
+    # segaux_cpout (B3b, 2026-10-14): the thin mask changes the Dice term's gradient scale, so it is
+    # calibrated on its own, on the same ckpt from the derived store (b3b_cpout/calib/), where the
+    # canonical fg_mask reproduces 0.8609 [0.468-2.214]: fg_mask_cpout 0.5533 [0.397-0.886].
+    ("membrane", "fcmae_vscyto3d_scratch_segaux_cpout"): 0.55,
 }
+# Data mask key per arm suffix; every other fg-mask arm reads ``fg_mask``.
+FG_MASK_KEYS: dict[str, str] = {"segaux_cpout": "fg_mask_cpout"}
+# segaux_cpout's derived training store: the iPSC dataset_v4 train cell.zarr's positions, image
+# arrays symlinked, plus fg_mask_cpout (experiments/2026-09-24_spotlight-v2/b3b_cpout/).
+CPOUT_TRAIN_STORE = "/hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_b3b/ipsc/train/cell_cpout.zarr"
+# Segaux-family arms that carry their own calibrated seg_aux_weight rather than the segaux arm's.
+_OWN_WEIGHT_SUFFIXES: tuple[str, ...] = (*TOPOLOGY_ARGS, "segaux_cpout")
+_SEGAUX_FAMILY: tuple[str, ...] = ("segaux", "segauxself", *_OWN_WEIGHT_SUFFIXES)
 # C-joint's mask Dice has no baseline to calibrate against (the baseline has no
 # mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
 MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
@@ -196,8 +216,14 @@ JOINTSTEPS_MAX_EPOCHS = 320
 # The SAUNA arm keeps its segaux source's wall: the membrane segaux fit ran 2.44 ep/h (epoch=125
 # 2026-09-27 13:44:58 -> epoch=154 2026-09-28 01:38:59), 82 h for 200 epochs, and SAUNA cost the
 # FNet-3D nucleus fit +7.6% (2-12:01:34 vs 2-07:46:14), ~88 h against the 96 h default.
+# The cpout arm is the same segaux recipe on another mask, so the same 2.44 ep/h (82 h) applies.
 LONG_WALL_MODELS: frozenset[str] = frozenset(
-    {"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux", "fcmae_vscyto3d_scratch_segaux_sauna"}
+    {
+        "fcmae_vscyto3d_scratch_v2",
+        "fcmae_vscyto3d_scratch_segaux",
+        "fcmae_vscyto3d_scratch_segaux_sauna",
+        "fcmae_vscyto3d_scratch_segaux_cpout",
+    }
 )
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
@@ -369,6 +395,8 @@ ARMS: tuple[Arm, ...] = (
     # Second SAUNA draw on pix2pix3d membrane (2026-10-13): draw 1 passed B1 with an A549 FG_PCC gain
     # over both baselines and both segaux draws, which rule R3 does not decide on one draw.
     Arm("pix2pix3d_unetvit", "segaux_sauna_seed1", ("membrane",), a549=True),
+    # B3b (2026-10-14): UNeXt2-3D membrane segaux on a thin-wall Dice target.
+    Arm("fcmae_vscyto3d_scratch", "segaux_cpout", ("membrane",), a549=True),
     # Track H: CellDiff-2D trained on a background-low-passed target (H1; launched as H2).
     *(Arm("celldiff_2d", s, ORGANELLES, a549=True) for s in BG_TARGET_ARGS),
 )
@@ -403,6 +431,10 @@ _DESCRIPTION: dict[str, str] = {
     "segaux_sauna": "the segaux arm's recipe + SegAuxDice weighting=sauna (Dice sums weighted by |SAUNA h map| "
     "of the patch mask, iPSC voxel size) at its own calibrated seg_aux_weight",
     "segaux_sauna_seed1": "the segaux_sauna arm's recipe + seed_everything: 1 (a second draw of the arm)",
+    "segaux_cpout": "the segaux arm's recipe + data fg_mask_key: fg_mask_cpout, a thin-wall target from cpdino "
+    "whole-cell outer outlines on the GT membrane within a wall band, canonical mask outside (recipe in "
+    "experiments/2026-09-24_spotlight-v2/b3b_cpout/cpout_target.py), read from the derived training store "
+    f"{CPOUT_TRAIN_STORE} (dataset_ref: null, data_path and channels inline) at its own seg_aux_weight",
     "segaux_cldice": "the segaux arm's recipe + SegAuxDice topology=cldice (0.5 Dice + 0.5 soft-clDice, 5 "
     "skeleton iterations) at its own calibrated seg_aux_weight",
     "segaux_halfw": "the segaux arm's recipe with seg_aux_weight x0.5 (loss-weight sweep)",
@@ -500,10 +532,17 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
         renames, l1_keys = allowed_diff(replace(arm, suffix="l1"), kind)
         return renames, l1_keys | allowed_diff(replace(arm, suffix="segaux"), kind)[1]
     recipe: set[str] = set()
-    if arm.suffix in ("segaux", "segauxself", *TOPOLOGY_ARGS):
+    if arm.suffix in _SEGAUX_FAMILY:
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.seg_aux", "model.init_args.seg_aux_weight"}
         if BASELINES[arm.baseline].engine == "flow":
             recipe.add("model.init_args.seg_aux_t0")
+        if arm.suffix == "segaux_cpout":
+            recipe |= {
+                "benchmark.dataset_ref",
+                "data.init_args.data_path",
+                "data.init_args.source_channel",
+                "data.init_args.target_channel",
+            }
     elif arm.suffix == "seed1":
         recipe.add("seed_everything")
     elif arm.suffix == "jointsteps":
@@ -576,18 +615,25 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
         return
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})
-    if arm.suffix in ("segaux", "segauxself", *TOPOLOGY_ARGS):
-        data_args["fg_mask_key"] = "fg_mask"
+    if arm.suffix in _SEGAUX_FAMILY:
+        data_args["fg_mask_key"] = FG_MASK_KEYS.get(arm.suffix, "fg_mask")
         seg_args: dict[str, Any] = {"c": SEG_AUX_C, **TOPOLOGY_ARGS.get(arm.suffix, {})}
         if arm.suffix == "segauxself":
             seg_args["label"] = "target"
         model_args["seg_aux"] = {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": seg_args}
         # segauxself reuses the segaux arm's calibrated weight so the two differ by the label only;
-        # the topology arms change the term's gradient scale, so they carry their own.
-        weight_arm = arm.model if arm.suffix in TOPOLOGY_ARGS else f"{arm.baseline}_segaux"
+        # the topology and cpout arms change the term's gradient scale, so they carry their own.
+        weight_arm = arm.model if arm.suffix in _OWN_WEIGHT_SUFFIXES else f"{arm.baseline}_segaux"
         model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, weight_arm)]
         if BASELINES[arm.baseline].engine == "flow":
             model_args["seg_aux_t0"] = SEG_AUX_T0
+        if arm.suffix == "segaux_cpout":
+            # The resolver raises on data fields co-declared with a full dataset_ref, so disable it
+            # and declare the three fields it would splice, channels from the same manifest.
+            cfg["benchmark"]["dataset_ref"] = None
+            data_args["data_path"] = CPOUT_TRAIN_STORE
+            data_args["source_channel"] = _IPSC_MANIFEST_DATA["channels"]["source"]
+            data_args["target_channel"] = _IPSC_MANIFEST_DATA["targets"][organelle]["target_channel"]
     elif arm.suffix == "seed1":
         cfg["seed_everything"] = 1
     elif arm.suffix == "jointsteps":

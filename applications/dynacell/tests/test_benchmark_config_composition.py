@@ -1319,6 +1319,11 @@ _LONG_WALL_TRAIN_LEAVES = (
         # cost the FNet-3D nucleus fit +7.6%, ~88 h against the 96 h default.
         {"membrane/fcmae_vscyto3d_scratch_segaux_sauna/ipsc_confocal/train.yml"}
     )
+    | frozenset(
+        # The membrane cpout arm: the same segaux recipe on a thin-wall mask, so the same measured
+        # 2.44 ep/h of its segaux source (checkpoint mtimes above), 82 h for 200 epochs.
+        {"membrane/fcmae_vscyto3d_scratch_segaux_cpout/ipsc_confocal/train.yml"}
+    )
 )
 _LONG_WALL_TIME = "7-00:00:00"
 _DEFAULT_4GPU_TIME = "4-00:00:00"
