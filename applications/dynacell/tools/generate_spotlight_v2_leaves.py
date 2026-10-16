@@ -88,8 +88,8 @@ Arms (``<baseline>_<suffix>``):
   shortened budget at a lower LR (:data:`FORK_SCHEDULES`). ``segcons`` adds
   ``SegConsistencyLoss`` with Cellpose-SAM (``cpsam``) as the frozen segmenter;
   ``segcons_ctrl`` is the same fork, steps, LR and seed without it, so the pair is
-  stage-matched. ``seg_consistency_weight`` is a ``null`` PLACEHOLDER until calibrated
-  (:data:`SEG_CONSISTENCY_WEIGHTS`); the engines refuse to build with it unset. Both
+  stage-matched. ``seg_consistency_weight`` is calibrated per arm at the fork checkpoint
+  (:data:`SEG_CONSISTENCY_WEIGHTS`; the engines refuse a ``null`` one). Both
   predict from ``last.ckpt`` (``--ckpt last``): ``loss/validate`` stays base-only, so a
   best-by-val pick would favour the term arm's earliest epoch.
 
@@ -279,11 +279,17 @@ SEG_CONSISTENCY_ARGS: dict[str, Any] = {
     "slab_halfwidth": 1,
     "crop_size": 256,
 }
-# PLACEHOLDER weights (None -> `seg_consistency_weight: null`, which the engines refuse). Calibrate
-# each as in calibration/calibrate_variant.py: the median over 20 seeded val batches of
-# ||grad base|| / ||grad seg_consistency|| at the fork checkpoint, 2 significant figures.
+# seg_consistency_weight per arm: the median over 20 seeded val batches of ||grad base|| /
+# ||grad seg_consistency|| at the fork checkpoint (calibrate_variant.py --variants segcons --ckpt
+# <fork>, micro-batch 1, A40 2026-10-15), 2 significant figures [IQR]. FNet-3D 0.4806 [0.246-0.928],
+# UNeXt2-3D 0.0501 [0.0245-0.0883], pix2pix2d (generator_ema, base = lambda_l1 * L1) 0.5707
+# [0.321-0.669]. Source: experiments/2026-09-24_spotlight-v2/calibration/results/
+# nucleus__{fnet3d_vscyto3daug_v2,fcmae_vscyto3d_scratch_v2,pix2pix2d_unetvit}__segcons{.csv,__meta.json}.
+# None would emit `seg_consistency_weight: null`, which the engines refuse.
 SEG_CONSISTENCY_WEIGHTS: dict[tuple[str, str], float | None] = {
-    ("nucleus", f"{m}_segcons"): None for m in SEGCONS_BASELINES
+    ("nucleus", "fnet3d_vscyto3daug_segcons"): 0.48,
+    ("nucleus", "fcmae_vscyto3d_scratch_segcons"): 0.050,
+    ("nucleus", "pix2pix2d_unetvit_segcons"): 0.57,
 }
 _FORK_SUFFIXES: tuple[str, ...] = ("segcons", "segcons_ctrl")
 SAFE_CROP_SIZE = [1, 384, 384]
@@ -522,8 +528,8 @@ _DESCRIPTION: dict[str, str] = {
     "segcons_ctrl": "fork: model ckpt_path (the converged baseline checkpoint, weights only) + the fine-tune "
     "budget and LR of FORK_SCHEDULES; no other change (the no-term control of segcons)",
     "segcons": "the segcons_ctrl fork + model seg_consistency (SegConsistencyLoss, Cellpose-SAM cpsam, slab "
-    "halfwidth 1, 256-px crop, per-tile activation checkpointing) + seg_consistency_weight (PLACEHOLDER null "
-    "until calibrated)",
+    "halfwidth 1, 256-px crop, per-tile activation checkpointing) + seg_consistency_weight (gradient-norm "
+    "calibrated at the fork checkpoint)",
 }
 
 # Keys every fit / predict arm renames so it owns its run dir, wandb run and job.
