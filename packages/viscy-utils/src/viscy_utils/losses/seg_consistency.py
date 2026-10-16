@@ -55,12 +55,12 @@ def _otsu_thresholds(flat: Tensor) -> Tensor:
         Threshold per row, shape ``(R,)``: the center of the bin maximizing the
         between-class variance.
     """
-    r = flat.shape[0]
     lo = flat.amin(1, keepdim=True)
     width = ((flat.amax(1, keepdim=True) - lo) / _OTSU_BINS).clamp_min(torch.finfo(flat.dtype).tiny)
     idx = ((flat - lo) / width).floor().long().clamp(0, _OTSU_BINS - 1)
-    idx += torch.arange(r, device=flat.device).unsqueeze(1) * _OTSU_BINS
-    hist = torch.bincount(idx.reshape(-1), minlength=r * _OTSU_BINS).reshape(r, _OTSU_BINS).double()
+    # scatter_add_ rather than bincount: bincount sizes its output on the host (a sync).
+    hist = torch.zeros(flat.shape[0], _OTSU_BINS, device=flat.device, dtype=torch.long)
+    hist = hist.scatter_add_(1, idx, torch.ones((), device=flat.device, dtype=torch.long).expand_as(idx)).double()
     centers = lo.double() + width.double() * (torch.arange(_OTSU_BINS, device=flat.device) + 0.5)
     w1 = hist.cumsum(1)
     w2 = hist.flip(1).cumsum(1).flip(1)

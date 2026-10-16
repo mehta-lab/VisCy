@@ -5,7 +5,7 @@ import torch
 from torch import Tensor, nn
 
 from viscy_utils.losses import SegConsistencyLoss
-from viscy_utils.losses.seg_consistency import _binary_kl, nucleus_area_planes
+from viscy_utils.losses.seg_consistency import _OTSU_BINS, _binary_kl, _otsu_thresholds, nucleus_area_planes
 
 
 class TinySegmenter(nn.Module):
@@ -135,3 +135,37 @@ def test_rejects_bad_arguments_and_shapes():
 def test_nucleus_area_planes_fallbacks():
     assert nucleus_area_planes(torch.zeros(2, 7, 8, 8)).tolist() == [3, 3]
     assert nucleus_area_planes(torch.zeros(1, 1, 8, 8)).tolist() == [0]
+
+
+def _otsu_thresholds_bincount(flat: Tensor) -> Tensor:
+    """The first (bincount-histogram) implementation of ``_otsu_thresholds``, kept as the reference."""
+    r = flat.shape[0]
+    lo = flat.amin(1, keepdim=True)
+    width = ((flat.amax(1, keepdim=True) - lo) / _OTSU_BINS).clamp_min(torch.finfo(flat.dtype).tiny)
+    idx = ((flat - lo) / width).floor().long().clamp(0, _OTSU_BINS - 1)
+    idx += torch.arange(r, device=flat.device).unsqueeze(1) * _OTSU_BINS
+    hist = torch.bincount(idx.reshape(-1), minlength=r * _OTSU_BINS).reshape(r, _OTSU_BINS).double()
+    centers = lo.double() + width.double() * (torch.arange(_OTSU_BINS, device=flat.device) + 0.5)
+    w1 = hist.cumsum(1)
+    w2 = hist.flip(1).cumsum(1).flip(1)
+    m1 = (hist * centers).cumsum(1) / w1
+    m2 = (hist * centers).flip(1).cumsum(1).flip(1) / w2
+    var = w1[:, :-1] * w2[:, 1:] * (m1[:, :-1] - m2[:, 1:]) ** 2
+    return centers.gather(1, var.argmax(1, keepdim=True)).squeeze(1).to(flat.dtype)
+
+
+def test_otsu_thresholds_equal_the_bincount_implementation():
+    vols = [_nuclei((3, 1, z, 24, 24), seed=z).reshape(3, -1) for z in (1, 5, 16)]
+    vols.append(torch.rand(2, 1000) ** 3 * 50 - 7)
+    for flat in vols:
+        assert torch.equal(_otsu_thresholds(flat), _otsu_thresholds_bincount(flat))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="host-sync detection needs CUDA")
+def test_focus_planes_make_no_host_sync():
+    vol = _nuclei((2, 1, 8, 32, 32))[:, 0].cuda()
+    torch.cuda.set_sync_debug_mode("error")
+    try:
+        nucleus_area_planes(vol)
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
