@@ -350,6 +350,15 @@ PAPER_KEY: dict[str, str] = {
     # Checkpoint-stage control: the nucleus vscyto3daug segaux_halfw arm re-predicted from
     # latest-epoch=76-step=200000 instead of its best-val epoch=51, at the e74 stage-control floor.
     "fnet3d_vscyto3daug_segaux_halfw_e76": "fnet3d_vscyto3daug_segaux_halfw_e76",
+    # P1 segmenter-consistency nucleus fine-tunes (condgen review, 2026-10-15): `_segcons` forks
+    # the converged baseline and fine-tunes it with SegConsistencyLoss (Cellpose-SAM);
+    # `_segcons_ctrl` is the same fork, steps and LR without the term.
+    "fnet3d_vscyto3daug_segcons": "fnet3d_vscyto3daug_segcons",
+    "fnet3d_vscyto3daug_segcons_ctrl": "fnet3d_vscyto3daug_segcons_ctrl",
+    "fcmae_vscyto3d_scratch_segcons": "unext2_segcons",
+    "fcmae_vscyto3d_scratch_segcons_ctrl": "unext2_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons": "pix2pix2d_segcons",
+    "pix2pix2d_unetvit_segcons_ctrl": "pix2pix2d_segcons_ctrl",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

@@ -1126,6 +1126,13 @@ _WIDE_GPU_TRAIN_LEAVES = (
         for organelle in ("nucleus", "membrane")
         for suffix in ("segaux", "segauxself", "seed1")
     )
+    | frozenset(
+        # P1 fine-tunes of the same baseline (nucleus). The control changes only the budget, LR and
+        # starting weights. The segcons arm adds cpsam: ~1.2 GB of bf16 weights plus ~0.07 GB per
+        # sample with per-tile checkpointing (A40 bench, 2026-10-15), so ~15 GiB/rank at bs=4.
+        f"nucleus/pix2pix2d_unetvit_{suffix}/ipsc_confocal/train.yml"
+        for suffix in ("segcons", "segcons_ctrl")
+    )
 )
 _WIDE_GPU_EXTRA = frozenset({"a40", "a6000", "l40s"})
 
