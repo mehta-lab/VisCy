@@ -90,7 +90,13 @@ class CellposeDense(nn.Module):
         path = cp_models.MODEL_DIR / model_name
         if not path.is_file():
             raise FileNotFoundError(f"cellpose model {model_name!r} not found at {path}")
-        cpm = cp_models.CellposeModel(device=torch.device("cpu"), pretrained_model=str(path), use_bfloat16=use_bfloat16)
+        # Building the net random-initializes it before loading the checkpoint, which would
+        # advance the global RNG that HCSDataModule's train/val split draws from later; fork it
+        # so a segcons arm and its same-seed control split identically.
+        with torch.random.fork_rng(devices=[]):
+            cpm = cp_models.CellposeModel(
+                device=torch.device("cpu"), pretrained_model=str(path), use_bfloat16=use_bfloat16
+            )
         if cpm.backbone != "sam_vitl":
             raise ValueError(f"{model_name}: expected a SAM backbone, got {cpm.backbone}")
         self.net = cpm.net.eval()

@@ -56,6 +56,20 @@ def test_train_keeps_the_network_in_eval(cpsam_bf16):
     assert not cpsam_bf16.training and not any(m.training for m in cpsam_bf16.net.modules())
 
 
+@pytest.mark.skipif(not (cp_models.MODEL_DIR / "cpsam").is_file(), reason="needs the cpsam checkpoint")
+def test_construction_leaves_the_global_torch_rng_untouched():
+    """Building the segmenter must not shift the seeded torch RNG the datamodule's split draws from.
+
+    ``HCSDataModule`` splits train/val FOVs with ``torch.randperm``; otherwise a segcons arm and
+    its same-seed control would train on different splits.
+    """
+    torch.manual_seed(42)
+    reference = torch.randperm(50)
+    torch.manual_seed(42)
+    CellposeDense("cpsam")
+    assert torch.equal(reference, torch.randperm(50))
+
+
 def test_refuses_the_evaluation_segmenter_and_missing_models():
     with pytest.raises(ValueError, match="evaluation segmenter"):
         CellposeDense("cpdino")
