@@ -285,8 +285,7 @@ SEG_CONSISTENCY_ARGS: dict[str, Any] = {
 # UNeXt2-3D 0.0501 [0.0245-0.0883], pix2pix2d (generator_ema, base = lambda_l1 * L1) 0.5707
 # [0.321-0.669]. Source: experiments/2026-09-24_spotlight-v2/calibration/results/
 # nucleus__{fnet3d_vscyto3daug_v2,fcmae_vscyto3d_scratch_v2,pix2pix2d_unetvit}__segcons{.csv,__meta.json}.
-# None would emit `seg_consistency_weight: null`, which the engines refuse.
-SEG_CONSISTENCY_WEIGHTS: dict[tuple[str, str], float | None] = {
+SEG_CONSISTENCY_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "fnet3d_vscyto3daug_segcons"): 0.48,
     ("nucleus", "fcmae_vscyto3d_scratch_segcons"): 0.050,
     ("nucleus", "pix2pix2d_unetvit_segcons"): 0.57,
@@ -833,11 +832,6 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
     ]
     if kind == "fit":
         lines.append(f"# Recipe delta vs that leaf: {_DESCRIPTION[arm.suffix]}.")
-        if arm.suffix == "segcons" and SEG_CONSISTENCY_WEIGHTS[(organelle, arm.model)] is None:
-            lines.append(
-                "# seg_consistency_weight is a PLACEHOLDER (null): calibrate it and set SEG_CONSISTENCY_WEIGHTS"
-                " in the generator before submitting; the engine refuses to build with it unset."
-            )
         if _long_wall(arm):
             lines.append(
                 "# Wall: hardware_4gpu_long (7 d); 200 epochs at the measured ~2.0 ep/h is ~100 h > 4 d"

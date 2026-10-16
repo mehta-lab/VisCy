@@ -369,19 +369,16 @@ def test_segcons_ctrl_builds_from_the_real_fork_checkpoint(baseline: str) -> Non
 
 
 @pytest.mark.parametrize("baseline", SEGCONS_BASELINES)
-def test_segcons_builds_with_its_calibrated_weight_and_refuses_a_null_one(baseline: str) -> None:
-    """The emitted calibrated weight builds the cpsam term; a ``null`` weight fails at build."""
+def test_segcons_builds_with_its_calibrated_weight(baseline: str) -> None:
+    """The emitted calibrated weight builds the cpsam term (a null weight is refused: test_seg_consistency_training)."""
     if not (cp_models.MODEL_DIR / "cpsam").is_file():
         pytest.skip("cpsam checkpoint not in cellpose's model directory")
     model_cfg = copy.deepcopy(_load_nucleus_fit(f"{baseline}_segcons")["model"])
     weight = SEG_CONSISTENCY_WEIGHTS[("nucleus", f"{baseline}_segcons")]
-    assert weight is not None and model_cfg["init_args"]["seg_consistency_weight"] == weight
+    assert model_cfg["init_args"]["seg_consistency_weight"] == weight
     del model_cfg["init_args"]["ckpt_path"]  # the strict fork load is covered by the control's test
     module = _instantiate_model(model_cfg)
     assert module.seg_consistency_weight == weight
-    model_cfg["init_args"]["seg_consistency_weight"] = None
-    with pytest.raises(ValueError, match="placeholder"):
-        _instantiate_model(model_cfg)
     term = module.seg_consistency
     assert isinstance(term, SegConsistencyLoss)
     assert type(term.segmenter).__name__ == "CellposeDense" and term.segmenter.model_name == "cpsam"
