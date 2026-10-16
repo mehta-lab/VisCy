@@ -27,26 +27,23 @@ from torch.utils.checkpoint import checkpoint
 __all__ = ["CellposeDense", "normalize99_diff"]
 
 
-def normalize99_diff(x: Tensor, lower: float = 1.0, upper: float = 99.0) -> Tensor:
+def normalize99_diff(x: Tensor) -> Tensor:
     """Apply cellpose ``normalize99`` per image, with the percentiles under ``no_grad``.
 
     Parameters
     ----------
     x : Tensor
         Images, shape ``(B, ...)``.
-    lower, upper : float
-        Percentiles mapped to 0 and 1.
 
     Returns
     -------
     Tensor
-        ``(x - p_lower) / (p_upper - p_lower)`` per image, unclipped; 0 where the
-        percentile range is below 1e-3 (cellpose's flat-image rule).
+        ``(x - p1) / (p99 - p1)`` per image, unclipped; 0 where the percentile
+        range is below 1e-3 (cellpose's flat-image rule).
     """
     with torch.no_grad():
         flat = x.reshape(x.shape[0], -1).float()
-        q = torch.quantile(flat, torch.tensor([lower / 100, upper / 100], device=x.device), dim=1)
-        lo, hi = q[0], q[1]
+        lo, hi = torch.quantile(flat, 0.01, dim=1), torch.quantile(flat, 0.99, dim=1)
         ok = (hi - lo) > 1e-3
         scale = torch.where(ok, 1.0 / (hi - lo).clamp_min(1e-12), torch.zeros_like(hi))
     shape = (-1, *([1] * (x.ndim - 1)))
@@ -61,8 +58,10 @@ class CellposeDense(nn.Module):
     256-px tiles at ``tile_overlap=0.1`` and blended with cellpose's taper mask. No
     diameter rescale, matching the eval's ``diameter=None``.
 
-    The network always stays in eval mode with ``requires_grad=False``; ``train()``
-    is a no-op. It is loaded on the CPU and follows the module's ``.to(device)``.
+    It is loaded on the CPU, in eval mode, and follows the module's ``.to(device)``.
+    The mode matters: cellpose builds the network in train mode, whose flows differ
+    from stock inference by up to 1.7 (measured). Keeping it frozen afterwards (eval
+    mode, no parameter gradients) is the caller's job; ``SegConsistencyLoss`` does it.
 
     Parameters
     ----------
@@ -93,15 +92,9 @@ class CellposeDense(nn.Module):
         cpm = cp_models.CellposeModel(device=torch.device("cpu"), pretrained_model=str(path), use_bfloat16=use_bfloat16)
         if cpm.backbone != "sam_vitl":
             raise ValueError(f"{model_name}: expected a SAM backbone, got {cpm.backbone}")
-        self.net = cpm.net
-        self.net.requires_grad_(False)
+        self.net = cpm.net.eval()
         self.model_name = model_name
         self.checkpoint_tiles = checkpoint_tiles
-        self.train(False)
-
-    def train(self, mode: bool = True) -> "CellposeDense":
-        """Keep the frozen network in eval mode whatever ``mode`` is."""
-        return super().train(False)
 
     def _net_flows(self, tiles: Tensor) -> Tensor:
         """Run the network on ``(N, 3, 256, 256)`` tiles; return its ``(N, 3, 256, 256)`` output."""
@@ -109,7 +102,7 @@ class CellposeDense(nn.Module):
 
     def _taper(self, device: torch.device) -> Tensor:
         """Return cellpose's ``transforms._taper_mask`` for one tile."""
-        bsize = max(224, self.BSIZE)
+        bsize = self.BSIZE
         xm = torch.arange(bsize, device=device, dtype=torch.float32)
         xm = (xm - xm.mean()).abs()
         mask = 1 / (1 + torch.exp((xm - (bsize / 2 - 20)) / 7.5))
@@ -167,7 +160,7 @@ class CellposeDense(nn.Module):
         xs = np.linspace(0, lx - bs, nx).astype(int)
         coords = [(int(a), int(c)) for a in ys for c in xs]
         tiles = torch.stack([xn[:, :, a : a + bs, c : c + bs] for a, c in coords], dim=1).reshape(-1, 3, bs, bs)
-        checkpointed = self.checkpoint_tiles is not None and torch.is_grad_enabled() and tiles.requires_grad
+        checkpointed = self.checkpoint_tiles is not None and tiles.requires_grad
         step = self.checkpoint_tiles if checkpointed else batch_size
         outs = []
         for j in range(0, tiles.shape[0], step):

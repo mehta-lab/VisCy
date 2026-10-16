@@ -126,6 +126,8 @@ def test_seg_consistency_through_cpsam_trains_a_backbone(cpsam_bf16):
     target = torch.from_numpy(np.stack([_nuclei_image((64, 64), seed=s) for s in range(4)])).reshape(2, 1, 2, 64, 64)
     target = target.repeat_interleave(2, dim=2).cuda()  # (2, 1, 4, 64, 64)
     loss_fn = SegConsistencyLoss(cpsam_bf16, crop_size=64)
+    # The loss freezes its segmenter, and the LightningModule's train() cannot reach it.
+    assert not cpsam_bf16.training and not any(p.requires_grad for p in cpsam_bf16.parameters())
     assert float(loss_fn(target.clone(), target)) == pytest.approx(0.0, abs=1e-6)
 
     torch.manual_seed(0)
@@ -136,6 +138,8 @@ def test_seg_consistency_through_cpsam_trains_a_backbone(cpsam_bf16):
         seg_consistency_weight=1.0,
         log_batches_per_epoch=0,
     ).cuda()
+    module.train()
+    assert not cpsam_bf16.training
     module.log = lambda *args, **kwargs: None
     batch = {"source": torch.randn_like(target), "target": target}
     with torch.autocast("cuda", dtype=torch.bfloat16):
