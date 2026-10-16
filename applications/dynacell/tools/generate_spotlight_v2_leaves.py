@@ -80,6 +80,18 @@ Arms (``<baseline>_<suffix>``):
   illumination removed too). The background stays supervised, unlike a masked loss.
   Validation stays raw, so ``--ckpt best`` selects on the baseline's criterion; predict
   leaves equal the baseline's. Normalization is the baseline's.
+- ``segcons`` / ``segcons_ctrl`` -- P1 of the conditional-generation review
+  (``experiments/2026-10-15_conditional-generation-review/PROPOSALS.md``), nucleus only, on
+  FNet-3D vscyto3daug, UNeXt2-3D and pix2pix2d. Both are fine-tunes ("forks") of the
+  baseline recipe's converged final checkpoint (:data:`FORK_CKPTS`, loaded weights-only
+  through ``model.init_args.ckpt_path``, so optimizer and schedule start fresh) on a
+  shortened budget at a lower LR (:data:`FORK_SCHEDULES`). ``segcons`` adds
+  ``SegConsistencyLoss`` with Cellpose-SAM (``cpsam``) as the frozen segmenter;
+  ``segcons_ctrl`` is the same fork, steps, LR and seed without it, so the pair is
+  stage-matched. ``seg_consistency_weight`` is calibrated per arm at the fork checkpoint
+  (:data:`SEG_CONSISTENCY_WEIGHTS`). Both
+  predict from ``last.ckpt`` (``--ckpt last``): ``loss/validate`` stays base-only, so a
+  best-by-val pick would favour the term arm's earliest epoch.
 
 Leaves are emitted with ``yaml.safe_dump``, so they carry no inline comments: the
 recipe rationale stays in the baseline leaf each header names, and the reasons for
@@ -227,6 +239,69 @@ LONG_WALL_MODELS: frozenset[str] = frozenset(
 )
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
+# P1 segmenter-consistency fine-tunes (2026-10-15): three converged nucleus baselines, each
+# forked twice, with and without the term. The fork source is the baseline recipe's final
+# checkpoint under its immutable latest-* name (all three runs completed their budget); the
+# FNet-3D and UNeXt2-3D forks start from the v2 retrains, the Spotlight-v2 controls on today's code.
+SEGCONS_BASELINES: tuple[str, ...] = ("fnet3d_vscyto3daug", "fcmae_vscyto3d_scratch", "pix2pix2d_unetvit")
+FORK_CKPTS: dict[tuple[str, str], str] = {
+    ("nucleus", "fnet3d_vscyto3daug"): f"{MODELS_ROOT}/ipsc/nucleus/fnet3d_vscyto3daug_v2/checkpoints/"
+    "latest-epoch=76-step=200000.ckpt",
+    ("nucleus", "fcmae_vscyto3d_scratch"): f"{MODELS_ROOT}/ipsc/nucleus/fcmae_vscyto3d_scratch_v2/checkpoints/"
+    "latest-epoch=199-step=62400.ckpt",
+    ("nucleus", "pix2pix2d_unetvit"): f"{MODELS_ROOT}/ipsc/nucleus/pix2pix2d_unetvit/checkpoints/"
+    "latest-epoch=39-step=20000.ckpt",
+}
+# Fine-tune budget: 10% of the baseline's (200000 steps, 200 epochs, 40 epochs, read off the fork
+# checkpoints' names) at 0.1x its peak LR (FNet-3D keeps its Constant schedule). The WarmupCosine
+# families warm up over 5% of the fine-tune's scheduler steps: UNeXt2-3D 20 x 312 = 6240 (62400
+# steps / 200 epochs), pix2pix2d 4 x 250 = 1000 (20000 global steps / 40 epochs, two optimizer
+# steps per GAN batch). The scheduler is rebuilt for the fine-tune, so a cosine decays to 0 again.
+# pix2pix2d predicts from generator_ema, which starts as the fork's own shadow. At the baseline's
+# ema_kimg 10 the fine-tune (1000 G steps x 16 samples: 4 ranks x batch 4) would leave
+# 0.5 ** (16000 / 10000) = 33% of the fork-start shadow in it, diluting both arms; ema_kimg 2
+# leaves 0.5 ** (16000 / 2000) = 0.5 ** 8 = 0.4% (decay = 0.5 ** (global batch / (ema_kimg * 1000))).
+FORK_SCHEDULES: dict[str, dict[str, dict[str, Any]]] = {
+    "fnet3d_vscyto3daug": {"trainer": {"max_steps": 20000}, "model": {"lr": 1.0e-4}},
+    "fcmae_vscyto3d_scratch": {"trainer": {"max_epochs": 20}, "model": {"lr": 4.0e-5, "warmup_steps": 312}},
+    "pix2pix2d_unetvit": {
+        "trainer": {"max_epochs": 4},
+        "model": {"lr_g": 2.0e-5, "lr_d": 2.0e-5, "warmup_steps": 50, "ema_kimg": 2.0},
+    },
+}
+# S_train from gate G4: cpsam (Kendall tau vs cpdino nucleus Dice/mAP .65/.80, not in the eval
+# stack). One slab-MIP pass per sample around the target crop's nuclear-area plane, center
+# 240-px crop, which cellpose pads to exactly one 256-px tile, the geometry the G4 bench timed
+# (a 256-px crop pads to 272 and runs 2 x 2 tiles, 4x the segmenter compute, measured with
+# get_pad_yx); see viscy_utils.losses.seg_consistency.
+# Every sample of the batch is scored. The with-gradient pass is checkpointed per tile: without
+# it each sample holds ~5.6 GB of activations (G4 H200 bench: 42.9 GB at 8 samples, against the
+# FNet-3D fit's ~41 GB), with it ~0.07 GB per sample at ~1.8x the term's time (A40, 2026-10-15).
+SEG_CONSISTENCY_ARGS: dict[str, Any] = {
+    "segmenter": {
+        "class_path": "dynacell.cellpose_dense.CellposeDense",
+        "init_args": {"model_name": "cpsam", "checkpoint_tiles": 1},
+    },
+    "slab_halfwidth": 1,
+    "crop_size": 240,
+}
+# seg_consistency_weight per arm: the median over 20 seeded val batches of ||grad base|| /
+# ||grad seg_consistency|| at the fork checkpoint, at the leaves' 240-px crop (calibrate_variant.py
+# --variants dice segcons --ckpt <fork> --tag segcons_crop240, micro-batch 1, A40 2026-10-16),
+# 2 significant figures [IQR]: FNet-3D 0.3670 [0.138-0.654], UNeXt2-3D 0.03238 [0.0243-0.0657],
+# pix2pix2d 0.1912 [0.0673-0.342]. Source: experiments/2026-09-24_spotlight-v2/calibration/results/
+# nucleus__{fnet3d_vscyto3daug_v2,fcmae_vscyto3d_scratch_v2,pix2pix2d_unetvit}__segcons_crop240{.csv,__meta.json}.
+# (The first calibration, at the 4-tile 256-px crop, gave 0.48 / 0.050 / 0.57: results/*__segcons.*.)
+# Known limitation, kept for comparability with the segaux weights: the convention is the segaux
+# one, so for pix2pix2d the gradients are on generator_ema with base = lambda_l1 * L1 (the
+# adversarial term is ignored), and micro-batch gradients are summed to the val batch's mean, not
+# averaged over the training batch's composition (per-rank batch, DDP world size).
+SEG_CONSISTENCY_WEIGHTS: dict[tuple[str, str], float] = {
+    ("nucleus", "fnet3d_vscyto3daug_segcons"): 0.37,
+    ("nucleus", "fcmae_vscyto3d_scratch_segcons"): 0.032,
+    ("nucleus", "pix2pix2d_unetvit_segcons"): 0.19,
+}
+_FORK_SUFFIXES: tuple[str, ...] = ("segcons", "segcons_ctrl")
 SAFE_CROP_SIZE = [1, 384, 384]
 MASK_VELOCITY_WEIGHT = 1.0
 # C-cond predict conditions on the same-dimensionality FNet `_segaux` prediction for the
@@ -399,6 +474,8 @@ ARMS: tuple[Arm, ...] = (
     Arm("fcmae_vscyto3d_scratch", "segaux_cpout", ("membrane",), a549=True),
     # Track H: CellDiff-2D trained on a background-low-passed target (H1; launched as H2).
     *(Arm("celldiff_2d", s, ORGANELLES, a549=True) for s in BG_TARGET_ARGS),
+    # P1 (2026-10-15): segmenter-consistency fine-tunes and their no-term controls, nucleus only.
+    *(Arm(m, s, ("nucleus",), a549=True) for m in SEGCONS_BASELINES for s in _FORK_SUFFIXES),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
 SEED_SOURCES: dict[str, str] = {
@@ -458,6 +535,11 @@ _DESCRIPTION: dict[str, str] = {
         + "), a training-only target transform; validation and prediction see the raw target"
         for suffix, args in BG_TARGET_ARGS.items()
     },
+    "segcons_ctrl": "fork: model ckpt_path (the converged baseline checkpoint, weights only) + the fine-tune "
+    "budget and LR of FORK_SCHEDULES; no other change (the no-term control of segcons)",
+    "segcons": "the segcons_ctrl fork + model seg_consistency (SegConsistencyLoss, Cellpose-SAM cpsam, slab "
+    "halfwidth 1, 240-px crop (one cellpose tile), per-tile activation checkpointing) + seg_consistency_weight "
+    "(gradient-norm calibrated at the fork checkpoint)",
 }
 
 # Keys every fit / predict arm renames so it owns its run dir, wandb run and job.
@@ -569,6 +651,12 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
         }
     elif arm.suffix in BG_TARGET_ARGS:
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.target_bg_lowpass"}
+    elif arm.suffix in _FORK_SUFFIXES:
+        schedule = FORK_SCHEDULES[arm.baseline]
+        recipe.add("model.init_args.ckpt_path")
+        recipe |= {f"trainer.{k}" for k in schedule["trainer"]} | {f"model.init_args.{k}" for k in schedule["model"]}
+        if arm.suffix == "segcons":
+            recipe |= {"model.init_args.seg_consistency", "model.init_args.seg_consistency_weight"}
     if _long_wall(arm):
         recipe.add("base")
     return _FIT_RENAMES, frozenset(recipe)
@@ -663,6 +751,17 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
             "class_path": "viscy_utils.losses.BackgroundLowPass",
             "init_args": dict(BG_TARGET_ARGS[arm.suffix]),
         }
+    elif arm.suffix in _FORK_SUFFIXES:
+        schedule = FORK_SCHEDULES[arm.baseline]
+        model_args["ckpt_path"] = FORK_CKPTS[(organelle, arm.baseline)]
+        model_args.update(schedule["model"])
+        cfg.setdefault("trainer", {}).update(schedule["trainer"])
+        if arm.suffix == "segcons":
+            model_args["seg_consistency"] = {
+                "class_path": "viscy_utils.losses.SegConsistencyLoss",
+                "init_args": copy.deepcopy(SEG_CONSISTENCY_ARGS),
+            }
+            model_args["seg_consistency_weight"] = SEG_CONSISTENCY_WEIGHTS[(organelle, arm.model)]
     elif arm.suffix != "v2":
         raise ValueError(f"unknown arm suffix {arm.suffix!r}")
     # Drop containers the arm did not need (v2/seed1 add no data/model keys).
@@ -753,6 +852,8 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
         lines.append("# Inference is identical to the baseline's; only the checkpoint, store and names differ.")
         if not arm.fit:
             lines.append("# Predict-only arm: the baseline's own last.ckpt, own store; submit with `--ckpt last`.")
+        elif arm.suffix in _FORK_SUFFIXES:
+            lines.append("# Fine-tune arm: predict the end of the fine-tune; submit with `--ckpt last`.")
         else:
             lines.append("# ckpt_path is a PLACEHOLDER (last.ckpt): submit with `--ckpt best`, re-bake afterwards.")
     lines.append("# Everything else, and the rationale for it, is the baseline leaf's.")

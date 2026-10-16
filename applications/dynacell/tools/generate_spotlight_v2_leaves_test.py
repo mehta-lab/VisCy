@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 from collections import Counter
+from pathlib import Path
 
 import pytest
+import torch
 import yaml
 from generate_spotlight_v2_leaves import (
     _FIT_RENAMES,
@@ -12,11 +15,16 @@ from generate_spotlight_v2_leaves import (
     BASELINES,
     BENCHMARKS,
     BG_TARGET_ARGS,
+    FORK_CKPTS,
+    FORK_SCHEDULES,
     ORGANELLES,
     POOL,
     SEED_SOURCES,
     SEG_AUX_WEIGHTS,
+    SEG_CONSISTENCY_ARGS,
+    SEG_CONSISTENCY_WEIGHTS,
     SEGAUXSELF_BASELINES,
+    SEGCONS_BASELINES,
     WEIGHT_SCALES,
     Arm,
     _unseeded,
@@ -31,7 +39,7 @@ from lightning.pytorch import LightningModule
 from dynacell._compose_hook import _dynacell_ref_resolver
 from dynacell.evaluation.paths import PAPER_KEY, canonical_model_name
 from viscy_utils.compose import load_composed_config
-from viscy_utils.losses import BackgroundLowPass
+from viscy_utils.losses import BackgroundLowPass, SegConsistencyLoss
 
 
 def _suffix(leaf_dir_name: str) -> str:
@@ -56,7 +64,7 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
     segaux 19+76, segauxself 8+32, seed1 9+36, v2 7+28, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
     l1segaux 1+4, l1seed1 1+4, segaux_seed1 10+40, v2_seed1 7+28,
     segaux_halfw 2+8, segaux_doublew 2+8, segaux_sauna 5+20, segaux_sauna_seed1 1+4, segaux_cldice 3+12,
-    segaux_cpout 1+4, bglp 2+8, bgflat 2+8.
+    segaux_cpout 1+4, bglp 2+8, bgflat 2+8, segcons 3+12, segcons_ctrl 3+12.
 
     The jointsteps and safecrop probes are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
@@ -84,6 +92,8 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "segaux_cpout": 1,
         "bglp": 2,
         "bgflat": 2,
+        "segcons": 3,
+        "segcons_ctrl": 3,
     }
     assert predicts == {
         "segaux": 76,
@@ -108,6 +118,8 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "segaux_cpout": 4,
         "bglp": 8,
         "bgflat": 8,
+        "segcons": 12,
+        "segcons_ctrl": 12,
     }
 
 
@@ -304,3 +316,73 @@ def test_bg_target_arms_compose_and_instantiate_with_only_the_target_op_added(su
     assert isinstance(op, BackgroundLowPass)
     assert {k: getattr(op, k) for k in BG_TARGET_ARGS[suffix]} == BG_TARGET_ARGS[suffix]
     assert (op.sigma_lp_z, op.sigma_feather_z, op.dilate_radius_z) == (0.0, 0.0, 0)
+
+
+def _load_nucleus_fit(model: str) -> dict:
+    return load_composed_config(BENCHMARKS / "nucleus" / model / POOL / "train.yml", resolver=_dynacell_ref_resolver)
+
+
+def _instantiate_model(model_cfg: dict) -> LightningModule:
+    """Build the model section as LightningCLI does (see the bg-target test for why LightningModule)."""
+    parser = ArgumentParser()
+    parser.add_subclass_arguments(LightningModule, "model")
+    return parser.instantiate(parser.parse_object({"model": model_cfg})).model
+
+
+@pytest.mark.parametrize("baseline", SEGCONS_BASELINES)
+def test_segcons_pair_is_one_fork_that_differs_by_the_term_only(baseline: str) -> None:
+    """Composed: ctrl = baseline + the fork keys; segcons = ctrl + seg_consistency and its weight."""
+    base, ctrl, arm = (_load_nucleus_fit(m) for m in (baseline, f"{baseline}_segcons_ctrl", f"{baseline}_segcons"))
+    renames, _ = allowed_diff(Arm(baseline, "segcons", ("nucleus",), a549=False), "fit")
+    schedule = FORK_SCHEDULES[baseline]
+    fork_keys = (
+        {"model.init_args.ckpt_path"}
+        | {f"trainer.{k}" for k in schedule["trainer"]}
+        | {f"model.init_args.{k}" for k in schedule["model"]}
+    )
+    assert changed_keys(base, ctrl) - renames == fork_keys
+    term = "model.init_args.seg_consistency"
+    assert {term if k.startswith(term + ".") else k for k in changed_keys(ctrl, arm) - renames} == {
+        term,
+        "model.init_args.seg_consistency_weight",
+    }
+    assert ctrl["model"]["init_args"]["ckpt_path"] == FORK_CKPTS[("nucleus", baseline)]
+    assert arm["model"]["init_args"]["seg_consistency"]["init_args"] == SEG_CONSISTENCY_ARGS
+    # Same seed, data, loss and precision as the baseline: the pair is stage-matched to it.
+    for key in ("seed_everything", "data"):
+        assert arm.get(key) == base.get(key)
+    assert arm["trainer"]["precision"] == base["trainer"]["precision"]
+
+
+@pytest.mark.parametrize("baseline", SEGCONS_BASELINES)
+def test_segcons_ctrl_builds_from_the_real_fork_checkpoint(baseline: str) -> None:
+    """The fork checkpoint exists and loads strictly into the composed control's model."""
+    ckpt = FORK_CKPTS[("nucleus", baseline)]
+    if not Path(ckpt).is_file():
+        pytest.skip(f"fork checkpoint not reachable: {ckpt}")
+    module = _instantiate_model(_load_nucleus_fit(f"{baseline}_segcons_ctrl")["model"])
+    state = torch.load(ckpt, map_location="cpu", weights_only=True, mmap=True)["state_dict"]
+    loaded = module.state_dict()
+    assert loaded.keys() == state.keys()
+    for key, value in state.items():
+        assert torch.equal(loaded[key], value), key
+
+
+@pytest.mark.parametrize("baseline", SEGCONS_BASELINES)
+def test_segcons_builds_with_its_calibrated_weight(baseline: str) -> None:
+    """The emitted calibrated weight builds the cpsam term (a null weight is refused: test_seg_consistency_training)."""
+    cp_models = pytest.importorskip("cellpose.models")
+    if not (cp_models.MODEL_DIR / "cpsam").is_file():
+        pytest.skip("cpsam checkpoint not in cellpose's model directory")
+    model_cfg = copy.deepcopy(_load_nucleus_fit(f"{baseline}_segcons")["model"])
+    weight = SEG_CONSISTENCY_WEIGHTS[("nucleus", f"{baseline}_segcons")]
+    assert model_cfg["init_args"]["seg_consistency_weight"] == weight
+    del model_cfg["init_args"]["ckpt_path"]  # the strict fork load is covered by the control's test
+    module = _instantiate_model(model_cfg)
+    assert module.seg_consistency_weight == weight
+    term = module.seg_consistency
+    assert isinstance(term, SegConsistencyLoss)
+    assert type(term.segmenter).__name__ == "CellposeDense" and term.segmenter.model_name == "cpsam"
+    assert term.segmenter.checkpoint_tiles == 1
+    assert (term.slab_halfwidth, term.crop_size) == (1, 240)
+    assert not any(k.startswith("seg_consistency") for k in module.state_dict())

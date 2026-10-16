@@ -139,6 +139,12 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fnet3d_paper_histmatch": "fnet3d_histmatch",
     "pix2pix3d_unetvit_v2_histmatch": "pix2pix3d_v2_histmatch",
     "fcmae_vscyto3d_scratch_v2_histmatch": "unext2_v2_histmatch",
+    "fnet3d_vscyto3daug_segcons": "fnet3d_vscyto3daug_segcons",
+    "fnet3d_vscyto3daug_segcons_ctrl": "fnet3d_vscyto3daug_segcons_ctrl",
+    "fcmae_vscyto3d_scratch_segcons": "unext2_segcons",
+    "fcmae_vscyto3d_scratch_segcons_ctrl": "unext2_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons": "pix2pix2d_segcons",
+    "pix2pix2d_unetvit_segcons_ctrl": "pix2pix2d_segcons_ctrl",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -242,6 +248,12 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fnet3d_paper_histmatch",
     "pix2pix3d_unetvit_v2_histmatch",
     "fcmae_vscyto3d_scratch_v2_histmatch",
+    "fnet3d_vscyto3daug_segcons",
+    "fnet3d_vscyto3daug_segcons_ctrl",
+    "fcmae_vscyto3d_scratch_segcons",
+    "fcmae_vscyto3d_scratch_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons",
+    "pix2pix2d_unetvit_segcons_ctrl",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = (
     "celldiff_2d_segauxself",
