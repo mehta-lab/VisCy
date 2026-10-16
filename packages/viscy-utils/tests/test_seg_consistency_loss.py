@@ -111,32 +111,25 @@ def test_segmenter_is_frozen_unregistered_and_stays_in_eval():
     assert not any(p.requires_grad for p in seg.parameters())
 
 
-def test_max_samples_and_crop_size_shape_what_the_segmenter_sees():
+def test_crop_size_shapes_what_the_segmenter_sees():
     target = _nuclei((4, 1, 6, 40, 40))
-    loss_fn = SegConsistencyLoss(TinySegmenter(), crop_size=24, max_samples=3)
+    loss_fn = SegConsistencyLoss(TinySegmenter(), crop_size=24)
     pred2d, target2d = loss_fn.project(target, target)
-    assert pred2d.shape == target2d.shape == (3, 1, 24, 24)
-
-
-def test_uncertainty_weight_lowers_the_loss_and_keeps_zero_at_target():
-    target = _nuclei((2, 1, 6, 32, 32))
-    pred = target + 0.3 * torch.randn_like(target)
-    plain = SegConsistencyLoss(TinySegmenter())
-    weighted = SegConsistencyLoss(TinySegmenter(), uncertainty_weight=True, uncertainty_scale=0.01)
-    assert 0.0 < float(weighted(pred, target)) < float(plain(pred, target))
-    assert float(weighted(target, target)) == pytest.approx(0.0, abs=1e-6)
+    assert pred2d.shape == target2d.shape == (4, 1, 24, 24)
 
 
 def test_rejects_bad_arguments_and_shapes():
     with pytest.raises(ValueError, match="slab_halfwidth"):
         SegConsistencyLoss(TinySegmenter(), slab_halfwidth=-1)
-    with pytest.raises(ValueError, match="max_samples"):
-        SegConsistencyLoss(TinySegmenter(), max_samples=0)
+    with pytest.raises(ValueError, match="crop_size"):
+        SegConsistencyLoss(TinySegmenter(), crop_size=0)
     loss_fn = SegConsistencyLoss(TinySegmenter())
     with pytest.raises(ValueError, match="share a shape"):
         loss_fn(torch.zeros(1, 1, 4, 8, 8), torch.zeros(1, 1, 4, 8, 9))
     with pytest.raises(ValueError, match="expected"):
         loss_fn(torch.zeros(1, 2, 4, 8, 8), torch.zeros(1, 2, 4, 8, 8))
+    with pytest.raises(ValueError, match="expected"):
+        loss_fn(torch.zeros(1, 1, 8, 8), torch.zeros(1, 1, 8, 8))
 
 
 def test_nucleus_area_planes_fallbacks():
