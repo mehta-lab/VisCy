@@ -205,7 +205,7 @@ def test_weight_is_required_with_the_term_and_seg_aux_is_rejected_with_it(family
     else:
         kwargs = {"generator_config": VIT2D_CONFIG, "discriminator_config": DISC2D_CONFIG}
         cls = DynacellGAN
-    with pytest.raises(ValueError, match="placeholder"):
+    with pytest.raises(ValueError, match="without seg_consistency_weight"):
         cls(**kwargs, seg_consistency=_segcons(), seg_consistency_weight=None)
     with pytest.raises(ValueError, match="no effect without seg_consistency"):
         cls(**kwargs, seg_consistency_weight=1.0)

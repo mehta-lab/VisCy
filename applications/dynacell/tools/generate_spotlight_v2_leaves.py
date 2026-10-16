@@ -89,7 +89,7 @@ Arms (``<baseline>_<suffix>``):
   ``SegConsistencyLoss`` with Cellpose-SAM (``cpsam``) as the frozen segmenter;
   ``segcons_ctrl`` is the same fork, steps, LR and seed without it, so the pair is
   stage-matched. ``seg_consistency_weight`` is calibrated per arm at the fork checkpoint
-  (:data:`SEG_CONSISTENCY_WEIGHTS`; the engines refuse a ``null`` one). Both
+  (:data:`SEG_CONSISTENCY_WEIGHTS`). Both
   predict from ``last.ckpt`` (``--ckpt last``): ``loss/validate`` stays base-only, so a
   best-by-val pick would favour the term arm's earliest epoch.
 

@@ -129,7 +129,7 @@ def _check_seg_consistency_args(
 
     The weight has no default: it is calibrated per cell (median over validation
     batches of ``||grad base|| / ||grad seg_consistency||`` at the starting
-    checkpoint), and a leaf that still carries the ``null`` placeholder must not train.
+    checkpoint), so a config that sets the term must also set its weight.
     With ``seg_aux`` too, the logged ``base`` would stop meaning the loss before the term.
     """
     if seg_consistency is None:
@@ -138,8 +138,8 @@ def _check_seg_consistency_args(
         return
     if weight is None:
         raise ValueError(
-            "seg_consistency_weight is unset (placeholder): calibrate it as the median gradient-norm ratio "
-            "||grad base|| / ||grad seg_consistency|| at the starting checkpoint and set it in the leaf."
+            "seg_consistency is set without seg_consistency_weight, which has no default: calibrate it as the "
+            "median gradient-norm ratio ||grad base|| / ||grad seg_consistency|| at the starting checkpoint."
         )
     if weight <= 0:
         raise ValueError(f"seg_consistency_weight must be > 0, got {weight}; drop seg_consistency to turn it off")
