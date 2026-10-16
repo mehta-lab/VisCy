@@ -286,15 +286,20 @@ SEG_CONSISTENCY_ARGS: dict[str, Any] = {
     "crop_size": 240,
 }
 # seg_consistency_weight per arm: the median over 20 seeded val batches of ||grad base|| /
-# ||grad seg_consistency|| at the fork checkpoint (calibrate_variant.py --variants segcons --ckpt
-# <fork>, micro-batch 1, A40 2026-10-15), 2 significant figures [IQR]. FNet-3D 0.4806 [0.246-0.928],
-# UNeXt2-3D 0.0501 [0.0245-0.0883], pix2pix2d (generator_ema, base = lambda_l1 * L1) 0.5707
-# [0.321-0.669]. Source: experiments/2026-09-24_spotlight-v2/calibration/results/
-# nucleus__{fnet3d_vscyto3daug_v2,fcmae_vscyto3d_scratch_v2,pix2pix2d_unetvit}__segcons{.csv,__meta.json}.
+# ||grad seg_consistency|| at the fork checkpoint, at the leaves' 240-px crop (calibrate_variant.py
+# --variants dice segcons --ckpt <fork> --tag segcons_crop240, micro-batch 1, A40 2026-10-16),
+# 2 significant figures [IQR]: FNet-3D 0.3670 [0.138-0.654], UNeXt2-3D 0.03238 [0.0243-0.0657],
+# pix2pix2d 0.1912 [0.0673-0.342]. Source: experiments/2026-09-24_spotlight-v2/calibration/results/
+# nucleus__{fnet3d_vscyto3daug_v2,fcmae_vscyto3d_scratch_v2,pix2pix2d_unetvit}__segcons_crop240{.csv,__meta.json}.
+# (The first calibration, at the 4-tile 256-px crop, gave 0.48 / 0.050 / 0.57: results/*__segcons.*.)
+# Known limitation, kept for comparability with the segaux weights: the convention is the segaux
+# one, so for pix2pix2d the gradients are on generator_ema with base = lambda_l1 * L1 (the
+# adversarial term is ignored), and micro-batch gradients are summed to the val batch's mean, not
+# averaged over the training batch's composition (per-rank batch, DDP world size).
 SEG_CONSISTENCY_WEIGHTS: dict[tuple[str, str], float] = {
-    ("nucleus", "fnet3d_vscyto3daug_segcons"): 0.48,
-    ("nucleus", "fcmae_vscyto3d_scratch_segcons"): 0.050,
-    ("nucleus", "pix2pix2d_unetvit_segcons"): 0.57,
+    ("nucleus", "fnet3d_vscyto3daug_segcons"): 0.37,
+    ("nucleus", "fcmae_vscyto3d_scratch_segcons"): 0.032,
+    ("nucleus", "pix2pix2d_unetvit_segcons"): 0.19,
 }
 _FORK_SUFFIXES: tuple[str, ...] = ("segcons", "segcons_ctrl")
 SAFE_CROP_SIZE = [1, 384, 384]

@@ -68,4 +68,4 @@ model:
             checkpoint_tiles: 1
         slab_halfwidth: 1
         crop_size: 240
-    seg_consistency_weight: 0.05
+    seg_consistency_weight: 0.032
