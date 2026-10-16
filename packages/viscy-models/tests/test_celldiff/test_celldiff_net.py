@@ -56,5 +56,5 @@ def test_wrong_cond_channels_raises(small_config):
 
 def test_indivisible_patch_size_raises(small_config):
     """Constructor rejects spatial sizes not divisible by patch_size after downsampling."""
-    with pytest.raises(ValueError, match="not divisible by patch_size"):
+    with pytest.raises(ValueError, match="not divisible by its patch extent"):
         CELLDiffNet(**{**small_config, "input_spatial_size": [10, 64, 64]})

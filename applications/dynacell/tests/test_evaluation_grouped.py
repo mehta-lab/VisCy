@@ -23,6 +23,8 @@ import numpy as np
 import pytest
 from omegaconf import OmegaConf
 
+from dynacell.evaluation.cross_condition_probe import GROUP_PROBE_FILENAME
+
 from ._eval_fixtures import (
     N_POSITIONS,
     T,
@@ -197,6 +199,26 @@ def test_grouped_rejects_instance_ap_field_override(tmp_path: Path):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
 
 
+@pytest.mark.parametrize("condition", [0, 1])
+def test_grouped_rejects_foreground_override(tmp_path: Path, condition: int):
+    """A per-condition ``pixel_metrics.foreground`` raises: one bucket must not mix FG/no-FG or recipes."""
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["conditions"][condition]["pixel_metrics"] = {
+        "foreground": {"enabled": True, "smooth_sigma_um": 0.5, "feather_sigma_um": 0.5}
+    }
+
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="pixel_metrics.foreground"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
 def test_grouped_warns_loudly_on_process_plus_cache_miss(tmp_path: Path, capsys):
     """``executor=process`` + multiple conditions + cache-miss prints a loud WARNING.
 
@@ -360,3 +382,304 @@ def test_grouped_rejects_empty_conditions(tmp_path: Path):
     pipeline = live_pipeline_module()
     with pytest.raises(ValueError, match="non-empty"):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
+def test_grouped_only_conditions_runs_the_named_subset(tmp_path: Path):
+    """``only_conditions`` scores the named conditions and leaves the others untouched."""
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["only_conditions"] = ["cond_b"]
+    OmegaConf.set_struct(grouped_cfg, True)
+
+    pipeline = live_pipeline_module()
+    results = pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+    assert [name for name, _ in results] == ["cond_b"]
+    ((_, (pixel_b, _, _)),) = results
+    assert len(pixel_b) == N_POSITIONS * T
+    assert (save_root / "cond_b_grouped" / "pixel_metrics.csv").is_file()
+    assert not (save_root / "cond_a_grouped").exists()
+
+
+def test_grouped_only_conditions_keeps_index_names():
+    """An unnamed condition is selected by its leaf index, and keeps that label."""
+    pipeline = live_pipeline_module()
+    conditions = OmegaConf.create([{"name": "cond_a"}, {}])
+    assert [name for name, _ in pipeline._select_conditions(conditions, ["1"])] == ["1"]
+
+
+@pytest.mark.parametrize("only", ["01", 1])
+def test_grouped_only_conditions_rejects_a_scalar(only):
+    """A bracketless override is a scalar, not a list; it must not select by its characters."""
+    pipeline = live_pipeline_module()
+    conditions = OmegaConf.create([{}, {}])
+    with pytest.raises(ValueError, match="must be a list"):
+        pipeline._select_conditions(conditions, only)
+
+
+@pytest.mark.parametrize("only", [["cond_c"], ["cond_a", "cond_c"], []])
+def test_grouped_only_conditions_rejects_unknown_or_empty(tmp_path: Path, only: list[str]):
+    """An unknown name or an empty selection raises before any condition is scored."""
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["only_conditions"] = only
+
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="only_conditions"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+    assert not (save_root / "cond_a_grouped").exists()
+    assert not (save_root / "cond_b_grouped").exists()
+
+
+def _probe_rerun_config(tmp_path: Path, only: list[str], *, force: bool = False, extra: tuple[dict, ...] = ()):
+    """A mock + denv grouped config restricted to ``only``; returns ``(config, save_dirs)``.
+
+    ``extra`` appends conditions as given, after the mock and denv ones.
+    """
+    base = build_eval_config(
+        tmp_path / "pred.zarr",
+        tmp_path / "gt.zarr",
+        tmp_path / "g",
+        tmp_path / "p",
+        tmp_path,
+        executor="serial",
+        fov_workers=1,
+    )
+    (tmp_path / "pred.zarr").mkdir()
+    save_dirs = {cond: tmp_path / "er" / "model" / "ipsc" / f"a549__{cond}" for cond in ("mock", "denv")}
+    for d in save_dirs.values():
+        d.mkdir(parents=True)
+    conditions = [{"name": cond, "save": {"save_dir": str(d)}} for cond, d in save_dirs.items()]
+    config = OmegaConf.merge(
+        base,
+        {
+            "conditions": [*conditions, *extra],
+            "only_conditions": only,
+            "force_recompute": {"final_metrics": force},
+            "cross_condition_probe": {"enabled": True},
+        },
+    )
+    return config, save_dirs
+
+
+def _stub_grouped_scoring(pipeline, monkeypatch, cached: set[Path]) -> tuple[list[list[Path]], list[Path], list[Path]]:
+    """Stub scoring; ``cached`` dirs hold metrics that a non-forced run would reuse.
+
+    The cache check keeps the real one's order: a force flag rejects first, and a
+    missing prediction store raises. The probe stub writes a fresh CSV into every
+    infected dir it can pair with a mock. Returns the dirs each probe call received,
+    the dirs whose cache was checked, and the dirs that were scored.
+    """
+    calls: list[list[Path]] = []
+    checked: list[Path] = []
+    scored: list[Path] = []
+
+    def evaluate(cfg, *, models, cp_space, prediction_snapshot):
+        scored.append(Path(cfg.save.save_dir))
+        return [], [], []
+
+    def cache_valid(cfg):
+        checked.append(Path(cfg.save.save_dir))
+        if cfg.force_recompute.all or cfg.force_recompute.final_metrics:
+            return False
+        if not Path(cfg.io.pred_path).exists():
+            raise FileNotFoundError(cfg.io.pred_path)
+        return Path(cfg.save.save_dir) in cached
+
+    def probe(dirs, n_splits, rng_seed):
+        calls.append(list(dirs))
+        if not any(d.name.endswith("__mock") for d in dirs):
+            return []
+        written = [d / GROUP_PROBE_FILENAME for d in dirs if d.name.endswith("__denv")]
+        for path in written:
+            path.write_text("fresh")
+        return written
+
+    monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "load_eval_models", lambda cfg: object())
+    monkeypatch.setattr(pipeline, "prediction_sources", lambda *a: {})
+    monkeypatch.setattr(pipeline, "evaluate_predictions", evaluate)
+    monkeypatch.setattr(pipeline, "_load_cached_final_metrics", lambda cfg: ([], [], []))
+    monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "_final_metrics_cache_valid", cache_valid)
+    monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", probe)
+    return calls, checked, scored
+
+
+def test_mock_only_rerun_reprobes_cached_infected(tmp_path: Path, monkeypatch):
+    """Rescoring mock alone re-probes each infected condition whose cache is current."""
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"])
+    (dirs["denv"] / GROUP_PROBE_FILENAME).write_text("stale")
+    calls, _, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert calls == [[dirs["mock"], dirs["denv"]]]
+    assert (dirs["denv"] / GROUP_PROBE_FILENAME).read_text() == "fresh"
+
+
+@pytest.mark.parametrize("mock_cached", [True, False])
+def test_infected_only_rerun_never_keeps_a_stale_probe(tmp_path: Path, monkeypatch, mock_cached: bool):
+    """Rescoring an infected condition re-probes it against a current mock, else drops its old CSV."""
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["denv"])
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("stale")
+    calls, _, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]} if mock_cached else set())
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert calls == [[dirs["denv"], dirs["mock"]] if mock_cached else [dirs["denv"]]]
+    if mock_cached:
+        assert probe_csv.read_text() == "fresh"
+    else:
+        assert not probe_csv.exists()
+
+
+def test_forced_subset_rerun_rescores_its_probe_group(tmp_path: Path, monkeypatch):
+    """Under force, the selection pulls in its probe-group siblings, so the probe stays whole.
+
+    A forced run trusts no cache (``force_recompute`` is how a recipe change the cache
+    check cannot see, e.g. ``feature_metrics.focus_slab``, is applied), so a sibling is
+    rescored rather than paired from its old embeddings. Another model's dir is not.
+    """
+    pipeline = live_pipeline_module()
+    other_model = tmp_path / "er" / "other" / "ipsc" / "a549__denv"
+    extra = ({"name": "other", "save": {"save_dir": str(other_model)}},)
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"], force=True, extra=extra)
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("stale")
+    calls, _, scored = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    results = pipeline.evaluate_predictions_grouped(config)
+
+    assert [name for name, _ in results] == ["mock", "denv"]
+    assert scored == [dirs["mock"], dirs["denv"]]
+    assert calls == [[dirs["mock"], dirs["denv"]]]
+    assert probe_csv.read_text() == "fresh"
+
+
+def test_failed_probe_leaves_no_probe_on_replaced_embeddings(tmp_path: Path, monkeypatch):
+    """A probe that raises after a rescore still drops the CSVs the rescore made stale."""
+    pipeline = live_pipeline_module()
+    zikv = tmp_path / "er" / "model" / "ipsc" / "a549__zikv"
+    zikv.mkdir(parents=True)
+    extra = ({"name": "zikv", "io": {"pred_path": str(tmp_path / "missing.zarr")}, "save": {"save_dir": str(zikv)}},)
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"], extra=extra)
+    stale = [dirs["denv"] / GROUP_PROBE_FILENAME, zikv / GROUP_PROBE_FILENAME]
+    for path in stale:
+        path.write_text("stale")
+    _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    def failing_probe(dirs, n_splits, rng_seed):
+        raise RuntimeError("probe failed")
+
+    monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", failing_probe)
+
+    with pytest.raises(RuntimeError, match="probe failed"):
+        pipeline.evaluate_predictions_grouped(config)
+
+    assert not any(path.exists() for path in stale)
+
+
+@pytest.mark.parametrize("fails_at", ["counterpart", "probe"])
+def test_cached_retry_repairs_probes_after_a_failed_mock_rescore(tmp_path: Path, monkeypatch, fails_at: str):
+    """A rescore that fails after replacing the mock's embeddings is repaired by a cached retry.
+
+    The failed run leaves no infected probe scored on the old mock; the retry reuses the
+    mock it saved, yet still re-probes the infected conditions.
+    """
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"])
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("old mock")
+    cached = {dirs["denv"]}
+    calls, _, scored = _stub_grouped_scoring(pipeline, monkeypatch, cached=cached)
+    stub_probe = pipeline._cross_condition_run_for_group
+
+    def failing_ref(cfg):
+        if Path(cfg.save.save_dir) == dirs["denv"]:
+            raise RuntimeError("counterpart failed")
+
+    def failing_probe(dirs, n_splits, rng_seed):
+        raise RuntimeError("probe failed")
+
+    if fails_at == "counterpart":
+        monkeypatch.setattr(pipeline, "apply_dataset_ref", failing_ref)
+    else:
+        monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", failing_probe)
+    with pytest.raises(RuntimeError, match=f"{fails_at} failed"):
+        pipeline.evaluate_predictions_grouped(config)
+    assert scored == [dirs["mock"]]
+    assert not probe_csv.exists()
+
+    # The dependency is restored, and the retry finds the mock it saved current.
+    monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "_cross_condition_run_for_group", stub_probe)
+    cached.add(dirs["mock"])
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert scored == [dirs["mock"]]
+    assert calls == [[dirs["mock"], dirs["denv"]]]
+    assert probe_csv.read_text() == "fresh"
+    assert not (dirs["mock"] / pipeline.PROBE_PENDING_FILENAME).exists()
+
+
+def test_reused_mock_keeps_infected_probes(tmp_path: Path, monkeypatch):
+    """A selected mock served from its cache changed no embeddings, so infected probes stay."""
+    pipeline = live_pipeline_module()
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"])
+    probe_csv = dirs["denv"] / GROUP_PROBE_FILENAME
+    probe_csv.write_text("current")
+    calls, checked, scored = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"]})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert scored == []
+    assert dirs["denv"] not in checked
+    assert calls == [[dirs["mock"]]]
+    assert probe_csv.read_text() == "current"
+
+
+def test_infected_rerun_does_not_reprobe_its_siblings(tmp_path: Path, monkeypatch):
+    """Rescoring one infected condition re-probes it alone; a sibling's probe inputs did not change."""
+    pipeline = live_pipeline_module()
+    zikv = tmp_path / "er" / "model" / "ipsc" / "a549__zikv"
+    extra = ({"name": "zikv", "save": {"save_dir": str(zikv)}},)
+    config, dirs = _probe_rerun_config(tmp_path, ["denv"], extra=extra)
+    calls, checked, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["mock"], zikv})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert zikv not in checked
+    assert calls == [[dirs["denv"], dirs["mock"]]]
+
+
+def test_subset_rerun_skips_conditions_outside_its_probe_groups(tmp_path: Path, monkeypatch):
+    """Only real counterparts are checked; another model's or a missing-store sibling cannot fail the run."""
+    pipeline = live_pipeline_module()
+    missing = str(tmp_path / "missing.zarr")
+    other_model = tmp_path / "er" / "other" / "ipsc" / "a549__denv"
+    zikv = tmp_path / "er" / "model" / "ipsc" / "a549__zikv"
+    extra = (
+        {"name": "other", "io": {"pred_path": missing}, "save": {"save_dir": str(other_model)}},
+        {"name": "zikv", "io": {"pred_path": missing}, "save": {"save_dir": str(zikv)}},
+    )
+    config, dirs = _probe_rerun_config(tmp_path, ["mock"], extra=extra)
+    calls, checked, _ = _stub_grouped_scoring(pipeline, monkeypatch, cached={dirs["denv"]})
+
+    pipeline.evaluate_predictions_grouped(config)
+
+    assert other_model not in checked
+    assert calls == [[dirs["mock"], dirs["denv"]]]

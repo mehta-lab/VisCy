@@ -1,0 +1,165 @@
+# FCMAE-2D (FullyConvolutionalMAE, pretraining=False) with FCMAE-2D
+# pretrained encoder init on nucleus (NUCL) — joint
+# ipsc_confocal + a549_mantis pooled, in-focus 2D benchmark track.
+# Paper key: VSCyto2D. Companion to the fcmae_vscyto2d_scratch joint
+# leaf — the two are identical except this one loads the 2D FCMAE
+# encoder weights and drops lr to 0.0002 (mirroring cytoland VSCyto2D
+# finetuning). Mirrors nucleus/fcmae_vscyto2d_pretrained/ipsc_confocal
+# on the joint train_set, flattened to the 2D focus-slab geometry.
+#
+# Joint leaf: BatchedConcatDataModule with two explicit HCSDataModule
+# children (no benchmark.dataset_ref — joint leaves bypass the single-
+# dataset resolver, so both child data_paths are the offline
+# `_focus.zarr` slab stores directly). Only
+# model_overlays/fcmae_vscyto2d_fit.yml is composed; the data block is
+# authored inline because joint hparams live on the children.
+#
+# Topology: single-GPU (inherited from model_overlays/fcmae_vscyto2d_fit.yml
+# single_gpu base). z_window_size=1 reads one in-focus plane per window;
+# BatchedConcatDataModule does NOT divide batch_size by num_samples, so
+# batch_size=4 * num_samples=4 = 16 GPU samples/step, matching the
+# single-set 2D data overlay's effective 16.
+base:
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  gene: Nuclei
+  target: nucleus
+  target_id: nucleus
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: fcmae_vscyto2d_pretrained
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__fcmae_vscyto2d_pretrained
+
+model:
+  init_args:
+    # Load only the encoder from the 2D FCMAE ckpt (400 ep on HEK + A549 +
+    # BJ5a + LIVECell + CTMC phase data); decoder/head stay at fresh init.
+    # lr 0.0002 overrides the overlay's 0.0004 for pretrained finetuning.
+    encoder_only: true
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/fcmae-2d/pretrain-logs/hek-a549-bj5a-livecell-ctmc-400ep/checkpoints/last.ckpt
+    lr: 0.0002
+
+trainer:
+  logger:
+    init_args:
+      name: FCMAE_VSCyto2D_Pretrained_JOINT_NUCL
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/fcmae_vscyto2d_pretrained
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/fcmae_vscyto2d_pretrained/checkpoints
+
+_hcs_init_args: &hcs_init_args
+  source_channel: Phase3D
+  target_channel: Nuclei
+  z_window_size: 1
+  # batch_size is NOT divided by num_samples in joint mode: 4 indices *
+  # num_samples=4 = 16 GPU samples per rank, matching the single-set 2D
+  # data overlay's effective 16.
+  batch_size: 4
+  num_workers: 4
+  yx_patch_size: [384, 384]
+  split_ratio: 0.8
+  mmap_preload: true
+  scratch_dir: /dev/shm
+  persistent_workers: true
+  normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Nuclei]
+        level: fov_statistics
+        subtrahend: median
+        divisor: iqr
+  augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys: [Phase3D, Nuclei]
+        w_key: Nuclei
+        spatial_size: [1, 600, 600]
+        num_samples: 4
+  gpu_augmentations:
+    - class_path: viscy_transforms.BatchedRandAffined
+      init_args:
+        keys: [source, target]
+        prob: 0.8
+        rotate_range: [0, 0, 0]
+        shear_range: [0.0, 0.05, 0.05]
+        scale_range: [[1, 1], [0.5, 1.5], [0.5, 1.5]]
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [1, 384, 384]
+    - class_path: viscy_transforms.BatchedRandAdjustContrastd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        gamma: [0.8, 1.2]
+    - class_path: viscy_transforms.BatchedRandScaleIntensityd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        factors: 0.5
+    - class_path: viscy_transforms.BatchedRandGaussianNoised
+      init_args:
+        keys: [source]
+        prob: 0.5
+        mean: 0.0
+        std: 0.3
+    - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        sigma_x: [0.25, 0.75]
+        sigma_y: [0.25, 0.75]
+        sigma_z: [0, 0]
+  val_gpu_augmentations:
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [1, 384, 384]
+
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # ipsc_confocal — aics-hipsc multi-marker in-focus slab (Nuclei channel)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell_focus.zarr
+      # a549_mantis — pooled dual nucl+memb in-focus slab (Nuclei channel)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/dual_nucl_memb_all_focus.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto2D_Pretrained_JOINT_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/fcmae_vscyto2d_pretrained
+  # 5-plane focus stores put the dense mmap buffer at ~5-11 GiB, so the 256G in
+  # hardware_gpu_any_long.yml is inherited 3D scale and just queues slower. Set
+  # here, not in the model overlay: the hardware profile composes AFTER the
+  # overlay and would override it. (Applied live via scontrol 2026-07-23; a
+  # resubmit silently re-requested 256G until this was baked.)
+  sbatch:
+    mem: "128G"

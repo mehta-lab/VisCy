@@ -1,0 +1,69 @@
+# pix2pix3d_unetvit MODERNIZED fit on mito (Structure channel of TOMM20.zarr) — AICS iPSC confocal, 4-GPU DDP.
+#
+# Finalized "Run D" recipe: modernized overlay (nonsat + R1 + G-EMA, equal LR)
+# + lambda_l1=10 + LeCam gamma=0.3 + 40 epochs. Mirrors the completed nucleus
+# modernized runs (same recipe, Structure channel / TOMM20 store). Submit with NO overrides.
+#
+# BACKFILL. This leaf was missing while its a549_mantis and joint siblings existed,
+# and it was the only gap in the 12-cell pix2pix3d (4 organelles x 3 pools) grid — so
+# no iPSC-trained mito GAN was ever trained. wandb (computational_imaging/dynacell)
+# holds A549_TOMM20 and JOINT_TOMM20 runs from 2026-07-07/08 and no iPSC_TOMM20 run in
+# any state. The gap surfaced on 2026-07-15, when the four iPSC-trained mito predict
+# leaves failed in ~30 s with a ValueError naming their placeholder ckpt_path (jobs
+# 34881151-53 / 34891026-28); the A549- and joint-trained
+# predicts in the same batch failed for an unrelated transient reason and succeeded on
+# resubmit, which is how a permanent config gap came to look like shared flakiness.
+# The empty Pix2Pix3D column in the paper's iPSC mitochondria table is this hole.
+#
+# Unlike the a549_mantis sibling there is no `data:` override: A549 needs one because
+# its condition-pooled TOMM20_all.zarr has no manifest resolver, whereas iPSC resolves
+# data_path / source_channel / target_channel from dataset_ref (aics-hipsc + tomm20),
+# exactly as every other iPSC-trained mito fit does.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: mito__ipsc_confocal__pix2pix3d_unetvit_modernized
+
+model:
+  init_args:
+    lambda_l1: 10.0
+    lecam_gamma: 0.3
+
+trainer:
+  max_epochs: 40
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_iPSC_TOMM20_4gpu_modernized_lambdaL1_10_lecam_40ep
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/pix2pix3d_unetvit
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        filename: "epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/pix2pix3d_unetvit/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_iPSC_TOMM20_4gpu_modernized_lambdaL1_10_lecam_40ep
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/pix2pix3d_unetvit
+  # pix2pix3d GAN (UNetViT3D G + multiscale-patch D, large 3D crops) OOMs on
+  # 80 GB h100; needs h200 (141 GB). Narrow the hardware_4gpu h100|h200 default.
+  sbatch:
+    constraint: h200

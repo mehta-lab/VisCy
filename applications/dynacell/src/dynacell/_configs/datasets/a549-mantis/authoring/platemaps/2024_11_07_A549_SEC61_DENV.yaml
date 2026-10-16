@@ -1,0 +1,36 @@
+# A549 mantis platemap — 2024_11_07_A549_SEC61_DENV
+#
+# Derived from configs/datasets/a549-mantis/airtable/2024_11_07_A549_SEC61_DENV.json
+# (all 16 FOV rows). See README.md in that directory for the sync workflow.
+#
+# Target: SEC61B (ER) on GFP cube, all wells.
+
+experiment: 2024_11_07_A549_SEC61_DENV
+run_dir: run_20260325_130901
+zarr_filename: 2024_11_07_A549_SEC61_DENV.zarr
+
+native_delta_t_min: 10
+hpi_start: 4.0
+native_t: 109
+
+# All wells image simultaneously; hpi_start is plate-level (infection clock).
+# mock wells are labeled against the same clock by convention.
+wells:
+  B/1:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
+  B/2:
+    condition: DENV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
+  B/3:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
+  C/2:
+    condition: DENV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
