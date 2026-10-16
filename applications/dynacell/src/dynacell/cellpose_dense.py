@@ -60,8 +60,9 @@ class CellposeDense(nn.Module):
 
     It is loaded on the CPU, in eval mode, and follows the module's ``.to(device)``.
     The mode matters: cellpose builds the network in train mode, whose flows differ
-    from stock inference by up to 1.7 (measured). Keeping it frozen afterwards (eval
-    mode, no parameter gradients) is the caller's job; ``SegConsistencyLoss`` does it.
+    from stock inference by up to 1.7 (measured), so ``train()`` keeps it in eval even
+    if this wrapper is ever a registered submodule. Parameter gradients are the caller's
+    to switch off; ``SegConsistencyLoss`` does it.
 
     Parameters
     ----------
@@ -95,6 +96,10 @@ class CellposeDense(nn.Module):
         self.net = cpm.net.eval()
         self.model_name = model_name
         self.checkpoint_tiles = checkpoint_tiles
+
+    def train(self, mode: bool = True) -> "CellposeDense":
+        """Keep the network in eval mode whatever ``mode`` is."""
+        return super().train(False)
 
     @classmethod
     def tiling(cls, ly: int, lx: int) -> tuple[tuple[int, int, int, int], list[tuple[int, int]]]:

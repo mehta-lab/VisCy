@@ -48,6 +48,14 @@ def test_configured_crop_is_one_cellpose_tile():
     assert len(CellposeDense.tiling(256, 256)[1]) == 4
 
 
+@needs_cpsam
+def test_train_keeps_the_network_in_eval(cpsam_bf16):
+    """Even as a registered submodule, a parent's train() leaves cellpose's network in eval mode."""
+    parent = torch.nn.ModuleDict({"seg": cpsam_bf16})
+    parent.train()
+    assert not cpsam_bf16.training and not any(m.training for m in cpsam_bf16.net.modules())
+
+
 def test_refuses_the_evaluation_segmenter_and_missing_models():
     with pytest.raises(ValueError, match="evaluation segmenter"):
         CellposeDense("cpdino")
