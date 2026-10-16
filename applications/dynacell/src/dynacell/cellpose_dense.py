@@ -96,6 +96,28 @@ class CellposeDense(nn.Module):
         self.model_name = model_name
         self.checkpoint_tiles = checkpoint_tiles
 
+    @classmethod
+    def tiling(cls, ly: int, lx: int) -> tuple[tuple[int, int, int, int], list[tuple[int, int]]]:
+        """Return cellpose's padding and tile corners for a ``(ly, lx)`` image.
+
+        ``get_pad_yx`` then ``make_tiles`` (non-augmented): the image is padded to a
+        multiple of 16 of at least ``BSIZE`` plus a margin, so a 240-px image pads to
+        exactly one 256-px tile while a 256-px one pads to 272 and needs 2 x 2 tiles.
+
+        Returns
+        -------
+        tuple
+            ``(yp1, yp2, xp1, xp2)`` padding and the ``(y, x)`` corner of every tile.
+        """
+        bs = cls.BSIZE
+        yp1, yp2, xp1, xp2 = cp_transforms.get_pad_yx(ly, lx, min_size=(bs, bs))
+        py, px = ly + yp1 + yp2, lx + xp1 + xp2
+        ny = 1 if py <= bs else int(np.ceil((1.0 + 2 * cls.TILE_OVERLAP) * py / bs))
+        nx = 1 if px <= bs else int(np.ceil((1.0 + 2 * cls.TILE_OVERLAP) * px / bs))
+        ys = np.linspace(0, py - bs, ny).astype(int)
+        xs = np.linspace(0, px - bs, nx).astype(int)
+        return (yp1, yp2, xp1, xp2), [(int(a), int(c)) for a in ys for c in xs]
+
     def _net_flows(self, tiles: Tensor) -> Tensor:
         """Run the network on ``(N, 3, 256, 256)`` tiles; return its ``(N, 3, 256, 256)`` output."""
         return self.net(tiles)[0]
@@ -150,15 +172,10 @@ class CellposeDense(nn.Module):
         net_dtype = next(self.net.parameters()).dtype
         xn = torch.cat([xn, torch.zeros_like(xn), torch.zeros_like(xn)], dim=1)
         bs = self.BSIZE
-        yp1, yp2, xp1, xp2 = cp_transforms.get_pad_yx(ly0, lx0, min_size=(bs, bs))
+        pads, coords = self.tiling(ly0, lx0)
+        yp1, yp2, xp1, xp2 = pads
         xn = F.pad(xn, (xp1, xp2, yp1, yp2))
         ly, lx = xn.shape[-2:]
-        # make_tiles (non-augmented); ly, lx >= bs after get_pad_yx.
-        ny = 1 if ly <= bs else int(np.ceil((1.0 + 2 * self.TILE_OVERLAP) * ly / bs))
-        nx = 1 if lx <= bs else int(np.ceil((1.0 + 2 * self.TILE_OVERLAP) * lx / bs))
-        ys = np.linspace(0, ly - bs, ny).astype(int)
-        xs = np.linspace(0, lx - bs, nx).astype(int)
-        coords = [(int(a), int(c)) for a in ys for c in xs]
         tiles = torch.stack([xn[:, :, a : a + bs, c : c + bs] for a, c in coords], dim=1).reshape(-1, 3, bs, bs)
         checkpointed = self.checkpoint_tiles is not None and tiles.requires_grad
         step = self.checkpoint_tiles if checkpointed else batch_size

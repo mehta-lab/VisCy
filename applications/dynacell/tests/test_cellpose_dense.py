@@ -12,6 +12,7 @@ pytest.importorskip("cellpose")
 
 from cellpose import models as cp_models  # noqa: E402
 from cellpose import transforms as cp_transforms  # noqa: E402
+from generate_spotlight_v2_leaves import SEG_CONSISTENCY_ARGS  # noqa: E402
 
 from dynacell.cellpose_dense import CellposeDense, normalize99_diff  # noqa: E402
 from dynacell.engine import DynacellUNet  # noqa: E402
@@ -37,6 +38,14 @@ def _nuclei_image(shape: tuple[int, int], seed: int = 0) -> np.ndarray:
 @pytest.fixture(scope="module")
 def cpsam_bf16() -> CellposeDense:
     return CellposeDense("cpsam").cuda()
+
+
+def test_configured_crop_is_one_cellpose_tile():
+    """The segcons leaves' crop pads to exactly one tile; a 256-px crop would pad to 2 x 2."""
+    crop = SEG_CONSISTENCY_ARGS["crop_size"]
+    _, coords = CellposeDense.tiling(crop, crop)
+    assert len(coords) == 1
+    assert len(CellposeDense.tiling(256, 256)[1]) == 4
 
 
 def test_refuses_the_evaluation_segmenter_and_missing_models():

@@ -383,5 +383,5 @@ def test_segcons_builds_with_its_calibrated_weight(baseline: str) -> None:
     assert isinstance(term, SegConsistencyLoss)
     assert type(term.segmenter).__name__ == "CellposeDense" and term.segmenter.model_name == "cpsam"
     assert term.segmenter.checkpoint_tiles == 1
-    assert (term.slab_halfwidth, term.crop_size) == (1, 256)
+    assert (term.slab_halfwidth, term.crop_size) == (1, 240)
     assert not any(k.startswith("seg_consistency") for k in module.state_dict())

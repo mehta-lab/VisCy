@@ -267,7 +267,9 @@ FORK_SCHEDULES: dict[str, dict[str, dict[str, Any]]] = {
 }
 # S_train from gate G4: cpsam (Kendall tau vs cpdino nucleus Dice/mAP .65/.80, not in the eval
 # stack). One slab-MIP pass per sample around the target crop's nuclear-area plane, center
-# 256-px tile (the geometry the G4 bench timed); see viscy_utils.losses.seg_consistency.
+# 240-px crop, which cellpose pads to exactly one 256-px tile, the geometry the G4 bench timed
+# (a 256-px crop pads to 272 and runs 2 x 2 tiles, 4x the segmenter compute, measured with
+# get_pad_yx); see viscy_utils.losses.seg_consistency.
 # Every sample of the batch is scored. The with-gradient pass is checkpointed per tile: without
 # it each sample holds ~5.6 GB of activations (G4 H200 bench: 42.9 GB at 8 samples, against the
 # FNet-3D fit's ~41 GB), with it ~0.07 GB per sample at ~1.8x the term's time (A40, 2026-10-15).
@@ -277,7 +279,7 @@ SEG_CONSISTENCY_ARGS: dict[str, Any] = {
         "init_args": {"model_name": "cpsam", "checkpoint_tiles": 1},
     },
     "slab_halfwidth": 1,
-    "crop_size": 256,
+    "crop_size": 240,
 }
 # seg_consistency_weight per arm: the median over 20 seeded val batches of ||grad base|| /
 # ||grad seg_consistency|| at the fork checkpoint (calibrate_variant.py --variants segcons --ckpt
@@ -527,8 +529,8 @@ _DESCRIPTION: dict[str, str] = {
     "segcons_ctrl": "fork: model ckpt_path (the converged baseline checkpoint, weights only) + the fine-tune "
     "budget and LR of FORK_SCHEDULES; no other change (the no-term control of segcons)",
     "segcons": "the segcons_ctrl fork + model seg_consistency (SegConsistencyLoss, Cellpose-SAM cpsam, slab "
-    "halfwidth 1, 256-px crop, per-tile activation checkpointing) + seg_consistency_weight (gradient-norm "
-    "calibrated at the fork checkpoint)",
+    "halfwidth 1, 240-px crop (one cellpose tile), per-tile activation checkpointing) + seg_consistency_weight "
+    "(gradient-norm calibrated at the fork checkpoint)",
 }
 
 # Keys every fit / predict arm renames so it owns its run dir, wandb run and job.

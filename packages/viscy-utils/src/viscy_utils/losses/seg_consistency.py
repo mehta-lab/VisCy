@@ -21,7 +21,8 @@ of planes excluded and the crop center as the fallback, as
 (slab halfwidth 1 there). The same planes are projected from the prediction. One
 segmenter pass per sample is the cheapest geometry the G4 bench measured, and it is
 the geometry the eval scores. ``Z = 1`` crops (2-D models) give their single plane.
-The projection is then center-cropped to ``crop_size`` (one 256-px Cellpose tile).
+The projection is then center-cropped to ``crop_size``: 240 px, which Cellpose pads to
+exactly one 256-px tile (a 256-px crop pads to 272 and costs 2 x 2 tiles).
 
 The segmenter is held outside the module tree, so its weights never enter a
 ``state_dict`` (checkpoints stay the backbone's, and ``ckpt_path`` loads of baseline
@@ -154,7 +155,7 @@ class SegConsistencyLoss(nn.Module):
         self,
         segmenter: nn.Module,
         slab_halfwidth: int = 1,
-        crop_size: int | None = 256,
+        crop_size: int | None = 240,
     ) -> None:
         super().__init__()
         if slab_halfwidth < 0:
