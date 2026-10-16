@@ -39,7 +39,7 @@ from viscy_models.gan import (
 )
 from viscy_models.unet.fcmae import FullyConvolutionalMAE
 from viscy_utils.log_images import detach_sample, log_image_grid
-from viscy_utils.losses import BackgroundLowPass, SegAuxDice
+from viscy_utils.losses import BackgroundLowPass, SegAuxDice, SegConsistencyLoss
 from viscy_utils.optimizers import configure_adamw_scheduler
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -120,6 +120,26 @@ def _check_seg_aux_args(
             f"{type(base_loss).__name__} accepts fg_mask and would change meaning. "
             "Use a mask-free base loss (e.g. MSELoss, L1Loss, MixedLoss) with seg_aux."
         )
+
+
+def _check_seg_consistency_args(seg_consistency: SegConsistencyLoss | None, weight: float | None) -> None:
+    """Reject a ``seg_consistency`` weight without the term, and the term without a weight.
+
+    The weight has no default: it is calibrated per cell (median over validation
+    batches of ``||grad base|| / ||grad seg_consistency||`` at the starting
+    checkpoint), and a leaf that still carries the ``null`` placeholder must not train.
+    """
+    if seg_consistency is None:
+        if weight is not None:
+            raise ValueError(f"seg_consistency_weight={weight} has no effect without seg_consistency.")
+        return
+    if weight is None:
+        raise ValueError(
+            "seg_consistency_weight is unset (placeholder): calibrate it as the median gradient-norm ratio "
+            "||grad base|| / ||grad seg_consistency|| at the starting checkpoint and set it in the leaf."
+        )
+    if weight < 0:
+        raise ValueError(f"seg_consistency_weight must be >= 0, got {weight}")
 
 
 def _require_fg_mask(batch: Sample) -> Tensor:
@@ -593,6 +613,13 @@ class DynacellUNet(LightningModule):
         must then carry ``fg_mask`` (set ``fg_mask_key`` on the datamodule).
     seg_aux_weight : float
         Weight of the ``seg_aux`` term. Must be ``0.0`` when ``seg_aux`` is None.
+    seg_consistency : SegConsistencyLoss or None
+        Segmenter-consistency term on ``(pred, target)``, added as
+        ``seg_consistency_weight * seg_consistency(pred, target)`` on top of the
+        rest of the training loss. ``loss/validate`` stays without it; its value
+        is logged as ``loss/validate_segcons``. Needs no ``fg_mask``.
+    seg_consistency_weight : float or None
+        Weight of the ``seg_consistency`` term; required with it, ``None`` without it.
     channels_last : bool, default False
         Store the backbone's convolution weights in channels-last layout
         (``torch.channels_last_3d`` for 5-D weights, ``torch.channels_last``
@@ -633,6 +660,8 @@ class DynacellUNet(LightningModule):
         encoder_only: bool = False,
         seg_aux: SegAuxDice | None = None,
         seg_aux_weight: float = 0.0,
+        seg_consistency: SegConsistencyLoss | None = None,
+        seg_consistency_weight: float | None = None,
         channels_last: bool = False,
         compile_model: bool = False,
     ) -> None:
@@ -641,7 +670,15 @@ class DynacellUNet(LightningModule):
         # resume takes them from its own config and older checkouts can still
         # resume checkpoints written with them on.
         self.save_hyperparameters(
-            ignore=["loss_function", "ckpt_path", "encoder_only", "seg_aux", "channels_last", "compile_model"]
+            ignore=[
+                "loss_function",
+                "ckpt_path",
+                "encoder_only",
+                "seg_aux",
+                "seg_consistency",
+                "channels_last",
+                "compile_model",
+            ]
         )
         if model_config is None:
             model_config = {}
@@ -662,6 +699,9 @@ class DynacellUNet(LightningModule):
         self.predict_phase_shifts = predict_phase_shifts
         self.seg_aux = seg_aux
         self.seg_aux_weight = seg_aux_weight
+        _check_seg_consistency_args(seg_consistency, seg_consistency_weight)
+        self.seg_consistency = seg_consistency
+        self.seg_consistency_weight = seg_consistency_weight
         self.channels_last = channels_last
         self.compile_model = compile_model
         # Fit-scoped compiled backbone; a plain dict keeps it out of the module tree.
@@ -671,6 +711,7 @@ class DynacellUNet(LightningModule):
         # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
         self.validation_losses: list[list[tuple[Tensor, int]]] = []
         self.validation_dice_losses: list[list[tuple[Tensor, int]]] = []
+        self.validation_segcons_losses: list[list[tuple[Tensor, int]]] = []
         self.validation_step_outputs: list = []
 
         # Cache fg_mask compatibility to avoid per-batch inspect.signature().
@@ -818,6 +859,10 @@ class DynacellUNet(LightningModule):
             base, dice, n_valid = self._compute_seg_aux_loss(pred, target, batch)
             loss = base + self.seg_aux_weight * dice
             components = {"base": base, "dice": dice, "dice_n_valid": n_valid}
+        if self.seg_consistency is not None:
+            segcons, segcons_components = self.seg_consistency(pred, target, return_components=True)
+            components = {"base": loss, **components, **segcons_components}
+            loss = loss + self.seg_consistency_weight * segcons
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
         self.log(
@@ -834,6 +879,7 @@ class DynacellUNet(LightningModule):
         # path. Without these the fused scalar cannot say whether the Dice term
         # is contributing anything, which is what the lambda_mse choice rests on.
         # With seg_aux: the base term, the unweighted Dice, and its valid-patch count.
+        # With seg_consistency: the loss without it, and its unweighted flow/probability terms.
         for name, value in components.items():
             self.log(
                 f"loss/{name}_train",
@@ -868,6 +914,9 @@ class DynacellUNet(LightningModule):
             # the same as the baseline's; the Dice goes to loss/validate_dice.
             loss, dice, _ = self._compute_seg_aux_loss(pred, target, batch)
             _record_val_loss(self.validation_dice_losses, dataloader_idx, dice.detach(), source.shape[0])
+        if self.seg_consistency is not None:
+            segcons = self.seg_consistency(pred, target)
+            _record_val_loss(self.validation_segcons_losses, dataloader_idx, segcons.detach(), source.shape[0])
         _record_val_loss(self.validation_losses, dataloader_idx, loss.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
@@ -928,9 +977,14 @@ class DynacellUNet(LightningModule):
             self.log("loss/validate", _aggregate_validation_losses(self.validation_losses), sync_dist=True)
         if self.validation_dice_losses:
             self.log("loss/validate_dice", _aggregate_validation_losses(self.validation_dice_losses), sync_dist=True)
+        if self.validation_segcons_losses:
+            self.log(
+                "loss/validate_segcons", _aggregate_validation_losses(self.validation_segcons_losses), sync_dist=True
+            )
         self.validation_step_outputs.clear()
         self.validation_losses.clear()
         self.validation_dice_losses.clear()
+        self.validation_segcons_losses.clear()
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with LR scheduler."""
@@ -1628,6 +1682,14 @@ class DynacellGAN(LightningModule):
         Every batch must carry ``fg_mask``.
     seg_aux_weight : float
         Weight of the ``seg_aux`` term. Must be ``0.0`` when ``seg_aux`` is None.
+    seg_consistency : SegConsistencyLoss or None
+        Segmenter-consistency term on the generator output, added to the
+        generator objective as ``seg_consistency_weight * seg_consistency(pred,
+        target)`` (not scaled by ``lambda_l1``). ``loss/validate`` /
+        ``loss/validate_ema`` stay reconstruction-only; its value is logged as
+        ``loss/validate_segcons`` / ``loss/validate_ema_segcons``.
+    seg_consistency_weight : float or None
+        Weight of the ``seg_consistency`` term; required with it, ``None`` without it.
     """
 
     def __init__(
@@ -1661,6 +1723,8 @@ class DynacellGAN(LightningModule):
         ckpt_path: str | None = None,
         seg_aux: SegAuxDice | None = None,
         seg_aux_weight: float = 0.0,
+        seg_consistency: SegConsistencyLoss | None = None,
+        seg_consistency_weight: float | None = None,
     ) -> None:
         super().__init__()
         # Lightning's manual-optimization API: required because the GAN
@@ -1672,7 +1736,7 @@ class DynacellGAN(LightningModule):
         # subcommands for any key the predict leaf does not declare. A single
         # pickled class also makes torch.load(weights_only=True) — which
         # _ckpt_state_dict uses — raise for the whole file.
-        self.save_hyperparameters(ignore=["ckpt_path", "recon_loss", "seg_aux"])
+        self.save_hyperparameters(ignore=["ckpt_path", "recon_loss", "seg_aux", "seg_consistency"])
 
         net_class = _ARCHITECTURE.get(architecture)
         if net_class is None:
@@ -1710,6 +1774,9 @@ class DynacellGAN(LightningModule):
         _check_seg_aux_args(seg_aux, seg_aux_weight, self.recon_loss, self._recon_accepts_fg_mask)
         self.seg_aux = seg_aux
         self.seg_aux_weight = seg_aux_weight
+        _check_seg_consistency_args(seg_consistency, seg_consistency_weight)
+        self.seg_consistency = seg_consistency
+        self.seg_consistency_weight = seg_consistency_weight
 
         self.lambda_l1 = lambda_l1
         self.loss_type = loss_type
@@ -1762,6 +1829,8 @@ class DynacellGAN(LightningModule):
         self.validation_losses_ema: list[list[tuple[Tensor, int]]] = []
         self.validation_dice_raw: list[list[tuple[Tensor, int]]] = []
         self.validation_dice_ema: list[list[tuple[Tensor, int]]] = []
+        self.validation_segcons_raw: list[list[tuple[Tensor, int]]] = []
+        self.validation_segcons_ema: list[list[tuple[Tensor, int]]] = []
         self.validation_step_outputs: list = []
 
         # Build example_input_array for graph logging (TensorBoard/W&B).
@@ -2087,6 +2156,9 @@ class DynacellGAN(LightningModule):
         if self.seg_aux is not None:
             dice_train, dice_n_valid = self._compute_seg_aux(pred, target, batch)
             g_loss = g_loss + self.seg_aux_weight * dice_train
+        if self.seg_consistency is not None:
+            segcons_train, segcons_components = self.seg_consistency(pred, target, return_components=True)
+            g_loss = g_loss + self.seg_consistency_weight * segcons_train
         opt_g.zero_grad(set_to_none=True)
         self.manual_backward(g_loss)
         opt_g.step()
@@ -2137,6 +2209,8 @@ class DynacellGAN(LightningModule):
         if self.seg_aux is not None:
             log_payload["loss/g_dice_train"] = dice_train
             log_payload["loss/g_dice_n_valid_train"] = dice_n_valid
+        if self.seg_consistency is not None:
+            log_payload.update({f"loss/g_{name}_train": value for name, value in segcons_components.items()})
         self.log_dict(
             log_payload,
             on_step=True,
@@ -2192,6 +2266,9 @@ class DynacellGAN(LightningModule):
         if self.seg_aux is not None:
             dice_raw, _ = self._compute_seg_aux(pred_raw, target, batch)
             _record_val_loss(self.validation_dice_raw, dataloader_idx, dice_raw.detach(), source.shape[0])
+        if self.seg_consistency is not None:
+            segcons_raw = self.seg_consistency(pred_raw, target)
+            _record_val_loss(self.validation_segcons_raw, dataloader_idx, segcons_raw.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             recon_raw,
@@ -2208,6 +2285,9 @@ class DynacellGAN(LightningModule):
             if self.seg_aux is not None:
                 dice_ema, _ = self._compute_seg_aux(pred_ema, target, batch)
                 _record_val_loss(self.validation_dice_ema, dataloader_idx, dice_ema.detach(), source.shape[0])
+            if self.seg_consistency is not None:
+                segcons_ema = self.seg_consistency(pred_ema, target)
+                _record_val_loss(self.validation_segcons_ema, dataloader_idx, segcons_ema.detach(), source.shape[0])
             self.log(
                 f"loss/val_ema/{dataloader_idx}",
                 recon_ema,
@@ -2256,11 +2336,19 @@ class DynacellGAN(LightningModule):
             self.log("loss/validate_dice", _aggregate_validation_losses(self.validation_dice_raw), sync_dist=True)
         if self.validation_dice_ema:
             self.log("loss/validate_ema_dice", _aggregate_validation_losses(self.validation_dice_ema), sync_dist=True)
+        if self.validation_segcons_raw:
+            self.log("loss/validate_segcons", _aggregate_validation_losses(self.validation_segcons_raw), sync_dist=True)
+        if self.validation_segcons_ema:
+            self.log(
+                "loss/validate_ema_segcons", _aggregate_validation_losses(self.validation_segcons_ema), sync_dist=True
+            )
         self.validation_step_outputs.clear()
         self.validation_losses_raw.clear()
         self.validation_losses_ema.clear()
         self.validation_dice_raw.clear()
         self.validation_dice_ema.clear()
+        self.validation_segcons_raw.clear()
+        self.validation_segcons_ema.clear()
 
     def configure_optimizers(self):
         """Build two AdamW optimizers + WarmupCosine schedulers via the shared helper."""
