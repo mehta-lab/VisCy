@@ -14,7 +14,7 @@ from torch import Tensor, nn
 
 from dynacell.engine import DynacellGAN, DynacellUNet
 from viscy_data.hcs import HCSDataModule
-from viscy_utils.losses import SegConsistencyLoss
+from viscy_utils.losses import SegAuxDice, SegConsistencyLoss
 
 FNET_CONFIG = {"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4}
 FCMAE3D_CONFIG = {
@@ -187,7 +187,7 @@ def test_gan_seg_consistency_fast_dev_run(tmp_path, tiny_hcs_zarr):
 
 
 @pytest.mark.parametrize("family", ["unet", "gan"])
-def test_weight_is_required_with_the_term_and_rejected_without_it(family):
+def test_weight_is_required_with_the_term_and_seg_aux_is_rejected_with_it(family):
     if family == "unet":
         kwargs = {"architecture": "FNet3D", "model_config": FNET_CONFIG}
         cls = DynacellUNet
@@ -200,6 +200,8 @@ def test_weight_is_required_with_the_term_and_rejected_without_it(family):
         cls(**kwargs, seg_consistency_weight=1.0)
     with pytest.raises(ValueError, match=">= 0"):
         cls(**kwargs, seg_consistency=_segcons(), seg_consistency_weight=-1.0)
+    with pytest.raises(ValueError, match="cannot be combined with seg_aux"):
+        cls(**kwargs, seg_consistency=_segcons(), seg_consistency_weight=1.0, seg_aux=SegAuxDice(), seg_aux_weight=1.0)
 
 
 @pytest.mark.parametrize("family", ["unet", "gan"])

@@ -122,12 +122,15 @@ def _check_seg_aux_args(
         )
 
 
-def _check_seg_consistency_args(seg_consistency: SegConsistencyLoss | None, weight: float | None) -> None:
-    """Reject a ``seg_consistency`` weight without the term, and the term without a weight.
+def _check_seg_consistency_args(
+    seg_consistency: SegConsistencyLoss | None, weight: float | None, seg_aux: SegAuxDice | None
+) -> None:
+    """Reject a ``seg_consistency`` weight without the term, the term without a weight, and it with ``seg_aux``.
 
     The weight has no default: it is calibrated per cell (median over validation
     batches of ``||grad base|| / ||grad seg_consistency||`` at the starting
     checkpoint), and a leaf that still carries the ``null`` placeholder must not train.
+    With ``seg_aux`` too, the logged ``base`` would stop meaning the loss before the term.
     """
     if seg_consistency is None:
         if weight is not None:
@@ -140,6 +143,8 @@ def _check_seg_consistency_args(seg_consistency: SegConsistencyLoss | None, weig
         )
     if weight < 0:
         raise ValueError(f"seg_consistency_weight must be >= 0, got {weight}")
+    if seg_aux is not None:
+        raise ValueError("seg_consistency cannot be combined with seg_aux; use one auxiliary term per arm.")
 
 
 def _require_fg_mask(batch: Sample) -> Tensor:
@@ -699,7 +704,7 @@ class DynacellUNet(LightningModule):
         self.predict_phase_shifts = predict_phase_shifts
         self.seg_aux = seg_aux
         self.seg_aux_weight = seg_aux_weight
-        _check_seg_consistency_args(seg_consistency, seg_consistency_weight)
+        _check_seg_consistency_args(seg_consistency, seg_consistency_weight, seg_aux)
         self.seg_consistency = seg_consistency
         self.seg_consistency_weight = seg_consistency_weight
         self.channels_last = channels_last
@@ -1774,7 +1779,7 @@ class DynacellGAN(LightningModule):
         _check_seg_aux_args(seg_aux, seg_aux_weight, self.recon_loss, self._recon_accepts_fg_mask)
         self.seg_aux = seg_aux
         self.seg_aux_weight = seg_aux_weight
-        _check_seg_consistency_args(seg_consistency, seg_consistency_weight)
+        _check_seg_consistency_args(seg_consistency, seg_consistency_weight, seg_aux)
         self.seg_consistency = seg_consistency
         self.seg_consistency_weight = seg_consistency_weight
 
