@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 import torch
 import yaml
-from cellpose import models as cp_models
 from generate_spotlight_v2_leaves import (
     _FIT_RENAMES,
     ARMS,
@@ -371,6 +370,7 @@ def test_segcons_ctrl_builds_from_the_real_fork_checkpoint(baseline: str) -> Non
 @pytest.mark.parametrize("baseline", SEGCONS_BASELINES)
 def test_segcons_builds_with_its_calibrated_weight(baseline: str) -> None:
     """The emitted calibrated weight builds the cpsam term (a null weight is refused: test_seg_consistency_training)."""
+    cp_models = pytest.importorskip("cellpose.models")
     if not (cp_models.MODEL_DIR / "cpsam").is_file():
         pytest.skip("cpsam checkpoint not in cellpose's model directory")
     model_cfg = copy.deepcopy(_load_nucleus_fit(f"{baseline}_segcons")["model"])

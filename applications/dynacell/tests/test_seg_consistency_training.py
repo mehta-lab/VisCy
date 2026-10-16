@@ -117,7 +117,7 @@ def test_unet_seg_consistency_fast_dev_run(tmp_path, tiny_hcs_zarr, case):
 
 
 def test_unet_training_step_gradient_includes_the_term():
-    """The weighted term changes the backbone gradient by exactly weight x its own gradient."""
+    """A zero-weight term leaves the backbone gradient equal to the no-term one; a nonzero weight changes it."""
     seed_everything(0)
     batch = {"source": torch.randn(2, 1, 4, 32, 32), "target": torch.randn(2, 1, 4, 32, 32)}
     baseline = DynacellUNet(architecture="FNet3D", model_config=FNET_CONFIG, log_batches_per_epoch=0)

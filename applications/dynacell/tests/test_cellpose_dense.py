@@ -7,12 +7,15 @@ tests that run it need a GPU and the stock ``cpsam`` checkpoint in cellpose's mo
 import numpy as np
 import pytest
 import torch
-from cellpose import models as cp_models
-from cellpose import transforms as cp_transforms
 
-from dynacell.cellpose_dense import CellposeDense, normalize99_diff
-from dynacell.engine import DynacellUNet
-from viscy_utils.losses import SegConsistencyLoss
+pytest.importorskip("cellpose")
+
+from cellpose import models as cp_models  # noqa: E402
+from cellpose import transforms as cp_transforms  # noqa: E402
+
+from dynacell.cellpose_dense import CellposeDense, normalize99_diff  # noqa: E402
+from dynacell.engine import DynacellUNet  # noqa: E402
+from viscy_utils.losses import SegConsistencyLoss  # noqa: E402
 
 needs_cpsam = pytest.mark.skipif(
     not torch.cuda.is_available() or not (cp_models.MODEL_DIR / "cpsam").is_file(),
