@@ -69,3 +69,4 @@ model:
     lr_g: 2.0e-05
     lr_d: 2.0e-05
     warmup_steps: 50
+    ema_kimg: 2.0

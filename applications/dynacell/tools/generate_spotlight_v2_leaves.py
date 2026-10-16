@@ -257,12 +257,16 @@ FORK_CKPTS: dict[tuple[str, str], str] = {
 # families warm up over 5% of the fine-tune's scheduler steps: UNeXt2-3D 20 x 312 = 6240 (62400
 # steps / 200 epochs), pix2pix2d 4 x 250 = 1000 (20000 global steps / 40 epochs, two optimizer
 # steps per GAN batch). The scheduler is rebuilt for the fine-tune, so a cosine decays to 0 again.
+# pix2pix2d predicts from generator_ema, which starts as the fork's own shadow. At the baseline's
+# ema_kimg 10 the fine-tune (1000 G steps x 16 samples: 4 ranks x batch 4) would leave
+# 0.5 ** (16000 / 10000) = 33% of the fork-start shadow in it, diluting both arms; ema_kimg 2
+# leaves 0.5 ** (16000 / 2000) = 0.5 ** 8 = 0.4% (decay = 0.5 ** (global batch / (ema_kimg * 1000))).
 FORK_SCHEDULES: dict[str, dict[str, dict[str, Any]]] = {
     "fnet3d_vscyto3daug": {"trainer": {"max_steps": 20000}, "model": {"lr": 1.0e-4}},
     "fcmae_vscyto3d_scratch": {"trainer": {"max_epochs": 20}, "model": {"lr": 4.0e-5, "warmup_steps": 312}},
     "pix2pix2d_unetvit": {
         "trainer": {"max_epochs": 4},
-        "model": {"lr_g": 2.0e-5, "lr_d": 2.0e-5, "warmup_steps": 50},
+        "model": {"lr_g": 2.0e-5, "lr_d": 2.0e-5, "warmup_steps": 50, "ema_kimg": 2.0},
     },
 }
 # S_train from gate G4: cpsam (Kendall tau vs cpdino nucleus Dice/mAP .65/.80, not in the eval
