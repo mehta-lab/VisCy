@@ -362,9 +362,10 @@ def test_segcons_ctrl_builds_from_the_real_fork_checkpoint(baseline: str) -> Non
         pytest.skip(f"fork checkpoint not reachable: {ckpt}")
     module = _instantiate_model(_load_nucleus_fit(f"{baseline}_segcons_ctrl")["model"])
     state = torch.load(ckpt, map_location="cpu", weights_only=True, mmap=True)["state_dict"]
-    assert module.state_dict().keys() == state.keys()
-    key = next(iter(state))
-    torch.testing.assert_close(module.state_dict()[key], state[key])
+    loaded = module.state_dict()
+    assert loaded.keys() == state.keys()
+    for key, value in state.items():
+        assert torch.equal(loaded[key], value), key
 
 
 @pytest.mark.parametrize("baseline", SEGCONS_BASELINES)
