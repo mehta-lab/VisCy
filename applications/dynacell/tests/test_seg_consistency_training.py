@@ -117,20 +117,31 @@ def test_unet_seg_consistency_fast_dev_run(tmp_path, tiny_hcs_zarr, case):
 
 
 def test_unet_training_step_gradient_includes_the_term():
-    """A zero-weight term leaves the backbone gradient equal to the no-term one; a nonzero weight changes it."""
+    """The step's backbone gradient is the base gradient plus weight x the term's own gradient."""
     seed_everything(0)
     batch = {"source": torch.randn(2, 1, 4, 32, 32), "target": torch.randn(2, 1, 4, 32, 32)}
+    term = _segcons()
     baseline = DynacellUNet(architecture="FNet3D", model_config=FNET_CONFIG, log_batches_per_epoch=0)
-    grads = {}
-    for weight in (None, 0.0, 2.0):
-        kwargs = {} if weight is None else {"seg_consistency": _segcons(), "seg_consistency_weight": weight}
-        module = DynacellUNet(architecture="FNet3D", model_config=FNET_CONFIG, log_batches_per_epoch=0, **kwargs)
-        module.load_state_dict(baseline.state_dict())
+    arm = DynacellUNet(
+        architecture="FNet3D",
+        model_config=FNET_CONFIG,
+        seg_consistency=term,
+        seg_consistency_weight=2.0,
+        log_batches_per_epoch=0,
+    )
+    arm.load_state_dict(baseline.state_dict())
+
+    def grad(module: DynacellUNet, fn) -> Tensor:
+        params = list(module.model.parameters())
+        return torch.cat([g.flatten() for g in torch.autograd.grad(fn(), params)])
+
+    for module in (baseline, arm):
         module.log = lambda *args, **kw: None
-        module.training_step(batch, 0).backward()
-        grads[weight] = torch.cat([p.grad.flatten() for p in module.model.parameters()])
-    torch.testing.assert_close(grads[None], grads[0.0])
-    assert not torch.allclose(grads[None], grads[2.0])
+    g_arm = grad(arm, lambda: arm.training_step(batch, 0))
+    g_base = grad(baseline, lambda: baseline.training_step(batch, 0))
+    g_term = grad(arm, lambda: term(arm(batch["source"]), batch["target"]))
+    assert g_term.abs().sum() > 0
+    torch.testing.assert_close(g_arm, g_base + 2.0 * g_term)
 
 
 def test_unet_validate_excludes_the_term(tiny_hcs_zarr):
@@ -198,8 +209,9 @@ def test_weight_is_required_with_the_term_and_seg_aux_is_rejected_with_it(family
         cls(**kwargs, seg_consistency=_segcons(), seg_consistency_weight=None)
     with pytest.raises(ValueError, match="no effect without seg_consistency"):
         cls(**kwargs, seg_consistency_weight=1.0)
-    with pytest.raises(ValueError, match=">= 0"):
-        cls(**kwargs, seg_consistency=_segcons(), seg_consistency_weight=-1.0)
+    for weight in (0.0, -1.0):
+        with pytest.raises(ValueError, match="> 0"):
+            cls(**kwargs, seg_consistency=_segcons(), seg_consistency_weight=weight)
     with pytest.raises(ValueError, match="cannot be combined with seg_aux"):
         cls(**kwargs, seg_consistency=_segcons(), seg_consistency_weight=1.0, seg_aux=SegAuxDice(), seg_aux_weight=1.0)
 

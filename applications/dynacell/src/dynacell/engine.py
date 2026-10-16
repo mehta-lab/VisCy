@@ -141,8 +141,8 @@ def _check_seg_consistency_args(
             "seg_consistency_weight is unset (placeholder): calibrate it as the median gradient-norm ratio "
             "||grad base|| / ||grad seg_consistency|| at the starting checkpoint and set it in the leaf."
         )
-    if weight < 0:
-        raise ValueError(f"seg_consistency_weight must be >= 0, got {weight}")
+    if weight <= 0:
+        raise ValueError(f"seg_consistency_weight must be > 0, got {weight}; drop seg_consistency to turn it off")
     if seg_aux is not None:
         raise ValueError("seg_consistency cannot be combined with seg_aux; use one auxiliary term per arm.")
 
