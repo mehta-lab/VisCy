@@ -1,0 +1,15 @@
+# Ablation: stain_c-radio with the FiLM conditioning applied to every pixel instead of around the crop centre
+# (cond_sigma null), testing whether confining the tracked cell's embedding to the tracked nucleus matters.
+base:
+  - stain_c-radio.yml
+model:
+  init_args:
+    model:
+      init_args:
+        stain_head:
+          init_args:
+            cond_sigma: null
+trainer:
+  logger:
+    init_args:
+      name: stain_c-radio_ungated

@@ -1,0 +1,9 @@
+# Encoder recipe: DINOv3 ViT-L/16 (LVD-1689M): 1024 + 1024.
+data:
+  init_args:
+    embeddings: /hpc/projects/virtual_staining/datasets/huang-lab/Bill/5-cellcycle/embeddings/dinov3.npy
+model:
+  init_args:
+    model:
+      init_args:
+        embed_dim: 2048

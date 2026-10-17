@@ -1,0 +1,11 @@
+# stain with c-radio embeddings.
+# Usage: sbatch ../run_fit.slurm stain_c-radio.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/stain.yml
+  - ../recipes/encoders/c-radio.yml
+trainer:
+  logger:
+    init_args:
+      name: stain_c-radio

@@ -1,0 +1,7 @@
+# Trainer recipe: prediction.
+trainer:
+  precision: 32-true
+  inference_mode: true
+  logger: false
+ckpt_path: #TODO checkpoint path
+return_predictions: false

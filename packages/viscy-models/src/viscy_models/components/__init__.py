@@ -8,6 +8,7 @@ from viscy_models.components.heads import (
     ClassificationHead,
     PixelToVoxelHead,
     PixelToVoxelShuffleHead,
+    RegressionHead,
     UnsqueezeHead,
 )
 from viscy_models.components.stems import StemDepthtoChannels, UNeXt2Stem
@@ -20,6 +21,7 @@ __all__ = [
     "BaseHead",
     "ClassificationHead",
     "PixelToVoxelHead",
+    "RegressionHead",
     "UnsqueezeHead",
     "PixelToVoxelShuffleHead",
     "icnr_init",

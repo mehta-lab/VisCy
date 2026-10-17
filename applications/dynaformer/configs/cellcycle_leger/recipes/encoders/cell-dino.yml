@@ -1,0 +1,9 @@
+# Encoder recipe: CELL-DINO ViT-L/16: 1024 class token + 1024 centre patch mean.
+data:
+  init_args:
+    embeddings: /hpc/projects/comp.micro/virtual_staining/models/dynaformer/data/embeddings/cell-dino.npy
+model:
+  init_args:
+    model:
+      init_args:
+        embed_dim: 2048

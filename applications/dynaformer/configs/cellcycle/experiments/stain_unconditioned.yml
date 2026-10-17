@@ -1,0 +1,22 @@
+# Baseline: the same UNeXt2 UNet with no temporal embedding, i.e. per-frame virtual staining from phase alone.
+# Reads no embeddings and has no temporal model; data, optimizer and budget match the stain_<encoder> runs.
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/stain.yml
+model:
+  init_args:
+    model:
+      init_args:
+        embed_dim: 1
+        temporal: null
+        stain_head:
+          init_args:
+            cond_dim: 0
+data:
+  init_args:
+    embeddings: null
+trainer:
+  logger:
+    init_args:
+      name: stain_unconditioned

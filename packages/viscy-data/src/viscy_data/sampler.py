@@ -1,22 +1,24 @@
-"""Composable batch sampler with batch grouping, stratification, and temporal enrichment.
+"""Batch samplers for grouped, stratified, and variable-length sampling.
 
-Yields lists of integer indices into a ``valid_anchors`` DataFrame
-produced by :class:`~dynaclr.index.MultiExperimentIndex`.
-Implements the :class:`torch.utils.data.Sampler` ``[list[int]]`` protocol
-for use as a ``batch_sampler`` in :class:`torch.utils.data.DataLoader`.
+:class:`FlexibleBatchSampler` yields lists of integer indices into a
+``valid_anchors`` DataFrame produced by :class:`~dynaclr.index.MultiExperimentIndex`.
+:class:`LengthBucketedBatchSampler` yields lists of indices into a dataset of
+variable-length sequences, grouped so every batch has a single sequence length.
+Both implement the :class:`torch.utils.data.Sampler` ``[list[int]]`` protocol for
+use as a ``batch_sampler`` in :class:`torch.utils.data.DataLoader`.
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import numpy as np
 import pandas as pd
 from torch.utils.data import Sampler
 
-__all__ = ["FlexibleBatchSampler"]
+__all__ = ["FlexibleBatchSampler", "LengthBucketedBatchSampler"]
 
 _logger = logging.getLogger(__name__)
 
@@ -544,3 +546,120 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         """
         n = len(strata)
         return {s: 1.0 / n for s in strata}
+
+
+class LengthBucketedBatchSampler(Sampler[list[int]]):
+    """Batch sampler that groups variable-length sequences by exact length.
+
+    A dataset of variable-length temporal clips cannot be collated by
+    ``torch.stack``, and a sequence model would otherwise need padding masks.
+    This sampler groups indices so that **every batch contains only clips of the
+    same length** — the default collation then works and no mask is needed.
+    Length varies between batches, which is exactly what keeps a length-agnostic
+    sequence model (e.g. rotary position embedding) honest.
+
+    Batch size per bucket is ``max(1, frames_per_batch // length)``, so the
+    number of frames per batch — and therefore GPU memory — stays roughly
+    constant: short clips simply pack more of them.
+
+    Parameters
+    ----------
+    sequence_lengths : Sequence[int] | np.ndarray
+        Sequence length for every dataset index, ``len == len(dataset)``.
+    frames_per_batch : int
+        Frame budget per batch, i.e. the product of batch size and sequence
+        length, by default 64.
+    shuffle : bool
+        Shuffle within buckets and across batches, by default ``True``.
+    drop_last : bool
+        Drop trailing partial batches within each bucket, by default ``False``.
+    seed : int
+        Base random seed, by default 0.
+    num_replicas : int
+        Number of distributed replicas, by default 1.
+    rank : int
+        Rank of this replica, by default 0.
+
+    Notes
+    -----
+    Every rank builds the identical batch sequence and then yields only its own
+    slice, so the ranks stay in step without communication. Because a rank may
+    receive a different number of batches than another when the batch count is
+    not divisible by ``num_replicas``, the sequence is truncated to a whole
+    multiple of ``num_replicas`` to keep DDP from deadlocking.
+    """
+
+    def __init__(
+        self,
+        sequence_lengths: Sequence[int] | np.ndarray,
+        frames_per_batch: int = 64,
+        shuffle: bool = True,
+        drop_last: bool = False,
+        seed: int = 0,
+        num_replicas: int = 1,
+        rank: int = 0,
+    ) -> None:
+        self.lengths = np.asarray(sequence_lengths, dtype=np.int64)
+        if self.lengths.ndim != 1 or self.lengths.size == 0:
+            raise ValueError("sequence_lengths must be a non-empty 1-D sequence.")
+        if self.lengths.min() < 1:
+            raise ValueError(f"sequence lengths must be >= 1, got minimum {self.lengths.min()}.")
+        self.frames_per_batch = frames_per_batch
+        self.shuffle = shuffle
+        self.drop_last = drop_last
+        self.seed = seed
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.epoch = 0
+        self.buckets = {int(length): np.flatnonzero(self.lengths == length) for length in np.unique(self.lengths)}
+        self._num_batches = self._truncate(
+            sum(self._bucket_batches(length, len(idx)) for length, idx in self.buckets.items())
+        )
+
+    def batch_size_for(self, length: int) -> int:
+        """Return the number of clips packed into a batch of the given length."""
+        return max(1, self.frames_per_batch // length)
+
+    def _bucket_batches(self, length: int, n: int) -> int:
+        """Return the number of batches a bucket of ``n`` clips produces."""
+        size = self.batch_size_for(length)
+        return n // size if self.drop_last else math.ceil(n / size)
+
+    def _truncate(self, total: int) -> int:
+        """Round a batch count down to a whole multiple of ``num_replicas``."""
+        return (total // self.num_replicas) * self.num_replicas
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the epoch for deterministic shuffling across DDP ranks."""
+        self.epoch = epoch
+
+    def __len__(self) -> int:
+        """Return the number of batches this rank yields per epoch."""
+        return self._num_batches // self.num_replicas
+
+    def __iter__(self) -> Iterator[list[int]]:
+        """Yield batches of indices that all share one sequence length.
+
+        The epoch counter self-advances, because Lightning does not call
+        ``set_epoch`` on a custom ``batch_sampler``. Calling :meth:`set_epoch`
+        before iterating still works for deterministic resume.
+        """
+        seed_offset = self.epoch
+        self.epoch += 1
+        rng = np.random.default_rng(self.seed + seed_offset) if self.shuffle else None
+        batches: list[list[int]] = []
+        for length, indices in self.buckets.items():
+            indices = indices.copy()
+            if rng is not None:
+                rng.shuffle(indices)
+            size = self.batch_size_for(length)
+            for start in range(0, len(indices), size):
+                batch = indices[start : start + size]
+                if self.drop_last and len(batch) < size:
+                    continue
+                batches.append(batch.tolist())
+        if rng is not None:
+            batches = [batches[i] for i in rng.permutation(len(batches))]
+        for i in range(self._num_batches):
+            if i % self.num_replicas == self.rank:
+                yield batches[i]

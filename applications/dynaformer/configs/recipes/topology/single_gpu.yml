@@ -1,0 +1,6 @@
+# Topology recipe: one GPU, one node.
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1

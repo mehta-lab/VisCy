@@ -1,0 +1,11 @@
+# stain with dinov3 embeddings.
+# Usage: sbatch ../run_fit.slurm stain_dinov3.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/stain.yml
+  - ../recipes/encoders/dinov3.yml
+trainer:
+  logger:
+    init_args:
+      name: stain_dinov3

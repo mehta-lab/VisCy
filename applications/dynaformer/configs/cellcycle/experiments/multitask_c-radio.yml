@@ -1,0 +1,11 @@
+# multitask with c-radio embeddings.
+# Usage: sbatch ../run_fit.slurm multitask_c-radio.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/multitask.yml
+  - ../recipes/encoders/c-radio.yml
+trainer:
+  logger:
+    init_args:
+      name: multitask_c-radio

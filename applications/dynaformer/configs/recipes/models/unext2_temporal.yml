@@ -1,0 +1,59 @@
+# Model recipe: UNeXt2 encoder + RoPE temporal transformer + UNeXt2 decoder
+# + per-frame regression head. Trains from scratch, downloads nothing.
+#
+# The convolutional counterpart of the MorphEm recipe: the decoder keeps skip
+# connections, so per-frame spatial detail bypasses the temporal bottleneck
+# while the bottleneck itself carries temporal context through a zero-initialized
+# projection.
+#
+# `yx_patch_size` must equal the data module's `final_yx_patch_size`, and
+# `stem_stride` must equal the encoder's `stem_kernel_size[-1]`.
+model:
+  class_path: dynaformer.engine.DynaformerModule
+  init_args:
+    lr: 0.0002
+    schedule: WarmupCosine
+    log_batches_per_epoch: 4
+    log_frames_per_sample: 4
+    model:
+      class_path: dynaformer.models.SpatioTemporalModel
+      init_args:
+        condition_decoder: true
+        encoder:
+          class_path: dynaformer.models.UNeXt2FrameEncoder
+          init_args:
+            in_channels: 1
+            in_stack_depth: 1
+            backbone: convnextv2_tiny
+            stem_kernel_size: [1, 4, 4]
+            yx_patch_size: [256, 256]
+            token_dim: 512
+            token_channels: 64
+        temporal:
+          class_path: dynaformer.models.RoPETransformerEncoder
+          init_args:
+            d_model: 512
+            n_heads: 8
+            n_layers: 4
+            ff_mult: 4
+            dropout: 0.1
+        decoder:
+          class_path: dynaformer.models.UNeXt2ImageDecoder
+          init_args:
+            feature_channels: [768, 384, 192, 96]
+            out_channels: 2
+            out_stack_depth: 1
+            stem_stride: 4
+            decoder_mode: pixelshuffle
+            decoder_conv_blocks: 2
+            head_expansion_ratio: 4
+            cond_dim: 512
+        heads:
+          scalar:
+            class_path: viscy_models.components.heads.RegressionHead
+            init_args:
+              head_name: scalar
+              batch_key: scalar_target
+              in_dims: 512
+              out_dims: 2
+              loss_weight: 1.0

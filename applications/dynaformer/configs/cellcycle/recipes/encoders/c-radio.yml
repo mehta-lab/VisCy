@@ -1,0 +1,9 @@
+# Encoder recipe: C-RADIOv4-H: 2560 summary (SigLIP2 and DINOv3 heads) + 1280 centre patch mean.
+data:
+  init_args:
+    embeddings: /hpc/projects/virtual_staining/datasets/huang-lab/Bill/5-cellcycle/embeddings/c-radio.npy
+model:
+  init_args:
+    model:
+      init_args:
+        embed_dim: 3840

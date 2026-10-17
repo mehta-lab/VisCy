@@ -1,0 +1,18 @@
+# Prediction with the reference model.
+# Usage: cd applications/dynaformer/configs/examples && uv run python -m dynaformer predict -c fucci/predict.yml
+#
+# Prediction reads whole contiguous track segments where possible: set
+# `window_size` above the longest track so each clip is a full trajectory, which
+# removes the discontinuities tiled windows leave in the predicted signal.
+base:
+  - ../../recipes/trainer/predict.yml
+  - ../../recipes/topology/single_gpu.yml
+  - ../../recipes/data/track_window_fucci.yml
+  - ../../recipes/models/morphem_mae_tcond.yml
+
+data:
+  init_args:
+    data_path: #TODO HCS OME-Zarr plate
+    tracks_path: #TODO directory of per-FOV tracking CSVs
+    window_size: 512
+    frames_per_batch: 512

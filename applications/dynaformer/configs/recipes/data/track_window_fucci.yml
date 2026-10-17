@@ -1,0 +1,50 @@
+# Data recipe: temporal clips of tracked nuclei, phase in -> two FUCCI markers out.
+#
+# Channel names must match the OME-Zarr. `mask_channel` is what makes the
+# per-frame `scalar_target` (and the trajectory metrics) possible: it pools the
+# marker channels over the segmented object instead of the whole patch.
+#
+# Clip length varies between `min_frames` and `window_size`; short tracks
+# contribute one full-length clip rather than being dropped. Batch size is
+# `frames_per_batch // T`, so GPU memory stays flat as the length varies.
+data:
+  class_path: viscy_data.track_window.TrackWindowDataModule
+  init_args:
+    data_path: #TODO HCS OME-Zarr plate
+    tracks_path: #TODO directory of per-FOV tracking CSVs
+    source_channel: Phase3D
+    target_channel: [mKO, mVenus]
+    mask_channel: nuclei_mask
+    z_range: [0, 1]
+    initial_yx_patch_size: [384, 384]
+    final_yx_patch_size: [256, 256]
+    window_size: 64
+    window_stride: 1
+    min_frames: 8
+    frames_per_batch: 64
+    split_ratio: 0.8
+    num_workers: 1
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D, mKO, mVenus]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      # Time is folded into the channel axis before these run, so each transform
+      # draws once per clip and every frame of a clip stays registered.
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [Phase3D, mKO, mVenus]
+          spatial_axes: [1, 2]
+          prob: 0.5
+      # Input-only noise. Constant sigma (sample_std: false) rather than a
+      # sampled one; a sampled schedule measured as a tie in the source study.
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [Phase3D]
+          prob: 1.0
+          mean: 0.0
+          std: 0.05
+          sample_std: false

@@ -1,0 +1,68 @@
+# Task recipe: f and g on one shared temporal model, trained with regression_weight * L_f + stain_weight * L_g.
+# Two checkpoints are kept, one selected on each readout, so each is compared with its single-task counterpart at
+# its own best step.
+model:
+  class_path: dynaformer.cellcycle_engine.TemporalEmbeddingModule
+  init_args:
+    regression_weight: 1.0
+    stain_weight: 1.0
+    lr: 0.0003
+    weight_decay: 0.05
+    warmup_steps: 500
+    model:
+      class_path: dynaformer.models.TemporalEmbeddingModel
+      init_args:
+        input_dropout: 0.1
+        temporal:
+          class_path: dynaformer.models.RoPETransformerEncoder
+          init_args:
+            d_model: 384
+            n_heads: 6
+            n_layers: 4
+            ff_mult: 4
+            dropout: 0.1
+        regression_head:
+          class_path: dynaformer.models.MLPRegressionHead
+          init_args:
+            in_dims: 384
+            out_dims: 2
+            hidden_dims: 256
+            dropout: 0.1
+        stain_head:
+          class_path: dynaformer.models.ConditionedUNet
+          init_args:
+            in_channels: 1
+            out_channels: 2
+            cond_dim: 384
+            cond_sigma: 48.0
+            backbone: convnextv2_tiny
+            decoder_conv_blocks: 2
+            head_expansion_ratio: 4
+            drop_path_rate: 0.1
+trainer:
+  max_steps: 30000
+  val_check_interval: 1000
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints
+        filename: best_regression
+        monitor: val/regression/pearson
+        mode: max
+        save_top_k: 1
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints
+        filename: best_stain
+        monitor: val/stain/pearson
+        mode: max
+        save_top_k: 1
+data:
+  init_args:
+    frames_per_batch: 1024
+    images_per_batch: 64
+    eval_frames_per_batch: 512

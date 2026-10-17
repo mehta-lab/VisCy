@@ -1,0 +1,9 @@
+# Encoder recipe: MorphEm ViT-S/16: 384 class token + 384 centre patch mean.
+data:
+  init_args:
+    embeddings: /hpc/projects/virtual_staining/datasets/huang-lab/Bill/5-cellcycle/embeddings/morphem.npy
+model:
+  init_args:
+    model:
+      init_args:
+        embed_dim: 768

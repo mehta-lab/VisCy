@@ -1,0 +1,15 @@
+# Ablation: regression_morphem with the temporal transformer removed. n_layers 0 leaves T as its final LayerNorm, so
+# every prediction reads its own frame's embedding only; everything else is identical to regression_morphem.yml.
+base:
+  - regression_morphem.yml
+model:
+  init_args:
+    model:
+      init_args:
+        temporal:
+          init_args:
+            n_layers: 0
+trainer:
+  logger:
+    init_args:
+      name: regression_morphem_single_frame

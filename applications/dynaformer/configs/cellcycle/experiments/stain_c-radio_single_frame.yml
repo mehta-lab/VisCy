@@ -1,0 +1,16 @@
+# Ablation: stain_c-radio with the temporal transformer removed (n_layers 0). The UNet is still conditioned on the
+# frame's own C-RADIO embedding, so against stain_unconditioned this measures what the embedding adds, and against
+# stain_c-radio what temporal context adds.
+base:
+  - stain_c-radio.yml
+model:
+  init_args:
+    model:
+      init_args:
+        temporal:
+          init_args:
+            n_layers: 0
+trainer:
+  logger:
+    init_args:
+      name: stain_c-radio_single_frame

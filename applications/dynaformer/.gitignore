@@ -1,0 +1,7 @@
+# Written into the working directory by `python -m dynaformer fit`, which the
+# README runs from configs/examples/.
+checkpoints/
+lightning_logs/
+outputs/
+wandb/
+__pycache__/

@@ -1,0 +1,8 @@
+# Trainer recipe for the cell-cycle models on the Leger et al. RPE1 tracks: the NIH3T3 trainer, logged to its own W&B
+# project.
+base:
+  - ../../cellcycle/recipes/trainer.yml
+trainer:
+  logger:
+    init_args:
+      project: dynaformer-cellcycle-leger

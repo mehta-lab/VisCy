@@ -59,6 +59,7 @@ viscy-models = { workspace = true }
 viscy-transforms = { workspace = true }
 viscy-utils = { workspace = true }
 dynaclr = { workspace = true }
+dynaformer = { workspace = true }
 cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 viscy-qc = { workspace = true }

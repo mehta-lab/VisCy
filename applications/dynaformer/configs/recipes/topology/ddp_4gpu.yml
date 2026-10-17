@@ -1,0 +1,9 @@
+# Topology recipe: 4-GPU DDP training on a single node.
+#
+# LengthBucketedBatchSampler is DDP-aware: every rank builds the same batch
+# sequence and yields its own slice, so ranks stay in step without communication.
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 4
+  num_nodes: 1

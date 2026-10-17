@@ -1,0 +1,11 @@
+# regression with an untrained ViT as E (no foundation model).
+# Usage: ./submit.sh -- regression_vit-untrained.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/regression.yml
+  - ../recipes/encoders/vit-untrained.yml
+trainer:
+  logger:
+    init_args:
+      name: regression_vit-untrained

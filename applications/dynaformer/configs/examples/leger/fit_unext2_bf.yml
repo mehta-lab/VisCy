@@ -1,0 +1,78 @@
+# Dynaformer on the Leger et al. cell-cycle dataset, brightfield in, two FUCCI scalars out.
+#
+# There is no image target in this dataset, so there is no decoder: the model is
+# encoder -> RoPE transformer -> regression head, and `engine.py` skips the image loss entirely.
+#
+# The encoder is trained from scratch, which is the apples-to-apples match for the paper's
+# from-scratch ResNet-18 -- any difference against their numbers is attributable to the temporal
+# module rather than to pretraining. Loss is pure L1 (`mse_weight: 0`), as they used.
+#
+# Budget note: one pass over this window index is ~2.4 M frames against ~375 k for one of their
+# epochs, so 24 epochs here is ~58 M frames, matching their 150 x 375 k total sample budget. Epoch
+# counts are not comparable between the two; total frames seen is.
+base:
+  - ../../recipes/trainer/fit.yml
+  - ../../recipes/topology/single_gpu.yml
+  - ../../recipes/data/npy_track_leger.yml
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 24
+  # Re-listed in full: `base:` composition replaces lists, and the recipe's
+  # `TrackTrajectoryMetrics` cannot run here -- it requires `norm_meta`, and it only logs
+  # `val/track_pearson/image` when a decoder exists. Selection falls back to the validation loss.
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        mode: min
+        every_n_epochs: 1
+        save_top_k: 3
+        save_last: true
+
+model:
+  class_path: dynaformer.engine.DynaformerModule
+  init_args:
+    lr: 0.0001
+    weight_decay: 0.01
+    schedule: WarmupCosine
+    encoder_lr: null # single learning rate, as in the reference study
+    log_batches_per_epoch: 0 # no decoder, so there are no image grids to log
+    model:
+      class_path: dynaformer.models.SpatioTemporalModel
+      init_args:
+        decoder: null
+        encoder:
+          class_path: dynaformer.models.UNeXt2FrameEncoder
+          init_args:
+            in_channels: 1
+            in_stack_depth: 1
+            backbone: convnextv2_tiny
+            # Stride 2 stem -> total stride 16 -> a 4x4 bottleneck on a 64x64 crop. The stride-4
+            # requirement applies only to UNeXt2ImageDecoder, which this model does not use.
+            stem_kernel_size: [ 1, 2, 2 ]
+            yx_patch_size: [ 64, 64 ]
+            token_dim: 512
+            token_channels: 64
+        temporal:
+          class_path: dynaformer.models.RoPETransformerEncoder
+          init_args:
+            d_model: 512 # equal to token_dim, so token_proj stays an identity
+            n_heads: 8
+            n_layers: 4
+            ff_mult: 4
+            dropout: 0.1
+        heads:
+          scalar:
+            class_path: viscy_models.components.heads.RegressionHead
+            init_args:
+              head_name: scalar
+              batch_key: scalar_target
+              in_dims: 512
+              out_dims: 2
+              l1_weight: 1.0
+              mse_weight: 0.0 # pure L1, matching the reference study
+              loss_weight: 1.0

@@ -27,6 +27,7 @@ __all__ = [
     "MLP",
     "PixelToVoxelHead",
     "PixelToVoxelShuffleHead",
+    "RegressionHead",
     "UnsqueezeHead",
 ]
 
@@ -269,6 +270,113 @@ class ClassificationHead(BaseHead):
         log_fn(f"loss/aux/{self.head_name}/{stage}", out["loss"])
         log_fn(f"metrics/acc_top1/{self.head_name}/{stage}", top1)
         log_fn(f"metrics/acc_top{self.top_k}/{self.head_name}/{stage}", topk)
+
+
+class RegressionHead(BaseHead):
+    """Linear regression head over normalized backbone features.
+
+    A layer norm followed by a linear map, trained with a combined L1 and squared
+    error loss. Used as an auxiliary readout when a dense image objective already
+    shapes the backbone: the head is cheap, and supervising a low-dimensional
+    quantity alongside the image tends to make the shared representation more
+    useful than either objective alone.
+
+    Parameters
+    ----------
+    head_name : str
+        Name used for logging.
+    batch_key : str
+        Key used to look up the regression target in the batch dict.
+    in_dims : int
+        Backbone feature dimensionality.
+    out_dims : int
+        Number of regressed values.
+    l1_weight : float
+        Weight of the absolute error term, by default 1.
+    mse_weight : float
+        Weight of the squared error term, by default 1.
+    loss_weight : float
+        Weight applied to this head's loss in the combined loss, by default 1.
+    weight_schedule : {"cosine", "constant"}
+        Schedule for the loss weight, by default ``"constant"``.
+    weight_start : float
+        Initial weight when using the ``"cosine"`` schedule, by default 0.
+    weight_warmup_epochs : int
+        Epochs over which to ramp up the weight, by default 50.
+    """
+
+    def __init__(
+        self,
+        head_name: str,
+        batch_key: str,
+        in_dims: int,
+        out_dims: int,
+        l1_weight: float = 1.0,
+        mse_weight: float = 1.0,
+        loss_weight: float = 1.0,
+        weight_schedule: Literal["cosine", "constant"] = "constant",
+        weight_start: float = 0.0,
+        weight_warmup_epochs: int = 50,
+    ) -> None:
+        super().__init__(
+            head_name=head_name,
+            batch_key=batch_key,
+            loss_weight=loss_weight,
+            weight_schedule=weight_schedule,
+            weight_start=weight_start,
+            weight_warmup_epochs=weight_warmup_epochs,
+        )
+        self.projection = nn.Sequential(nn.LayerNorm(in_dims), nn.Linear(in_dims, out_dims))
+        self.l1_weight = l1_weight
+        self.mse_weight = mse_weight
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Map backbone features to regressed values.
+
+        Parameters
+        ----------
+        x : Tensor
+            Shape ``(B, in_dims)``.
+
+        Returns
+        -------
+        Tensor
+            Predictions of shape ``(B, out_dims)``.
+        """
+        return self.projection(x)
+
+    def compute_loss(self, y_hat: Tensor, y: Tensor) -> Tensor:
+        """Combine absolute and squared error.
+
+        Parameters
+        ----------
+        y_hat : Tensor
+            Predictions matching the shape of ``y``.
+        y : Tensor
+            Regression targets.
+
+        Returns
+        -------
+        Tensor
+            Scalar loss.
+        """
+        residual = y_hat - y
+        return self.l1_weight * residual.abs().mean() + self.mse_weight * residual.pow(2).mean()
+
+    def log_metrics(self, out: dict, log_fn: callable, stage: str) -> None:
+        """Log the head loss and the mean absolute error.
+
+        Parameters
+        ----------
+        out : dict
+            Must contain ``"loss"``, ``"logits"`` (the predictions) and ``"y"``.
+        log_fn : callable
+            Lightning module's ``self.log``.
+        stage : str
+            ``"train"`` or ``"val"``.
+        """
+        log_fn(f"loss/aux/{self.head_name}/{stage}", out["loss"])
+        log_fn(f"metrics/mae/{self.head_name}/{stage}", (out["logits"] - out["y"]).abs().mean())
 
 
 class CrossModalContrastiveHead(BaseHead):

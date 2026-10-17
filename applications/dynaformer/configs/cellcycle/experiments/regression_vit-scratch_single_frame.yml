@@ -1,0 +1,15 @@
+# Ablation: regression_vit-scratch with the temporal transformer removed (n_layers 0): a per-frame ViT trained from
+# scratch to predict the reporters, the plain supervised baseline.
+base:
+  - regression_vit-scratch.yml
+model:
+  init_args:
+    model:
+      init_args:
+        temporal:
+          init_args:
+            n_layers: 0
+trainer:
+  logger:
+    init_args:
+      name: regression_vit-scratch_single_frame

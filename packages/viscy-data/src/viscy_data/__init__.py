@@ -108,8 +108,11 @@ from viscy_data.livecell import LiveCellDataModule, LiveCellDataset, LiveCellTes
 # Memory-mapped cache (from mmap_cache.py -- requires [mmap] extra at runtime)
 from viscy_data.mmap_cache import MmappedDataModule, MmappedDataset
 
-# Batch sampler (from sampler.py)
-from viscy_data.sampler import FlexibleBatchSampler
+# Temporal clips from pre-cropped per-track numpy arrays (from npy_track.py)
+from viscy_data.npy_track import NpyTrackDataModule, NpyTrackDataset
+
+# Batch samplers (from sampler.py)
+from viscy_data.sampler import FlexibleBatchSampler, LengthBucketedBatchSampler
 
 # Segmentation (from segmentation.py)
 from viscy_data.segmentation import SegmentationDataModule, SegmentationDataset
@@ -117,6 +120,9 @@ from viscy_data.segmentation import SegmentationDataModule, SegmentationDataset
 # Utility modules (from select.py, distributed.py)
 from viscy_data.select import SelectWell
 from viscy_data.sliding_window import MaskTestDataset, SlidingWindowDataset
+
+# Temporal windows of tracked cells (from track_window.py -- requires [triplet] extra at runtime)
+from viscy_data.track_window import TrackWindowDataModule, TrackWindowDataset
 
 # Triplet learning (from triplet.py -- requires [triplet] extra at runtime)
 from viscy_data.triplet import TripletDataModule, TripletDataset
@@ -153,6 +159,7 @@ __all__ = [
     "ChannelDropout",
     # Utilities
     "FlexibleBatchSampler",
+    "LengthBucketedBatchSampler",
     "read_norm_meta",
     "SelectWell",
     "ShardedDistributedSampler",
@@ -164,6 +171,11 @@ __all__ = [
     "CachedOmeZarrDataModule",
     "CachedOmeZarrDataset",
     "GPUTransformDataModule",
+    # Temporal windows
+    "NpyTrackDataModule",
+    "NpyTrackDataset",
+    "TrackWindowDataModule",
+    "TrackWindowDataset",
     # Triplet
     "TripletDataModule",
     "TripletDataset",

@@ -1,0 +1,21 @@
+# Trainer recipe for the cell-cycle models. Callbacks live in the task recipes, because checkpoint selection depends
+# on which readout the task trains (and `base:` composition replaces lists rather than merging them).
+#
+# Training is counted in steps, with validation every `val_check_interval` steps: an epoch over clips images only a
+# small share of the frames, so epochs are not a useful unit here.
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  precision: bf16-mixed
+  check_val_every_n_epoch: null
+  log_every_n_steps: 50
+  gradient_clip_val: 1.0
+  num_sanity_val_steps: 1
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: dynaformer-cellcycle
+      save_dir: .

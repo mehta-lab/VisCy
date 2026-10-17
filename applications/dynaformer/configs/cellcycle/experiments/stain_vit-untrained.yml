@@ -1,0 +1,11 @@
+# stain with an untrained ViT as E (no foundation model).
+# Usage: ./submit.sh -- stain_vit-untrained.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/stain.yml
+  - ../recipes/encoders/vit-untrained.yml
+trainer:
+  logger:
+    init_args:
+      name: stain_vit-untrained

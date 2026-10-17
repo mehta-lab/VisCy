@@ -1,0 +1,27 @@
+# Data recipe: Leger et al. (MELBA 2026) RPE1 cell-cycle tracks, brightfield input.
+#
+# Pre-cropped 64x64 per-track arrays with a continuous two-channel FUCCI target per frame.
+# Targets are already per-track min-max scaled to [0, 1], so there is no normalization step and
+# no `norm_meta` -- which is why the fit leaves drop `TrackTrajectoryMetrics`.
+#
+# Split is by movie: `0608` (311 tracks, 6% of the training set) is held out for validation so the
+# published test split stays untouched. Leger et al. had no validation split at all and monitored
+# on the test set.
+#
+# Training clip lengths follow their section 3.2; the start offset is redrawn every epoch, so the
+# static lengths the length-bucketed sampler needs do not fix the crops.
+data:
+  class_path: viscy_data.npy_track.NpyTrackDataModule
+  init_args:
+    data_path: /hpc/projects/comp.micro/virtual_staining/models/dynaformer/data
+    train_split: train
+    predict_split: test
+    source_channel: 0 # 0 brightfield, 1 H2B
+    val_movies: [ "0608" ]
+    window_lengths: [ 4, 16, 32, 64, 96, 128, 192 ]
+    frames_per_batch: 1024
+    num_workers: 8
+    persistent_workers: true
+    prefetch_factor: 4
+    pin_memory: true
+    seed: 42

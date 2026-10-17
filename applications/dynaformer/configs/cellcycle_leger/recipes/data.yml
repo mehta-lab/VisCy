@@ -1,0 +1,20 @@
+# Data recipe: the Leger et al. (MELBA 2026) RPE1 tracks (data/README.md), brightfield in, FUCCI Geminin and Cdt1 out,
+# from an embedding cache written by dynaformer.leger_embed (index.csv and labels.npy sit next to it).
+#
+# The published splits have no validation set: movie 0608 (311 tracks) is held out of `train` for it, as in the August
+# dynaformer runs, so `test` (Regular) and `test_drugged` (Drug) are only scored. Training clips are up to 192 frames,
+# the longest window Leger et al. trained on, at the NIH3T3 recipe's ~32 clips per step; evaluation runs every track
+# whole.
+data:
+  class_path: dynaformer.leger_data.LegerDataModule
+  init_args:
+    embedding_features: all
+    val_movies: ["0608"]
+    window_size: 192
+    length_quantum: 8
+    min_frames: 8
+    frames_per_batch: 6144
+    eval_frames_per_batch: 4096
+    test_split: test
+    num_workers: 8
+    seed: 42

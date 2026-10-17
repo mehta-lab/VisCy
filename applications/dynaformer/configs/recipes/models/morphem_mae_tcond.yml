@@ -1,0 +1,64 @@
+# Model recipe: pretrained MorphEm ViT-S encoder + RoPE temporal transformer
+# + temporally-conditioned MAE image decoder + per-frame regression head.
+#
+# This is the reference configuration. Hyperparameters follow the study this
+# application generalizes; see the app README for what has and has not been
+# reproduced here.
+#
+# `condition_decoder: true` is the load-bearing setting: it routes the
+# temporally-mixed token into the image decoder through a zero-initialized
+# projection. Without it the decoder reconstructs each frame in isolation and
+# the predicted trajectory jitters.
+#
+# `d_model` matches the MorphEm embedding width (384), so no extra projection
+# sits between the encoder and the temporal transformer.
+model:
+  class_path: dynaformer.engine.DynaformerModule
+  init_args:
+    lr: 0.0003
+    # Well below `lr`: fine-tuning a pretrained backbone at the head learning
+    # rate destroys the features that make it worth using.
+    encoder_lr: 0.00001
+    schedule: Constant
+    log_batches_per_epoch: 4
+    log_frames_per_sample: 4
+    model:
+      class_path: dynaformer.models.SpatioTemporalModel
+      init_args:
+        condition_decoder: true
+        encoder:
+          class_path: dynaformer.models.MorphEmFrameEncoder
+          init_args:
+            model_name: CaicedoLab/MorphEm
+            freeze: false
+            img_size: 224
+        temporal:
+          class_path: dynaformer.models.RoPETransformerEncoder
+          init_args:
+            d_model: 384
+            n_heads: 8
+            n_layers: 4
+            ff_mult: 4
+            dropout: 0.1
+        decoder:
+          class_path: dynaformer.models.MAEImageDecoder
+          init_args:
+            embed_dim: 384
+            out_channels: 2
+            grid_size: 14
+            patch_size: 16
+            out_size: [256, 256]
+            out_stack_depth: 1
+            dec_dim: 256
+            dec_depth: 4
+            dec_heads: 8
+            cond_dim: 384
+        heads:
+          scalar:
+            class_path: viscy_models.components.heads.RegressionHead
+            init_args:
+              head_name: scalar
+              batch_key: scalar_target
+              in_dims: 384
+              out_dims: 2
+              loss_weight: 1.0

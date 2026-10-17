@@ -50,6 +50,55 @@ def _default_tensorstore_config(cache_pool_bytes: int = 0) -> TensorStoreConfig:
     )
 
 
+def align_tracks_tables_with_positions(
+    data_path: str | Path,
+    tracks_path: str | Path,
+    include_wells: list[str] | None = None,
+    exclude_fovs: list[str] | None = None,
+    cache_pool_bytes: int = 0,
+) -> "tuple[list[Position], list[pd.DataFrame]]":
+    """Open an HCS plate and pair every FOV with its tracking table.
+
+    Each FOV's table is read from ``<tracks_path>/<fov_name>/*.csv``, the layout
+    ultrack and Trackastra exports produce.
+
+    Parameters
+    ----------
+    data_path : str | Path
+        HCS OME-Zarr plate.
+    tracks_path : str | Path
+        Directory of per-FOV tracking CSVs.
+    include_wells : list[str] | None
+        Only include these wells, by default ``None`` (all).
+    exclude_fovs : list[str] | None
+        Exclude these FOVs, by default ``None`` (none).
+    cache_pool_bytes : int
+        Size of the tensorstore cache pool, by default 0 (unbounded default).
+
+    Returns
+    -------
+    tuple[list[Position], list[pd.DataFrame]]
+        Positions and their tracking tables, in matching order.
+    """
+    if pd is None:
+        raise ImportError("pandas is required to read tracking tables. Install with: pip install 'viscy-data[triplet]'")
+    positions = []
+    tracks_tables = []
+    tracks_path = Path(tracks_path)
+    images_plate = open_ome_zarr(
+        data_path,
+        implementation="tensorstore",
+        implementation_config=_default_tensorstore_config(cache_pool_bytes),
+    )
+    for well in _filter_wells(images_plate, include_wells=include_wells):
+        for fov in _filter_fovs(well, exclude_fovs=exclude_fovs):
+            positions.append(fov)
+            tracks_df = pd.read_csv(next((tracks_path / fov.zgroup.name.strip("/")).glob("*.csv"))).astype(int)
+            tracks_tables.append(tracks_df)
+
+    return positions, tracks_tables
+
+
 class TripletDataset(Dataset):
     """Dataset for triplet sampling of cells based on tracking."""
 
@@ -422,24 +471,13 @@ class TripletDataModule(HCSDataModule):
         tuple[list[Position], list[pd.DataFrame]]
             List of positions and list of tracks tables for each position
         """
-        if pd is None:
-            raise ImportError(
-                "pandas is required for TripletDataModule. Install with: pip install 'viscy-data[triplet]'"
-            )
-        positions = []
-        tracks_tables = []
-        images_plate = open_ome_zarr(
-            self.data_path,
-            implementation="tensorstore",
-            implementation_config=_default_tensorstore_config(self._cache_pool_bytes),
+        return align_tracks_tables_with_positions(
+            data_path=self.data_path,
+            tracks_path=self.tracks_path,
+            include_wells=self._include_wells,
+            exclude_fovs=self._exclude_fovs,
+            cache_pool_bytes=self._cache_pool_bytes,
         )
-        for well in _filter_wells(images_plate, include_wells=self._include_wells):
-            for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
-                positions.append(fov)
-                tracks_df = pd.read_csv(next((self.tracks_path / fov.zgroup.name.strip("/")).glob("*.csv"))).astype(int)
-                tracks_tables.append(tracks_df)
-
-        return positions, tracks_tables
 
     @property
     def _base_dataset_settings(self) -> dict:

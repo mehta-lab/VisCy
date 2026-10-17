@@ -1,0 +1,26 @@
+# Trainer recipe: fitting.
+# Topology lives in recipes/topology/*.yml; precision and epoch budget in the leaf.
+#
+# Checkpoints are selected on whole-track trajectory correlation, not on the
+# validation loss: the loss rewards per-frame reconstruction, which a model can
+# win while producing a trajectory that jitters frame to frame.
+seed_everything: 42
+trainer:
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: dynaformer
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/track_pearson/image
+        mode: max
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true

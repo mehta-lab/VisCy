@@ -1,0 +1,14 @@
+# Ablation: regression_vit-untrained with the temporal transformer removed (n_layers 0).
+base:
+  - regression_vit-untrained.yml
+model:
+  init_args:
+    model:
+      init_args:
+        temporal:
+          init_args:
+            n_layers: 0
+trainer:
+  logger:
+    init_args:
+      name: regression_vit-untrained_single_frame

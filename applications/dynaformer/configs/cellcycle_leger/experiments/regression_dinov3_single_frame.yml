@@ -1,0 +1,15 @@
+# Ablation: regression_dinov3 with the temporal transformer removed. n_layers 0 leaves T as its final LayerNorm, so
+# every prediction reads its own frame's embedding only; everything else is identical to regression_dinov3.yml.
+base:
+  - regression_dinov3.yml
+model:
+  init_args:
+    model:
+      init_args:
+        temporal:
+          init_args:
+            n_layers: 0
+trainer:
+  logger:
+    init_args:
+      name: regression_dinov3_single_frame

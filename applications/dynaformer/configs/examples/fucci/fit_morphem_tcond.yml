@@ -1,0 +1,43 @@
+# Reference model: pretrained MorphEm encoder + temporally-conditioned MAE decoder.
+# Usage: cd applications/dynaformer/configs/examples && uv run python -m dynaformer fit -c fucci/fit_morphem_tcond.yml
+#
+# Downloads CaicedoLab/MorphEm from HuggingFace on first run.
+base:
+  - ../../recipes/trainer/fit.yml
+  - ../../recipes/topology/single_gpu.yml
+  - ../../recipes/data/track_window_fucci.yml
+  - ../../recipes/models/morphem_mae_tcond.yml
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 100
+  # Re-listing callbacks replaces the recipe's list rather than extending it,
+  # so the learning-rate monitor and checkpoint callbacks are repeated here.
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: dynaformer.evaluation.TrackTrajectoryMetrics
+      init_args:
+        channel_names: [mKO, mVenus]
+        readout: ratio
+        channels: [0, 1]
+        norm_level: fov_statistics
+        norm_subtrahend: mean
+        norm_divisor: std
+        scalar_head_name: scalar
+        every_n_epochs: 1
+        max_tracks: 32
+        max_frames: 128
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/track_pearson/image
+        mode: max
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+
+data:
+  init_args:
+    data_path: #TODO HCS OME-Zarr plate
+    tracks_path: #TODO directory of per-FOV tracking CSVs

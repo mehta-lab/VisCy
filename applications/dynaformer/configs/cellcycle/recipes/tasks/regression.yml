@@ -1,0 +1,44 @@
+# Task recipe: f(ê_t) regresses the nucleus's Geminin-mKO and PIP-mVenus medians.
+# E (cached) -> RoPE transformer T over the track -> MLP head on every frame. No images are loaded.
+model:
+  class_path: dynaformer.cellcycle_engine.TemporalEmbeddingModule
+  init_args:
+    regression_weight: 1.0
+    stain_weight: 0.0
+    lr: 0.0003
+    weight_decay: 0.05
+    warmup_steps: 500
+    model:
+      class_path: dynaformer.models.TemporalEmbeddingModel
+      init_args:
+        input_dropout: 0.1
+        temporal:
+          class_path: dynaformer.models.RoPETransformerEncoder
+          init_args:
+            d_model: 384
+            n_heads: 6
+            n_layers: 4
+            ff_mult: 4
+            dropout: 0.1
+        regression_head:
+          class_path: dynaformer.models.MLPRegressionHead
+          init_args:
+            in_dims: 384
+            out_dims: 2
+            hidden_dims: 256
+            dropout: 0.1
+trainer:
+  max_steps: 15000
+  val_check_interval: 500
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints
+        filename: best_regression
+        monitor: val/regression/pearson
+        mode: max
+        save_top_k: 1
+        save_last: true

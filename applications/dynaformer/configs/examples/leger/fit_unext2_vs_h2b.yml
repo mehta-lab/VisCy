@@ -1,0 +1,81 @@
+# Virtual staining: brightfield in, H2B fluorescence image out.
+#
+# The FUCCI target in this dataset is scalars only -- the authors integrated the reporters over the
+# nuclear mask before publishing -- so the one genuine image-to-image task the release supports is
+# predicting the H2B channel from brightfield. That is also the only configuration here that
+# exercises dynaformer's actual thesis: a temporally-conditioned image decoder.
+#
+# Conditioning is zero-initialized, so at step 0 this model is bit-identical to a per-frame virtual
+# staining network and only learns temporal corrections on top.
+#
+# `stem_kernel_size` is (1,4,4) here, not the (1,2,2) of the scalar runs: UNeXt2ImageDecoder
+# restores the input resolution only at stem stride 4 and rejects anything else outright.
+base:
+  - ../../recipes/trainer/fit.yml
+  - ../../recipes/topology/single_gpu.yml
+  - ../../recipes/data/npy_track_leger.yml
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 24
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        mode: min
+        every_n_epochs: 1
+        save_top_k: 3
+        save_last: true
+
+data:
+  init_args:
+    source_channel: 0 # brightfield
+    target_channel: 1 # H2B -- the stain to predict
+    # Whole 64x64 frames of a long track are far heavier than two scalars, so the frame budget
+    # comes down accordingly.
+    frames_per_batch: 256
+
+model:
+  class_path: dynaformer.engine.DynaformerModule
+  init_args:
+    lr: 0.0002
+    weight_decay: 0.01
+    schedule: WarmupCosine
+    log_batches_per_epoch: 2
+    log_frames_per_sample: 4
+    model:
+      class_path: dynaformer.models.SpatioTemporalModel
+      init_args:
+        condition_decoder: true
+        encoder:
+          class_path: dynaformer.models.UNeXt2FrameEncoder
+          init_args:
+            in_channels: 1
+            in_stack_depth: 1
+            backbone: convnextv2_tiny
+            stem_kernel_size: [ 1, 4, 4 ]
+            yx_patch_size: [ 64, 64 ]
+            token_dim: 512
+            token_channels: 64
+        temporal:
+          class_path: dynaformer.models.RoPETransformerEncoder
+          init_args:
+            d_model: 512
+            n_heads: 8
+            n_layers: 4
+            ff_mult: 4
+            dropout: 0.1
+        decoder:
+          class_path: dynaformer.models.UNeXt2ImageDecoder
+          init_args:
+            feature_channels: [ 768, 384, 192, 96 ]
+            out_channels: 1
+            out_stack_depth: 1
+            stem_stride: 4
+            decoder_mode: pixelshuffle
+            decoder_conv_blocks: 2
+            head_expansion_ratio: 4
+            cond_dim: 512 # equals the temporal d_model; 0 would disable conditioning

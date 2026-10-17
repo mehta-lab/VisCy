@@ -1,0 +1,17 @@
+# Ablation: the same model with the temporal transformer removed.
+#
+# `n_layers: 0` leaves `RoPETransformerEncoder.forward` as just its final LayerNorm, so no
+# information crosses frames and every prediction depends on its own frame alone. Encoder, head,
+# optimizer, data and budget are otherwise identical to `fit_unext2_bf.yml`, which makes the
+# difference between the two runs a clean measurement of what temporal context is worth -- the
+# paper's Single Frame vs Transformer contrast, reproduced inside one codebase.
+base:
+  - ./fit_unext2_bf.yml
+
+model:
+  init_args:
+    model:
+      init_args:
+        temporal:
+          init_args:
+            n_layers: 0

@@ -1,0 +1,11 @@
+# stain with morphem embeddings.
+# Usage: sbatch ../run_fit.slurm stain_morphem.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/stain.yml
+  - ../recipes/encoders/morphem.yml
+trainer:
+  logger:
+    init_args:
+      name: stain_morphem

@@ -1,0 +1,9 @@
+# Encoder recipe: C-RADIOv4-H: 2560 summary token + 1280 centre patch mean.
+data:
+  init_args:
+    embeddings: /hpc/projects/comp.micro/virtual_staining/models/dynaformer/data/embeddings/c-radio.npy
+model:
+  init_args:
+    model:
+      init_args:
+        embed_dim: 3840

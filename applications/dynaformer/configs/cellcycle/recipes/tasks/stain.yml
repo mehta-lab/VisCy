@@ -1,0 +1,56 @@
+# Task recipe: g(p_t, ê_t) virtually stains Geminin-mKO and PIP-mVenus from phase, conditioned on ê_t.
+# E (cached) -> RoPE transformer T -> zero-initialized, centre-gated FiLM in a UNeXt2 UNet. The temporal model is
+# trained only through the conditioning. Checkpoints are selected on the stain's nucleus readout (the median of the
+# predicted image inside the nucleus), the quantity the regression head predicts directly.
+model:
+  class_path: dynaformer.cellcycle_engine.TemporalEmbeddingModule
+  init_args:
+    regression_weight: 0.0
+    stain_weight: 1.0
+    lr: 0.0003
+    weight_decay: 0.05
+    warmup_steps: 500
+    model:
+      class_path: dynaformer.models.TemporalEmbeddingModel
+      init_args:
+        input_dropout: 0.1
+        temporal:
+          class_path: dynaformer.models.RoPETransformerEncoder
+          init_args:
+            d_model: 384
+            n_heads: 6
+            n_layers: 4
+            ff_mult: 4
+            dropout: 0.1
+        stain_head:
+          class_path: dynaformer.models.ConditionedUNet
+          init_args:
+            in_channels: 1
+            out_channels: 2
+            cond_dim: 384
+            cond_sigma: 48.0
+            backbone: convnextv2_tiny
+            decoder_conv_blocks: 2
+            head_expansion_ratio: 4
+            drop_path_rate: 0.1
+trainer:
+  max_steps: 30000
+  val_check_interval: 1000
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: checkpoints
+        filename: best_stain
+        monitor: val/stain/pearson
+        mode: max
+        save_top_k: 1
+        save_last: true
+data:
+  init_args:
+    # Embeddings of every frame give the temporal context; 64 frames per batch get an image and a UNet pass.
+    frames_per_batch: 1024
+    images_per_batch: 64
+    eval_frames_per_batch: 512

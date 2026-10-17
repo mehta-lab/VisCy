@@ -1,0 +1,11 @@
+# multitask with morphem embeddings.
+# Usage: sbatch ../run_fit.slurm multitask_morphem.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/multitask.yml
+  - ../recipes/encoders/morphem.yml
+trainer:
+  logger:
+    init_args:
+      name: multitask_morphem

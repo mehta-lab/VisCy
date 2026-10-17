@@ -1,0 +1,19 @@
+# Data recipe: tracked NIH3T3 PIP-FUCCI nuclei (Bill/5-cellcycle: spatial split, nucleus reporter medians, crops).
+# The encoder recipe sets `embeddings`; the task recipe sets how many frames get images.
+data:
+  class_path: dynaformer.cellcycle_data.CellCycleDataModule
+  init_args:
+    data_dir: /hpc/projects/virtual_staining/datasets/huang-lab/Bill/5-cellcycle
+    embedding_features: all
+    window_size: 64
+    length_quantum: 8
+    min_frames: 8
+    frames_per_batch: 2048
+    eval_frames_per_batch: 1024
+    images_per_batch: 0
+    val_image_stride: 4
+    image_size: 224
+    jitter: 16
+    test_split: test
+    num_workers: 8
+    seed: 42

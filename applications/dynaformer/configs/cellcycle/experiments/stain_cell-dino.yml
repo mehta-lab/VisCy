@@ -1,0 +1,11 @@
+# stain with cell-dino embeddings.
+# Usage: sbatch ../run_fit.slurm stain_cell-dino.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/stain.yml
+  - ../recipes/encoders/cell-dino.yml
+trainer:
+  logger:
+    init_args:
+      name: stain_cell-dino

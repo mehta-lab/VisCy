@@ -1,0 +1,11 @@
+# multitask with a ViT trained from scratch as E (no foundation model; the untrained ViT, trained with the model).
+# Usage: ./submit.sh -- multitask_vit-scratch.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/data.yml
+  - ../recipes/tasks/multitask.yml
+  - ../recipes/encoders/vit-scratch.yml
+trainer:
+  logger:
+    init_args:
+      name: multitask_vit-scratch

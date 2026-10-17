@@ -1,0 +1,10 @@
+# Encoder recipe: no foundation model. MorphEm's ViT-S/16 architecture with random weights (seed 0): 384 class token +
+# 384 centre patch mean. The control for what pretraining is worth.
+data:
+  init_args:
+    embeddings: /hpc/projects/virtual_staining/datasets/huang-lab/Bill/5-cellcycle/embeddings/vit-untrained.npy
+model:
+  init_args:
+    model:
+      init_args:
+        embed_dim: 768
