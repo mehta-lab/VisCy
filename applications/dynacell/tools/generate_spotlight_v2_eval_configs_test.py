@@ -10,9 +10,11 @@ import pytest
 import yaml
 from generate_grouped_eval_configs import _BASE_OVERLAY, _LEAF_OUT_ROOT
 from generate_spotlight_v2_eval_configs import (
+    ALT_BACKENDS,
     DEFAULT_ROSTER,
     PRED_FORCE,
     V2_ROOT,
+    backend_root,
     build_buckets,
     gt_test_store,
     load_roster,
@@ -21,8 +23,10 @@ from generate_spotlight_v2_eval_configs import (
     store_problems,
 )
 from iohub.ngff import open_ome_zarr
+from omegaconf import OmegaConf
 
 from dynacell.evaluation import paths
+from dynacell.evaluation.pipeline import _validate_instance_ap_config
 
 
 def _write_roster(tmp_path: Path, waves: dict, leaves: list[str] | None = None) -> Path:
@@ -216,3 +220,39 @@ def test_er_mito_gate_compares_against_the_per_organelle_gt(organelle: str, leaf
     """The store gate reads the per-organelle iPSC GT and the A549 sec61b/tomm20 test sets."""
     parsed = parsed_row(organelle, "fnet3d_vscyto3daug_v2", leaf, Path("unused"))
     assert gt_test_store(parsed) == paths.DATA_ROOT / store
+
+
+@pytest.mark.parametrize("backend", sorted(ALT_BACKENDS))
+def test_backend_rescoring_buckets_keep_the_stores_and_write_elsewhere(backend: str) -> None:
+    """Re-scoring buckets read the same stores as the cpdino ones but save under their own root."""
+    rows = [
+        ("w", "nucleus", m, leaf, Path(f"/s/{m}/{leaf}.zarr")) for m in ("fnet2d", "fnet3d_paper") for leaf in ("ipsc",)
+    ]
+    base = build_buckets(rows)
+    alt = build_buckets(rows, backend=backend)
+    assert sorted(alt) == [f"{name}_{backend}" for name in sorted(base)]
+    (body, n), (base_body, _) = alt[f"spotlight_v2_nucleus_ipsc__w_{backend}"], base["spotlight_v2_nucleus_ipsc__w"]
+    assert n == 2
+    assert body["segmentation"] == {"backend": backend}
+    assert body["compute_instance_ap"] is ALT_BACKENDS[backend]
+    assert body["compute_feature_metrics"] is False
+    assert base_body["segmentation"] == {"backend": "cpdino"}
+    root = str(backend_root(backend))
+    for cond, base_cond in zip(body["conditions"], base_body["conditions"], strict=True):
+        assert cond["io"]["pred_path"] == base_cond["io"]["pred_path"]
+        assert cond["io"]["pred_cache_dir"].startswith(root + "/")
+        assert cond["save"]["save_dir"].startswith(root + "/")
+        assert not cond["save"]["save_dir"].startswith(str(V2_ROOT) + "/")
+    # The eval accepts the backend / target / instance-AP combination.
+    _validate_instance_ap_config(OmegaConf.create(body))
+
+
+def test_backend_rescoring_is_nucleus_only_and_needs_a_wave(tmp_path: Path) -> None:
+    """Re-scoring refuses non-nucleus rows, unknown backends, and a run without --wave."""
+    with pytest.raises(ValueError, match="nucleus only"):
+        build_buckets([("w", "membrane", "fnet2d", "ipsc", Path("/s.zarr"))], backend="cellpose")
+    with pytest.raises(ValueError, match="unknown re-scoring backend"):
+        backend_root("cpdino")
+    roster = _write_roster(tmp_path, {"w": {"nucleus": ["fnet2d"]}})
+    with pytest.raises(SystemExit):
+        main(["--roster", str(roster), "--segmentation-backend", "cellpose"])
