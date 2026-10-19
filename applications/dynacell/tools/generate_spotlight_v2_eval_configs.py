@@ -55,6 +55,16 @@ one (SuperModel) next to cpdino. Only masks are recomputed (no feature metrics),
 their own root, ``<DATA_ROOT>/_spotlight_v2_<backend>``, so they never overwrite the cpdino rows.
 Their GT masks are cached in the shared manifest GT cache under the backend's own plate name.
 
+A 2-D model predicted on the 2-D benchmark's focus slab only (``predict_z_planes``: the
+store holds the GT-anchored focus plane +-h per timepoint and records them as
+``viscy_predicted_z_planes``) cannot be scored over the full volume. The roster's top-level
+``focus2d_waves: {<wave>: <halfwidth>}`` scores such a wave like the 2-D benchmark
+(``focus2d.halfwidth``: every metric on the focus plane / slab), into
+``<DATA_ROOT>/_spotlight_v2_focus2d_h<halfwidth>`` so a full-volume row of the same model is
+never overwritten. A ``(organelle, model, leaf)`` may then appear once per protocol. The
+gate accepts a plane-restricted store only in a ``focus2d`` wave, and requires exactly the
+chunks of its recorded planes there.
+
 Usage::
 
     uv run --no-sync python applications/dynacell/tools/generate_spotlight_v2_eval_configs.py --dry-run
@@ -112,6 +122,17 @@ PRED_FORCE: dict[str, bool] = {
 }
 
 
+def focus2d_root(halfwidth: int) -> Path:
+    """Return the output root of ``focus2d`` waves scored at ``halfwidth``."""
+    return paths.DATA_ROOT / f"_spotlight_v2_focus2d_h{halfwidth}"
+
+
+def load_focus2d_waves(path: Path) -> dict[str, int]:
+    """Return the roster's ``{wave: focus2d halfwidth}`` (empty when it scores every wave in 3-D)."""
+    with path.open() as f:
+        return dict(yaml.safe_load(f).get("focus2d_waves") or {})
+
+
 def split_leaf(leaf: str) -> tuple[str, str | None]:
     """Return ``(test_set, condition)`` for a ``<test>[__<cond>]`` leaf token."""
     if leaf not in LEAVES:
@@ -131,13 +152,17 @@ def load_roster(path: Path) -> list[tuple[str, str, str, str, Path]]:
     Raises
     ------
     ValueError
-        On an unknown organelle/leaf/model or a duplicate ``(organelle, model, leaf)``.
+        On an unknown organelle/leaf/model, a ``focus2d_waves`` entry naming no wave, or a
+        duplicate ``(organelle, model, leaf)`` within one protocol (3-D or a focus2d halfwidth).
     """
     with path.open() as f:
         roster = yaml.safe_load(f)
     default_leaves = roster["leaves"]
+    focus2d = dict(roster.get("focus2d_waves") or {})
+    if unknown := set(focus2d) - set(roster["waves"]):
+        raise ValueError(f"focus2d_waves {sorted(unknown)} are not waves")
     rows: list[tuple[str, str, str, str, Path]] = []
-    seen: dict[tuple[str, str, str], str] = {}
+    seen: dict[tuple, str] = {}
     for wave, by_organelle in roster["waves"].items():
         for organelle, entries in by_organelle.items():
             if organelle not in ORGANELLES:
@@ -151,7 +176,7 @@ def load_roster(path: Path) -> list[tuple[str, str, str, str, Path]]:
                 overrides = entry.get("pred_paths", {})
                 for leaf in entry.get("leaves", default_leaves):
                     test_set, condition = split_leaf(leaf)
-                    key = (organelle, model, leaf)
+                    key = (organelle, model, leaf, focus2d.get(wave))
                     if key in seen:
                         raise ValueError(f"{key} is in wave {seen[key]!r} and wave {wave!r}")
                     seen[key] = wave
@@ -206,12 +231,37 @@ def _positions(store: Path) -> dict[str, Path]:
     }
 
 
-def store_problems(pred_path: Path, gt_store: Path) -> list[str]:
+def _slab_chunk_keys(group: Path, shape: list[int], chunks: list[int]) -> set[tuple[int, ...]] | None:
+    """Return the chunk keys a plane-restricted (2-D benchmark) predict writes, or None for a full one.
+
+    A slab-only predict records ``viscy_predicted_z_planes`` (``{channel: [planes per t]}``) on the
+    position and writes only those planes, so the full-array chunk count does not apply. Each
+    listed channel needs every ``(t, c, z, y, x)`` chunk of its planes; other channels need all.
+    """
+    attrs = json.loads((group / "zarr.json").read_text()).get("attributes", {})
+    planes = attrs.get("viscy_predicted_z_planes")
+    if planes is None:
+        return None
+    labels = [c["label"] for c in attrs["ome"]["omero"]["channels"]]
+    grid = [math.ceil(n / c) for n, c in zip(shape, chunks)]
+    yx = [(y, x) for y in range(grid[3]) for x in range(grid[4])]
+    keys: set[tuple[int, ...]] = set()
+    for ci, label in enumerate(labels):
+        per_t = planes.get(label)
+        for t in range(shape[0]):
+            zs = range(shape[2]) if per_t is None else per_t[t]
+            keys |= {(t // chunks[0], ci // chunks[1], z // chunks[2], y, x) for z in zs for y, x in yx}
+    return keys
+
+
+def store_problems(pred_path: Path, gt_store: Path, focus2d: bool = False) -> list[str]:
     """Return why ``pred_path`` is not a complete prediction of ``gt_store`` (empty = complete).
 
     Checks the position set against the GT test store, each position's full-res
     ``(T, Z, Y, X)`` against the GT's (channels differ by design), and every
-    array's chunk-file count against ``prod(ceil(shape / chunks))``.
+    array's chunk-file count against ``prod(ceil(shape / chunks))``. A plane-restricted
+    (2-D benchmark) store must instead hold exactly the chunks of its recorded planes
+    (:func:`_slab_chunk_keys`); score it with a ``focus2d`` wave.
     """
     if not pred_path.is_dir():
         return [f"missing store {pred_path}"]
@@ -228,10 +278,18 @@ def store_problems(pred_path: Path, gt_store: Path) -> list[str]:
             problems.append(f"{name}: no arrays")
             continue
         for array_name, (shape, chunks, chunk_root) in arrays:
-            expected = math.prod(math.ceil(s / c) for s, c in zip(shape, chunks))
+            slab = _slab_chunk_keys(group, shape, chunks) if array_name == "0" else None
+            if slab is not None and not focus2d:
+                problems.append(
+                    f"{name}: plane-restricted predict (viscy_predicted_z_planes); score it in a focus2d wave"
+                )
+                continue
+            expected = len(slab) if slab is not None else math.prod(math.ceil(s / c) for s, c in zip(shape, chunks))
             found = _count_chunk_files(chunk_root)
             if found != expected:
                 problems.append(f"{name}/{array_name}: {found}/{expected} chunk files")
+            elif slab is not None and (absent := [k for k in slab if not chunk_root.joinpath(*map(str, k)).is_file()]):
+                problems.append(f"{name}/{array_name}: {len(absent)} recorded-plane chunks missing, e.g. {absent[0]}")
         gt_layout = _array_layout(gt_pos[name] / "0") if name in gt_pos else None
         full_res = dict(arrays).get("0")
         if gt_layout is not None and full_res is not None:
@@ -277,25 +335,40 @@ def backend_root(backend: str) -> Path:
     return paths.DATA_ROOT / f"_spotlight_v2_{backend}"
 
 
+def wave_root(wave: str, focus2d: dict[str, int], backend: str | None = None, v2_root: Path = V2_ROOT) -> Path:
+    """Return where a wave's buckets save: the v2 root, a backend root, or a focus2d root."""
+    if wave in focus2d:
+        if backend is not None:
+            raise ValueError(f"wave {wave!r} is a focus2d wave; --segmentation-backend re-scores 3-D waves only")
+        return focus2d_root(focus2d[wave])
+    return v2_root if backend is None else backend_root(backend)
+
+
 def build_buckets(
-    rows: list[tuple[str, str, str, str, Path]], v2_root: Path = V2_ROOT, backend: str | None = None
+    rows: list[tuple[str, str, str, str, Path]],
+    v2_root: Path = V2_ROOT,
+    backend: str | None = None,
+    focus2d: dict[str, int] | None = None,
 ) -> dict[str, tuple[dict, int]]:
     """Return ``{bucket_name: (leaf_body, n_conditions)}`` for the roster rows.
 
     With ``backend``, the buckets re-score nucleus stores with that segmenter into
-    :func:`backend_root` instead of ``v2_root`` (see the module docstring).
+    :func:`backend_root` instead of ``v2_root``; a ``focus2d`` wave scores on the focus
+    plane into :func:`focus2d_root` (see the module docstring).
     """
+    focus2d = focus2d or {}
     if backend is not None:
         v2_root = backend_root(backend)
         if bad := {row[1] for row in rows} - {"nucleus"}:
             raise ValueError(f"--segmentation-backend re-scores nucleus only; got {sorted(bad)}")
-    grouped: dict[str, tuple[str, list[ParsedZarr]]] = {}
+    grouped: dict[str, tuple[str, str, list[ParsedZarr]]] = {}
     for wave, organelle, model, leaf, pred_path in rows:
         name = bucket_name(wave, organelle, leaf) + (f"_{backend}" if backend else "")
-        grouped.setdefault(name, (organelle, []))[1].append(parsed_row(organelle, model, leaf, pred_path))
+        grouped.setdefault(name, (wave, organelle, []))[2].append(parsed_row(organelle, model, leaf, pred_path))
     buckets: dict[str, tuple[dict, int]] = {}
-    for name, (organelle, members) in sorted(grouped.items()):
-        body = build_leaf_yaml(target_name(organelle), _TRAIN_BUCKET, members, dynacell_root=v2_root)
+    for name, (wave, organelle, members) in sorted(grouped.items()):
+        root = wave_root(wave, focus2d, backend, v2_root)
+        body = build_leaf_yaml(target_name(organelle), _TRAIN_BUCKET, members, dynacell_root=root)
         # Replace, never mutate: build_leaf_yaml shallow-copies the generator's
         # module-level overlay, so this dict is shared with every other leaf.
         body["force_recompute"] = dict(PRED_FORCE)
@@ -303,6 +376,11 @@ def build_buckets(
             body["segmentation"] = {"backend": backend}
             body["compute_instance_ap"] = ALT_BACKENDS[backend]
             body["compute_feature_metrics"] = False
+        if wave in focus2d:
+            # Before ``conditions``, where the canonical 2-D benchmark leaves put it.
+            conditions = body.pop("conditions")
+            body["focus2d"] = {"halfwidth": focus2d[wave]}
+            body["conditions"] = conditions
         buckets[name] = (body, len(members))
     return buckets
 
@@ -316,6 +394,11 @@ def leaf_text(name: str, body: dict, n: int, roster: Path, root: Path = V2_ROOT)
         "# (never the canonical dirs the paper reads); the GT caches are the shared manifest\n"
         "# ones. Every pred_* artifact is forced.\n"
     )
+    if "focus2d" in body:
+        comment += (
+            f"# Scored like the 2-D benchmark: focus2d.halfwidth={body['focus2d']['halfwidth']}, every metric on the\n"
+            "# GT-anchored focus plane / slab of each FOV and timepoint (the store may hold only that slab).\n"
+        )
     return _HYDRA_HEADER + comment + yaml.safe_dump(body, default_flow_style=False, sort_keys=False)
 
 
@@ -347,10 +430,14 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             raise ValueError(f"--wave {sorted(unknown)} not in roster {args.roster}")
         rows = [row for row in rows if row[0] in args.wave]
+    focus2d = load_focus2d_waves(args.roster)
     parsed_rows = [parsed_row(organelle, model, leaf, pred) for _, organelle, model, leaf, pred in rows]
+    in_focus2d = [row[0] in focus2d for row in rows]
     # Listing ~5k chunk files per store is NFS-latency bound; threads overlap it.
     with ThreadPoolExecutor(_GATE_WORKERS) as pool:
-        all_problems = list(pool.map(lambda p: store_problems(p.pred_path, gt_test_store(p)), parsed_rows))
+        all_problems = list(
+            pool.map(lambda p, f: store_problems(p.pred_path, gt_test_store(p), f), parsed_rows, in_focus2d)
+        )
     failures: list[str] = []
     for parsed, problems in zip(parsed_rows, all_problems):
         pred_path = parsed.pred_path
@@ -364,14 +451,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     backend = args.segmentation_backend
-    buckets = build_buckets(rows, backend=backend)
-    root = V2_ROOT if backend is None else backend_root(backend)
+    buckets = build_buckets(rows, backend=backend, focus2d=focus2d)
+    wave_of = {bucket_name(w, o, leaf) + (f"_{backend}" if backend else ""): w for w, o, _, leaf, _ in rows}
     for name, (body, n) in buckets.items():
         out = args.out_root / name / "eval_grouped.yaml"
         print(f"[gen] {name}: {n} conditions -> {out}")
         if not args.dry_run:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(leaf_text(name, body, n, args.roster, root))
+            out.write_text(leaf_text(name, body, n, args.roster, wave_root(wave_of[name], focus2d, backend)))
     print(f"[gen] {len(rows)} conditions in {len(buckets)} buckets{' (dry run)' if args.dry_run else ''}")
     return 0
 

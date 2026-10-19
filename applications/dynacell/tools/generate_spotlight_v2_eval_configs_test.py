@@ -16,7 +16,9 @@ from generate_spotlight_v2_eval_configs import (
     V2_ROOT,
     backend_root,
     build_buckets,
+    focus2d_root,
     gt_test_store,
+    load_focus2d_waves,
     load_roster,
     main,
     parsed_row,
@@ -256,3 +258,74 @@ def test_backend_rescoring_is_nucleus_only_and_needs_a_wave(tmp_path: Path) -> N
     roster = _write_roster(tmp_path, {"w": {"nucleus": ["fnet2d"]}})
     with pytest.raises(SystemExit):
         main(["--roster", str(roster), "--segmentation-backend", "cellpose"])
+
+
+def _write_slab_plate(path: Path, planes: list[list[int]], shape: tuple[int, ...], drop: tuple | None = None) -> None:
+    """One-position store written like a slab-only predict: only the recorded planes hold chunks."""
+    with open_ome_zarr(path, layout="hcs", mode="w", channel_names=["Nuclei_prediction"], version="0.5") as plate:
+        pos = plate.create_position("A", "1", "0")
+        arr = pos.create_zeros("0", shape, dtype=np.float32, chunks=(1, 1, 1, *shape[3:]))
+        for t, zs in enumerate(planes):
+            for z in zs:
+                if (t, z) != drop:
+                    arr[t, 0, z] = 1.0
+        pos.zattrs["viscy_predicted_z_planes"] = {"Nuclei_prediction": planes}
+
+
+def test_gate_accepts_a_complete_slab_store_only_in_a_focus2d_wave(tmp_path: Path) -> None:
+    """A slab-only store passes a focus2d gate, fails a 3-D one, and fails when a recorded plane is missing."""
+    shape = (2, 1, 6, 8, 8)
+    gt = tmp_path / "gt.zarr"
+    _write_plate(gt, [("A", "1", "0")], shape)
+    planes = [[1, 2, 3], [2, 3, 4]]
+    good = tmp_path / "slab.zarr"
+    _write_slab_plate(good, planes, shape)
+    assert store_problems(good, gt, focus2d=True) == []
+    assert any("focus2d wave" in p for p in store_problems(good, gt))
+    holey = tmp_path / "holey.zarr"
+    _write_slab_plate(holey, planes, shape, drop=(1, 4))
+    assert store_problems(holey, gt, focus2d=True)
+    # A full store still passes a focus2d gate (the 2-D benchmark scores full stores too).
+    assert store_problems(gt, gt, focus2d=True) == []
+
+
+def test_focus2d_waves_score_on_the_plane_in_their_own_root(tmp_path: Path) -> None:
+    """A focus2d wave sets focus2d.halfwidth and saves under its own root; one key may repeat across protocols."""
+    entry = {"model": "pix2pix2d_unetvit_last", "leaves": ["ipsc"]}
+    roster = tmp_path / "roster.yaml"
+    roster.write_text(
+        yaml.safe_dump(
+            {
+                "leaves": ["ipsc"],
+                "waves": {"w3d": {"nucleus": [entry]}, "w2d": {"nucleus": [entry]}},
+                "focus2d_waves": {"w2d": 1},
+            }
+        )
+    )
+    rows = load_roster(roster)
+    focus2d = load_focus2d_waves(roster)
+    buckets = build_buckets(rows, focus2d=focus2d)
+    body2d, body3d = buckets["spotlight_v2_nucleus_ipsc__w2d"][0], buckets["spotlight_v2_nucleus_ipsc__w3d"][0]
+    assert body2d["focus2d"] == {"halfwidth": 1} and "focus2d" not in body3d
+    assert list(body2d).index("focus2d") == list(body2d).index("conditions") - 1
+    root = str(focus2d_root(1))
+    assert body2d["conditions"][0]["save"]["save_dir"].startswith(root + "/")
+    assert body3d["conditions"][0]["save"]["save_dir"].startswith(str(V2_ROOT) + "/")
+    with pytest.raises(ValueError, match="focus2d wave"):
+        build_buckets(rows, backend="cellpose", focus2d=focus2d)
+    roster.write_text(
+        yaml.safe_dump(
+            {
+                "leaves": ["ipsc"],
+                "waves": {"a": {"nucleus": [entry]}, "b": {"nucleus": [entry]}},
+                "focus2d_waves": {"a": 1, "b": 1},
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="is in wave"):
+        load_roster(roster)
+    roster.write_text(
+        yaml.safe_dump({"leaves": ["ipsc"], "waves": {"a": {"nucleus": [entry]}}, "focus2d_waves": {"z": 1}})
+    )
+    with pytest.raises(ValueError, match="are not waves"):
+        load_roster(roster)
