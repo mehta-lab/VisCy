@@ -520,13 +520,23 @@ waves:
   # P1 segmenter-consistency fine-tunes (condgen review, 2026-10-19): each pair forks the same
   # converged checkpoint; segcons adds the cpsam consistency term, segcons_ctrl is the same fork,
   # steps and LR without it. Predicted from latest-* (= last.ckpt). Compare segcons vs segcons_ctrl
-  # head to head, and both vs the v2 baselines' rows. Hacking check: also generate
-  # --segmentation-backend cellpose and supermodel for this wave.
+  # head to head, and both vs the v2 baselines' rows. 3-D models here; pix2pix2d in p1segcons2d.
   p1segcons:
     nucleus:
       - fnet3d_vscyto3daug_segcons
       - fnet3d_vscyto3daug_segcons_ctrl
       - fcmae_vscyto3d_scratch_segcons
       - fcmae_vscyto3d_scratch_segcons_ctrl
+  # ... and the pix2pix2d pair. Their predicts are slab-only (the 2-D benchmark's focus plane +-1),
+  # so the wave is a focus2d wave (focus2d_waves below). The pix2pix2d v2 baselines' Spotlight-v2
+  # rows are full-volume scores of full-Z stores, so they are re-scored here under the same focus2d
+  # protocol (own root; their full-volume rows stay): _last = the fork-source checkpoint.
+  p1segcons2d:
+    nucleus:
       - pix2pix2d_unetvit_segcons
       - pix2pix2d_unetvit_segcons_ctrl
+      - pix2pix2d_unetvit_last
+      - pix2pix2d_unetvit_seed1
+# Waves scored like the 2-D benchmark (focus2d.halfwidth) into _spotlight_v2_focus2d_h<halfwidth>.
+focus2d_waves:
+  p1segcons2d: 1
