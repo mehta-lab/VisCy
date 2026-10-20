@@ -20,6 +20,7 @@ from generate_spotlight_v2_eval_configs import (
     gt_test_store,
     load_focus2d_waves,
     load_roster,
+    load_wave_root_tags,
     main,
     parsed_row,
     store_problems,
@@ -328,4 +329,28 @@ def test_focus2d_waves_score_on_the_plane_in_their_own_root(tmp_path: Path) -> N
         yaml.safe_dump({"leaves": ["ipsc"], "waves": {"a": {"nucleus": [entry]}}, "focus2d_waves": {"z": 1}})
     )
     with pytest.raises(ValueError, match="are not waves"):
+        load_roster(roster)
+
+
+def test_wave_root_tags_rescore_a_model_beside_its_first_rows(tmp_path: Path) -> None:
+    """A tagged focus2d wave re-scores the same (model, leaf) into <root>_<tag>; the untagged rows stay put."""
+    entry = {"model": "pix2pix2d_unetvit_last", "leaves": ["ipsc"]}
+    roster = tmp_path / "roster.yaml"
+    doc = {
+        "leaves": ["ipsc"],
+        "waves": {"first": {"nucleus": [entry]}, "again": {"nucleus": [entry]}},
+        "focus2d_waves": {"first": 1, "again": 1},
+        "wave_root_tags": {"again": "fu"},
+    }
+    roster.write_text(yaml.safe_dump(doc))
+    rows = load_roster(roster)
+    buckets = build_buckets(rows, focus2d=load_focus2d_waves(roster), root_tags=load_wave_root_tags(roster))
+    first = buckets["spotlight_v2_nucleus_ipsc__first"][0]["conditions"][0]
+    again = buckets["spotlight_v2_nucleus_ipsc__again"][0]["conditions"][0]
+    assert first["io"]["pred_path"] == again["io"]["pred_path"]
+    assert first["save"]["save_dir"].startswith(str(focus2d_root(1)) + "/")
+    assert again["save"]["save_dir"].startswith(str(focus2d_root(1)) + "_fu/")
+    del doc["wave_root_tags"]
+    roster.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ValueError, match="is in wave"):
         load_roster(roster)

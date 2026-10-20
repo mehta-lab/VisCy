@@ -65,6 +65,11 @@ never overwritten. A ``(organelle, model, leaf)`` may then appear once per proto
 gate accepts a plane-restricted store only in a ``focus2d`` wave, and requires exactly the
 chunks of its recorded planes there.
 
+``wave_root_tags: {<wave>: <tag>}`` saves a wave under ``<its root>_<tag>`` instead. It re-scores a
+model that another wave already scored with the same protocol, e.g. a control re-scored in the
+same bucket (same GPU) as a new arm, without overwriting the first rows. A ``(organelle, model,
+leaf)`` may then appear once per (protocol, tag).
+
 Usage::
 
     uv run --no-sync python applications/dynacell/tools/generate_spotlight_v2_eval_configs.py --dry-run
@@ -127,6 +132,12 @@ def focus2d_root(halfwidth: int) -> Path:
     return paths.DATA_ROOT / f"_spotlight_v2_focus2d_h{halfwidth}"
 
 
+def load_wave_root_tags(path: Path) -> dict[str, str]:
+    """Return the roster's ``{wave: root tag}`` (empty when every wave saves under its protocol's root)."""
+    with path.open() as f:
+        return dict(yaml.safe_load(f).get("wave_root_tags") or {})
+
+
 def load_focus2d_waves(path: Path) -> dict[str, int]:
     """Return the roster's ``{wave: focus2d halfwidth}`` (empty when it scores every wave in 3-D)."""
     with path.open() as f:
@@ -159,8 +170,11 @@ def load_roster(path: Path) -> list[tuple[str, str, str, str, Path]]:
         roster = yaml.safe_load(f)
     default_leaves = roster["leaves"]
     focus2d = dict(roster.get("focus2d_waves") or {})
+    tags = dict(roster.get("wave_root_tags") or {})
     if unknown := set(focus2d) - set(roster["waves"]):
         raise ValueError(f"focus2d_waves {sorted(unknown)} are not waves")
+    if unknown := set(tags) - set(roster["waves"]):
+        raise ValueError(f"wave_root_tags {sorted(unknown)} are not waves")
     rows: list[tuple[str, str, str, str, Path]] = []
     seen: dict[tuple, str] = {}
     for wave, by_organelle in roster["waves"].items():
@@ -176,7 +190,7 @@ def load_roster(path: Path) -> list[tuple[str, str, str, str, Path]]:
                 overrides = entry.get("pred_paths", {})
                 for leaf in entry.get("leaves", default_leaves):
                     test_set, condition = split_leaf(leaf)
-                    key = (organelle, model, leaf, focus2d.get(wave))
+                    key = (organelle, model, leaf, focus2d.get(wave), tags.get(wave))
                     if key in seen:
                         raise ValueError(f"{key} is in wave {seen[key]!r} and wave {wave!r}")
                     seen[key] = wave
@@ -335,13 +349,22 @@ def backend_root(backend: str) -> Path:
     return paths.DATA_ROOT / f"_spotlight_v2_{backend}"
 
 
-def wave_root(wave: str, focus2d: dict[str, int], backend: str | None = None, v2_root: Path = V2_ROOT) -> Path:
-    """Return where a wave's buckets save: the v2 root, a backend root, or a focus2d root."""
+def wave_root(
+    wave: str,
+    focus2d: dict[str, int],
+    backend: str | None = None,
+    v2_root: Path = V2_ROOT,
+    root_tags: dict[str, str] | None = None,
+) -> Path:
+    """Return where a wave's buckets save: the v2, backend or focus2d root, ``_<tag>``-suffixed if tagged."""
     if wave in focus2d:
         if backend is not None:
             raise ValueError(f"wave {wave!r} is a focus2d wave; --segmentation-backend re-scores 3-D waves only")
-        return focus2d_root(focus2d[wave])
-    return v2_root if backend is None else backend_root(backend)
+        root = focus2d_root(focus2d[wave])
+    else:
+        root = v2_root if backend is None else backend_root(backend)
+    tag = (root_tags or {}).get(wave)
+    return root if tag is None else root.with_name(f"{root.name}_{tag}")
 
 
 def build_buckets(
@@ -349,6 +372,7 @@ def build_buckets(
     v2_root: Path = V2_ROOT,
     backend: str | None = None,
     focus2d: dict[str, int] | None = None,
+    root_tags: dict[str, str] | None = None,
 ) -> dict[str, tuple[dict, int]]:
     """Return ``{bucket_name: (leaf_body, n_conditions)}`` for the roster rows.
 
@@ -367,7 +391,7 @@ def build_buckets(
         grouped.setdefault(name, (wave, organelle, []))[2].append(parsed_row(organelle, model, leaf, pred_path))
     buckets: dict[str, tuple[dict, int]] = {}
     for name, (wave, organelle, members) in sorted(grouped.items()):
-        root = wave_root(wave, focus2d, backend, v2_root)
+        root = wave_root(wave, focus2d, backend, v2_root, root_tags)
         body = build_leaf_yaml(target_name(organelle), _TRAIN_BUCKET, members, dynacell_root=root)
         # Replace, never mutate: build_leaf_yaml shallow-copies the generator's
         # module-level overlay, so this dict is shared with every other leaf.
@@ -431,6 +455,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(f"--wave {sorted(unknown)} not in roster {args.roster}")
         rows = [row for row in rows if row[0] in args.wave]
     focus2d = load_focus2d_waves(args.roster)
+    root_tags = load_wave_root_tags(args.roster)
     parsed_rows = [parsed_row(organelle, model, leaf, pred) for _, organelle, model, leaf, pred in rows]
     in_focus2d = [row[0] in focus2d for row in rows]
     # Listing ~5k chunk files per store is NFS-latency bound; threads overlap it.
@@ -451,14 +476,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     backend = args.segmentation_backend
-    buckets = build_buckets(rows, backend=backend, focus2d=focus2d)
+    buckets = build_buckets(rows, backend=backend, focus2d=focus2d, root_tags=root_tags)
     wave_of = {bucket_name(w, o, leaf) + (f"_{backend}" if backend else ""): w for w, o, _, leaf, _ in rows}
     for name, (body, n) in buckets.items():
         out = args.out_root / name / "eval_grouped.yaml"
         print(f"[gen] {name}: {n} conditions -> {out}")
         if not args.dry_run:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(leaf_text(name, body, n, args.roster, wave_root(wave_of[name], focus2d, backend)))
+            out.write_text(
+                leaf_text(name, body, n, args.roster, wave_root(wave_of[name], focus2d, backend, root_tags=root_tags))
+            )
     print(f"[gen] {len(rows)} conditions in {len(buckets)} buckets{' (dry run)' if args.dry_run else ''}")
     return 0
 
