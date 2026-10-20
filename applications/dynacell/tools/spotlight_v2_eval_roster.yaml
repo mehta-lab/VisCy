@@ -537,6 +537,20 @@ waves:
       - pix2pix2d_unetvit_segcons_ctrl
       - pix2pix2d_unetvit_last
       - pix2pix2d_unetvit_seed1
+  # P1 pix2pix2d follow-ups (2026-10-19, p1/PREREG_followups.md): the replication pair (forked from
+  # pix2pix2d_unetvit_seed1) and the 10x-lambda positive control, with the original segcons_ctrl re-scored in the
+  # same buckets (same GPU) as the x10 arm it is compared against. Tagged (wave_root_tags) so that re-score does not
+  # overwrite segcons_ctrl's p1segcons2d rows.
+  p1followups2d:
+    nucleus:
+      - pix2pix2d_unetvit_segcons_s1
+      - pix2pix2d_unetvit_segcons_ctrl_s1
+      - pix2pix2d_unetvit_segcons_x10
+      - pix2pix2d_unetvit_segcons_ctrl
 # Waves scored like the 2-D benchmark (focus2d.halfwidth) into _spotlight_v2_focus2d_h<halfwidth>.
 focus2d_waves:
   p1segcons2d: 1
+  p1followups2d: 1
+# Waves saved under <their root>_<tag> (a model re-scored beside its first rows).
+wave_root_tags:
+  p1followups2d: p1fu
