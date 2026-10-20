@@ -1,6 +1,7 @@
 # Fig 6 attempt 25: Alex Lin's OPS set classifier (czbiohub-sf/ops_monorepo@ab11b56, unchanged) on cached
 # DynaCLR TOMM20 embeddings, to separate cell-cycle-linked from infection-induced TOMM20 changes.
 # Run: .venv/bin/python applications/dynaclr/tools/tomm20_set_classifier.py --config <this file> --stage <stage>
+# Record of attempt 25 (outputs produced at viscy commit 77113bac). TCN-only lineage labels.
 attempt: 25
 seed: 17
 
@@ -8,6 +9,8 @@ fig_root: /home/eduardo.hirata/repos/dynaclr-organelle-paper/organelle_remodelin
 labels: /hpc/mydata/eduardo.hirata/fig6_inputs/attempt23_phase_embedding_e017ba39.parquet
 labels_origin: FIG/23_tomm20_density_montage/source_data/phase_embedding.parquet
 labels_sha256: e017ba39f4cd542c10784e3ba462e30143064a9e73e2a7cfe1820f4ab1e7e806
+require_sensor_agreement: false
+compare_to: null
 expected_frames: 94101
 attempt13_manifest: /home/eduardo.hirata/repos/dynaclr-organelle-paper/organelle_remodeling_paper/figures/labelfree_infection/13_crop_candidate_gallery/manifest.json
 crop_helpers: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/scripts/evaluation/build_fig6_crop_candidates.py
@@ -82,3 +85,15 @@ render:
     division_min: 0.98
     death_max: 0.9
     window: [-1, 0, 1]
+
+report_notes:
+- 'Visual check of the montages: a few top BYSTANDER and cell-cycle-classifier G2 cells, including one control-well G2 cell, show diffuse nuclear pAL17. Whether these are infected cells without a TCN onset call or cycle-linked sensor redistribution is not resolved here; the reference pools are not sensor-verified.'
+deviations:
+- 'Infection AUROC: added variant B with reference bags matched to each τ bag''s (dataset, 2 h HPI bin) composition (cross-dataset only where a fold''s reference test pool lacks that dataset), because the HPI-only baseline separates τ bags from pool references almost perfectly; variant A is the specified analysis.'
+- Analysis bags (AUROC, confusion, cross-checks) use the largest eval size ≤ the chosen size and ≤ half the smallest CV test pool (10 cells), not the chosen training size, because late τ test pools (21–48 cells) are smaller than the chosen size; eval.py lists are capped per fold at the smallest test pool.
+- Classes are also dropped from a fold if their val or test pool is empty (an empty pool would give all-masked bags); no class was dropped.
+- 'Hydra configs: num_workers 0 (≤ 8 threads on the shared node) and eval show_progress false; everything else as shipped. Training seed 42 as shipped; our sampling uses seed 17.'
+- Cross-scoring adds a random same-class (forward) and random post-onset (reverse) comparator next to the specified random reference cells; the reverse random reference is also matched on source (bystander or control); the UMAP figure adds a Cell-cycle classifier panel.
+- 'Provenance: the export and run stages ran with an earlier revision of this wrapper (same export/run logic; later edits changed analyze/render/report, export-record tabulation, the label-path check and line wrapping); analyze, render and report were re-run with the revision recorded in manifest.json.'
+- Labels are read from the fixed snapshot fig6_inputs/attempt23_phase_embedding_e017ba39.parquet (sha256 asserted) because attempt 23 is being rewritten; the export stage had read the identical bytes from attempt 23's source_data/phase_embedding.parquet (sha256 checked against attempt 23's manifest at that time).
+- Folds deal FOVs round-robin within well type across datasets, so each fold has 2 control FOVs but 07_01's 4 control FOVs cannot reach all 5 folds (fold0 test lacks one).

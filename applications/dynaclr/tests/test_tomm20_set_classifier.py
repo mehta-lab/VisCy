@@ -1,4 +1,4 @@
-"""Attempt-25 export: representative frames, FOV folds, phase-matched pools and pinned-format dumps."""
+"""Set-classifier export: lineage label rule, representative frames, FOV folds, matched pools and pinned dumps."""
 
 import importlib.util
 from pathlib import Path
@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs/evaluation/zikv_set_transformer/tomm20_cycle_vs_infection_pca80.yml"
+CONFIG = ROOT / "configs/evaluation/zikv_set_transformer/tomm20_cycle_vs_infection_pca80_sensor_verified.yml"
 spec = importlib.util.spec_from_file_location("tomm20_set_classifier", ROOT / "tools/tomm20_set_classifier.py")
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
@@ -90,7 +90,7 @@ def test_representatives_are_unique_per_track_bin(exported):
     assert not onset.duplicated([*m.TRACK, "tau_bin"]).any()
     assert not refs.duplicated([*m.TRACK, "hpi_bin"]).any()
     assert onset.tau_h.ge(CFG["tau_start"]).all() and onset.tau_h.lt(CFG["tau_stop"]).all()
-    assert set(onset.class_i) <= set(m.model_i_classes(CFG))
+    assert set(onset.infection_class) <= set(m.infection_classes(CFG))
     assert reps.row_id.tolist() == list(range(len(reps)))
 
 
@@ -113,25 +113,25 @@ def test_fovs_are_disjoint_across_splits(exported):
         m.check_disjoint(dict(bad=dict(train=["a"], val=["a"], test=["b"])))
 
 
-def test_model_i_pools_are_phase_matched(exported):
+def test_infection_classifier_pools_are_phase_matched(exported):
     _, _, reps, _, _, pools, counts, _ = exported
     for (model, fold), p in pools.items():
-        if model != "model_i":
+        if model != "infection_classifier":
             continue
         for split in m.SPLITS:
             for c in p["classes"]:
                 phases = reps.cc_state.iloc[p[split][c]].value_counts()
                 assert set(phases.index) == set(CFG["phases"]), (fold, split, c)
                 assert (phases == phases.iloc[0]).all(), (fold, split, c, phases.to_dict())
-                assert reps.class_i.iloc[p[split][c]].eq(c).all()
-    kept = counts[counts.model.eq("model_i") & counts.kept]
+                assert reps.infection_class.iloc[p[split][c]].eq(c).all()
+    kept = counts[counts.model.eq("infection_classifier") & counts.kept]
     assert kept.after.eq(3 * kept.per_stratum_after).all()
 
 
-def test_model_c_pools_hold_only_balanced_references(exported):
+def test_cell_cycle_classifier_pools_hold_only_balanced_references(exported):
     _, _, reps, _, _, pools, _, decision = exported
     for (model, fold), p in pools.items():
-        if model != "model_c":
+        if model != "cell_cycle_classifier":
             continue
         assert p["classes"][:3] == CFG["phases"]
         for split in m.SPLITS:
@@ -141,10 +141,10 @@ def test_model_c_pools_hold_only_balanced_references(exported):
                 assert cells.cc_state.eq(c).all()
                 sources = cells.group.value_counts()
                 assert set(sources.index) == set(m.REFERENCES) and (sources == sources.iloc[0]).all()
-    assert decision["include_m"] == ("M" in pools[("model_c", "fold0")]["classes"])
+    assert decision["include_m"] == ("M" in pools[("cell_cycle_classifier", "fold0")]["classes"])
 
 
-def test_dropped_class_is_absent_from_every_split(exported):
+def test_dropped_infection_classs_absent_from_every_split(exported):
     _, _, reps, _, folds, *_ = exported
     strict = dict(CFG, min_train_cells=10**6)
     pools, counts, _ = m.build_pools(reps, folds, strict)
@@ -158,7 +158,7 @@ def test_dropped_class_is_absent_from_every_split(exported):
 def test_dumps_round_trip_through_pinned_load_dataset(exported, tmp_path):
     _, _, reps, _, _, pools, _, _ = exported
     emb = reps[m.pc_columns(CFG)].to_numpy(np.float32)
-    p = pools[("model_i", "fold0")]
+    p = pools[("infection_classifier", "fold0")]
     for split in m.SPLITS:
         directory = tmp_path / split
         m.write_dump(directory, p["classes"], p[split], reps, emb, CFG["dump_n_cells"])
@@ -172,7 +172,7 @@ def test_dumps_round_trip_through_pinned_load_dataset(exported, tmp_path):
         assert joined.dump_experiment.eq(joined.dataset).all() and joined.dump_well.eq(joined.fov_name).all()
         assert (joined.dump_segmentation_id == joined.track_id.astype(str) + ":" + joined.t.astype(str)).all()
         assert joined.dump_cc_state.eq(joined.cc_state).all() and joined.dump_group.eq(joined.group).all()
-        assert joined.class_i.eq(c).all()
+        assert joined.infection_class.eq(c).all()
         np.testing.assert_array_equal(ds._gene_pools[g].numpy(), emb[joined.row_id.to_numpy()])
         embs, ch_ids, mask, label = ds[ds.perturbation_list.index(c)]
         assert embs.shape == (10, CFG["embedding_dims"]) and label == g and ch_ids.eq(0).all()
@@ -190,9 +190,79 @@ def test_member_checks_reject_a_mixed_pool(exported):
     members = pd.concat(rows, ignore_index=True)
     m.check_members(members, reps, CFG)
     bad = members.merge(reps[["row_id", "group", "fov_key"]], on="row_id")
-    target = bad.index[bad.model.eq("model_c") & bad.cls.eq("G1") & bad.group.eq("BYSTANDER")][0]
+    target = bad.index[bad.model.eq("cell_cycle_classifier") & bad.cls.eq("G1") & bad.group.eq("BYSTANDER")][0]
     same_fov = reps.fov_key.eq(bad.fov_key[target]) & reps.group.eq("onset") & reps.cc_state.eq("G1")
     bad.loc[target, "row_id"] = int(reps.row_id[same_fov].iloc[0])
     bad = bad[members.columns]
-    with pytest.raises(ValueError, match="Model C"):
+    with pytest.raises(ValueError, match="Cell-cycle classifier"):
         m.check_members(bad, reps, CFG)
+
+
+def lineage_table():
+    """TCN- and sensor-anchored frames of six lineages in one 07_01 control FOV and one ZIKV FOV."""
+    lineages = [
+        ("A/3/000", 1, ["uninfected"] * 3, ["uninfected"] * 3),
+        ("B/3/000", 2, ["pre_onset", "infected", "infected"], ["pre_onset", "pre_onset", "infected"]),
+        ("B/3/000", 3, ["not_infected"] * 3, ["pre_onset", "infected", "infected"]),
+        ("B/3/000", 4, ["not_infected"] * 3, ["not_infected"] * 3),
+        ("B/3/000", 5, ["ambiguous"] * 3, ["ambiguous"] * 3),
+        ("B/3/000", 6, ["pre_onset", "infected", "infected"], ["not_infected"] * 3),
+    ]
+    tcn, sensor = [], []
+    for fov, track, tcn_status, sensor_status in lineages:
+        for t in range(3):
+            key = dict(dataset="07_01", fov_name=fov, track_id=track, t=t, lineage_uid=f"07_01::{fov}::{track}")
+            onset = tcn_status[t] in m.ONSET_STATUSES
+            tcn.append(
+                dict(
+                    key,
+                    infection_status=tcn_status[t],
+                    hpi=10.0 + 0.5 * t,
+                    tau_h=0.5 * t - 0.5 if onset else np.nan,
+                    cc_state="G1",
+                    mantis_death=track == 4 and t == 2,
+                )
+            )
+            sensor.append(dict(key, infection_status=sensor_status[t]))
+    return pd.DataFrame(tcn), pd.DataFrame(sensor)
+
+
+def test_lineage_rule_keeps_only_classes_both_anchors_agree_on():
+    tcn, sensor = lineage_table()
+    table = m.select_lineages(tcn, sensor, require_agreement=True)
+    uid = "07_01::{}::{}".format
+    assert table.loc[uid("B/3/000", 3), ["tcn", "sensor"]].tolist() == ["not_infected", "onset"]
+    kept = table.tcn[table.kept].to_dict()
+    assert kept == {uid("A/3/000", 1): "uninfected", uid("B/3/000", 2): "onset", uid("B/3/000", 4): "not_infected"}
+    loose = m.select_lineages(tcn, None, require_agreement=False)
+    assert set(loose.index[loose.kept]) == {uid("A/3/000", 1), *(uid("B/3/000", k) for k in (2, 3, 4, 6))}
+    mixed = tcn.assign(
+        infection_status=lambda x: np.where(x.track_id.eq(4) & x.t.eq(0), "ambiguous", x.infection_status)
+    )
+    with pytest.raises(ValueError, match="more than one infection_status"):
+        m.lineage_classes(mixed)
+
+
+def test_load_labels_excludes_a_tcn_bystander_that_the_sensor_calls_onset(tmp_path):
+    tcn, sensor = lineage_table()
+    tcn.to_parquet(tmp_path / "tcn.parquet", index=False)
+    sensor.to_parquet(tmp_path / "sensor.parquet", index=False)
+    cfg = dict(
+        CFG,
+        labels=str(tmp_path / "tcn.parquet"),
+        labels_sha256=m.sha(tmp_path / "tcn.parquet"),
+        expected_frames=len(tcn),
+        sensor_labels=dict(path=str(tmp_path / "sensor.parquet"), sha256=m.sha(tmp_path / "sensor.parquet")),
+        require_sensor_agreement=True,
+    )
+    d, record, table = m.load_labels(cfg)
+    groups = d.groupby("track_id").group.unique().map(list).to_dict()
+    assert groups == {1: ["CONTROL"], 2: ["onset"], 4: ["BYSTANDER"]}
+    assert len(d[d.track_id.eq(4)]) == 2 and record["mantis_death_excluded"] == 1
+    assert record["live_frames_excluded_by_rule"] == 9
+    assert d.tau_h[d.group.eq("onset")].notna().all() and d.tau_h[d.group.ne("onset")].isna().all()
+    sensor.loc[0, "lineage_uid"] = "07_01::A/3/000::9"
+    sensor.to_parquet(tmp_path / "sensor.parquet", index=False)
+    cfg["sensor_labels"]["sha256"] = m.sha(tmp_path / "sensor.parquet")
+    with pytest.raises(ValueError, match="different lineages"):
+        m.load_labels(cfg)

@@ -1,12 +1,13 @@
-"""Fig 6 attempt 25: Alex Lin's OPS set classifier, unchanged, on cached TOMM20 embeddings — cell cycle vs infection.
+"""Fig 6 attempts 25–26: Alex Lin's OPS set classifier, unchanged, on cached TOMM20 embeddings — cycle vs infection.
 
 Applies the pinned ``set_classifier`` package (czbiohub-sf/ops_monorepo@ab11b56, ``train``/``eval``/``score``) to
-DynaCLR TOMM20 ``obsm/X_normalized_pca80`` (49 PCs) of 2026_07_01 and 2026_04_10. Model I classifies bags of
-TCN-onset lineage cells by 2 h pseudotime bin against bystander and control-well references, with every pool
-phase-matched (equal G1/S/G2); Model C classifies the cycle phase of uninfected (control + bystander) cells.
+DynaCLR TOMM20 ``obsm/X_normalized_pca80`` (49 PCs) of 2026_07_01 and 2026_04_10. The infection classifier classifies
+bags of onset-lineage cells (TCN onset, optionally verified by the pAL17 sensor) by 2 h pseudotime bin against bystander
+and control-well references, with every pool phase-matched (equal G1/S/G2); the cell-cycle classifier classifies the
+cycle phase of uninfected (control + bystander) cells.
 Stages: ``export`` (representative frames, FOV folds, pools, dumps), ``run`` (pinned train/eval/score on the
 reserved GPU node), ``analyze`` (sweep, ranking, AUROCs with baselines, distortion map, cross-scoring), ``render``
-(crops, panels, montage, UMAP) and ``report`` (claims the attempt-25 figure directory, README and manifest).
+(crops, panels, montage, UMAP) and ``report`` (claims the attempt's figure directory, README and manifest).
 """
 
 import argparse
@@ -46,20 +47,17 @@ CHANNEL = "TOMM20"
 TRACK = ["dataset", "fov_name", "track_id"]
 KEYS = ["fov_name", "track_id", "t"]
 SPLITS = ["train", "val", "test"]
-MODELS = ["model_i", "model_c"]
+MODELS = ["infection_classifier", "cell_cycle_classifier"]
 MODEL_TITLES = {
-    "model_i": "Model I (τ bins + references, phase-matched)",
-    "model_c": "Model C (cycle phase, uninfected)",
+    "infection_classifier": "Infection classifier (τ bins + references, phase-matched)",
+    "cell_cycle_classifier": "Cell-cycle classifier (cycle phase, uninfected)",
 }
 REFERENCES = ["BYSTANDER", "CONTROL"]
-GROUP_OF_STATUS = {"infected": "onset", "pre_onset": "onset", "not_infected": "BYSTANDER", "uninfected": "CONTROL"}
+ONSET_STATUSES = ("infected", "pre_onset")
+LINEAGE_GROUP = {"onset": "onset", "not_infected": "BYSTANDER", "uninfected": "CONTROL"}
 ALL_PHASES = ["G1", "S", "G2", "M"]
 PHASE_COLORS = {"G1": "#0072b2", "S": "#e69f00", "G2": "#9564a7", "M": "#00846b"}
 REFERENCE_COLORS = {"BYSTANDER": "#000000", "CONTROL": "#8c8c8c"}
-CLASS_TITLES = {
-    "BYSTANDER": "ZIKV-well lineages without a TCN onset (phase-matched pool)",
-    "CONTROL": "control-well cells (phase-matched pool)",
-}
 RC = {"font.family": "DejaVu Sans", "font.size": 8, "pdf.fonttype": 42}
 META_COLUMNS = ["experiment", "well", "x_pheno", "y_pheno", "segmentation_id", "channel_type", "index"]
 EXTRA_COLUMNS = ["lineage_uid", "tau_h", "hpi", "cc_state", "group"]
@@ -81,7 +79,7 @@ def write_json(path, payload):
 
 
 def load_config(path):
-    """Read the attempt-25 YAML config.
+    """Read an attempt YAML config.
 
     Parameters
     ----------
@@ -99,7 +97,7 @@ def load_config(path):
 
 
 def tau_class(tau_bin):
-    """Return the Model I class name of a τ bin start in hours, e.g. ``-8 -> TAU_m08`` and ``0 -> TAU_p00``."""
+    """Return the infection-classifier class of a τ bin start in hours, e.g. ``-8 -> TAU_m08``, ``0 -> TAU_p00``."""
     return f"TAU_{'m' if tau_bin < 0 else 'p'}{abs(int(tau_bin)):02d}"
 
 
@@ -108,8 +106,8 @@ def tau_bins(cfg):
     return list(range(cfg["tau_start"], cfg["tau_stop"], cfg["bin_hours"]))
 
 
-def model_i_classes(cfg):
-    """Return the Model I class names in display order (τ bins, then references)."""
+def infection_classes(cfg):
+    """Return the Infection classifier class names in display order (τ bins, then references)."""
     return [*(tau_class(b) for b in tau_bins(cfg)), *REFERENCES]
 
 
@@ -154,8 +152,91 @@ def labels_path(cfg):
     return path
 
 
+def lineage_classes(frames):
+    """Return each lineage's class: ``onset`` if any frame is infected or pre_onset, else its single status.
+
+    Parameters
+    ----------
+    frames : pandas.DataFrame
+        Frames with ``lineage_uid`` and ``infection_status``.
+
+    Returns
+    -------
+    pandas.Series
+        Class per ``lineage_uid`` (onset, not_infected, ambiguous or uninfected).
+    """
+    g = frames.groupby("lineage_uid").infection_status
+    onset = g.agg(lambda s: s.isin(ONSET_STATUSES).any())
+    if g.nunique()[~onset].gt(1).any():
+        raise ValueError("a non-onset lineage has more than one infection_status")
+    return g.first().where(~onset, "onset")
+
+
+def select_lineages(tcn, sensor, require_agreement):
+    """Apply the lineage label rule to the TCN-anchored frames and, optionally, the sensor-anchored frames.
+
+    A lineage is kept when its TCN class is onset, not_infected or uninfected (ambiguous lineages are dropped) and,
+    with ``require_agreement``, its sensor class is the same. Onset lineages keep the TCN ``tau_h``.
+
+    Parameters
+    ----------
+    tcn : pandas.DataFrame
+        TCN-anchored frames (``dataset``, ``lineage_uid``, ``infection_status``).
+    sensor : pandas.DataFrame or None
+        Sensor-anchored frames of the same lineages; required when ``require_agreement``.
+    require_agreement : bool
+        Keep only lineages whose two classes agree.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per lineage: ``dataset``, ``tcn``, ``sensor`` (if used), ``frames`` and ``kept``.
+    """
+    table = pd.DataFrame(dict(tcn=lineage_classes(tcn)))
+    table["dataset"] = tcn.groupby("lineage_uid").dataset.first()
+    table["frames"] = tcn.groupby("lineage_uid").size()
+    keep = table.tcn.isin(LINEAGE_GROUP)
+    if require_agreement:
+        table["sensor"] = lineage_classes(sensor).reindex(table.index)
+        if table.sensor.isna().any():
+            raise ValueError("sensor table lacks some lineages")
+        keep &= table.tcn.eq(table.sensor)
+    table["kept"] = keep
+    return table
+
+
+def read_sensor_labels(cfg, tcn):
+    """Read the sensor-anchored table (sha-checked) and assert it has exactly the TCN table's frames and lineages.
+
+    Parameters
+    ----------
+    cfg : dict
+        Attempt config with ``sensor_labels`` (``path``, ``sha256``).
+    tcn : pandas.DataFrame
+        TCN-anchored frames.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Sensor frames (``dataset``, keys, ``lineage_uid``, ``infection_status``).
+    """
+    path = Path(cfg["sensor_labels"]["path"])
+    digest = sha(path)
+    if digest != cfg["sensor_labels"]["sha256"]:
+        raise ValueError(f"{path} sha256 {digest} != expected {cfg['sensor_labels']['sha256']}")
+    s = pd.read_parquet(path, columns=["dataset", *KEYS, "lineage_uid", "infection_status"])
+    m = tcn[["dataset", *KEYS, "lineage_uid"]].merge(
+        s, on=["dataset", *KEYS], how="outer", suffixes=("", "_sensor"), validate="one_to_one", indicator=True
+    )
+    if not m._merge.eq("both").all():
+        raise ValueError("sensor and TCN tables have different frame keys")
+    if not m.lineage_uid.eq(m.lineage_uid_sensor).all():
+        raise ValueError("sensor and TCN tables assign frames to different lineages")
+    return s
+
+
 def load_labels(cfg):
-    """Read the attempt-23 label snapshot (sha-checked), drop Mantis death and ambiguous frames and assign groups.
+    """Read the label snapshot (sha-checked), apply the lineage rule, drop Mantis death frames and assign groups.
 
     Parameters
     ----------
@@ -164,8 +245,9 @@ def load_labels(cfg):
 
     Returns
     -------
-    tuple of (pandas.DataFrame, dict)
-        Live, non-ambiguous frames with ``well``, ``well_type``, ``group`` and ``fov_key``, and an input record.
+    tuple of (pandas.DataFrame, dict, pandas.DataFrame)
+        Live frames of kept lineages with ``well``, ``well_type``, ``group`` and ``fov_key``, an input record and the
+        per-lineage label table.
     """
     path = labels_path(cfg)
     d = pd.read_parquet(path)
@@ -173,37 +255,74 @@ def load_labels(cfg):
         raise ValueError(f"{path}: {len(d)} frames, expected {cfg['expected_frames']}")
     if d.duplicated(["dataset", *KEYS]).any():
         raise ValueError("duplicate (dataset, fov_name, track_id, t) in the label table")
+    sensor = read_sensor_labels(cfg, d) if cfg["require_sensor_agreement"] else None
+    table = select_lineages(d, sensor, cfg["require_sensor_agreement"])
     status = d.infection_status.value_counts().to_dict()
-    death = int(d.mantis_death.sum())
-    d = d[~d.mantis_death].copy()
     d["well"] = d.fov_name.str.rsplit("/", n=1).str[0]
     control = d.dataset.map(cfg["control_wells"]).eq(d.well)
     if not control.eq(d.infection_status.eq("uninfected")).all():
         raise ValueError("uninfected frames must be exactly the control-well frames")
     d["well_type"] = np.where(control, "control", "zikv")
-    ambiguous = int(d.infection_status.eq("ambiguous").sum())
-    d = d[d.infection_status.ne("ambiguous")].copy()
-    d["group"] = d.infection_status.map(GROUP_OF_STATUS)
-    if d.group.isna().any():
-        raise ValueError(f"unknown infection_status values: {sorted(d.infection_status[d.group.isna()].unique())}")
+    death = int(d.mantis_death.sum())
+    kept = table.tcn[table.kept]
+    excluded_frames = int((~d.mantis_death & ~d.lineage_uid.isin(kept.index)).sum())
+    d = d[~d.mantis_death & d.lineage_uid.isin(kept.index)].copy()
+    d["group"] = d.lineage_uid.map(kept).map(LINEAGE_GROUP)
     onset = d.group.eq("onset")
     if d.tau_h[onset].isna().any() or d.tau_h[~onset].notna().any():
         raise ValueError("tau_h must be set exactly for onset-lineage frames")
     if not d.cc_state.isin(ALL_PHASES).all():
         raise ValueError(f"unexpected cc_state values: {sorted(d.cc_state.unique())}")
     d["fov_key"] = d.dataset + "::" + d.fov_name
+    classes = ["dataset", "tcn", *(["sensor"] if cfg["require_sensor_agreement"] else [])]
+    crosstab = table.groupby(classes).agg(lineages=("kept", "size"), frames=("frames", "sum"), kept=("kept", "first"))
     record = dict(
         path=str(path),
         origin=cfg["labels_origin"],
         sha256=cfg["labels_sha256"],
+        sensor=None
+        if sensor is None
+        else dict(path=cfg["sensor_labels"]["path"], sha256=cfg["sensor_labels"]["sha256"]),
+        rule=label_rule(cfg),
         frames=cfg["expected_frames"],
         infection_status=status,
+        lineage_crosstab=crosstab.reset_index().to_dict(orient="records"),
+        kept_lineages=pd.crosstab(table.dataset[table.kept], table.tcn[table.kept]).to_dict(),
         mantis_death_excluded=death,
-        ambiguous_excluded=ambiguous,
+        live_frames_excluded_by_rule=excluded_frames,
         used_frames=len(d),
         used_by_group=pd.crosstab(d.dataset, d.group).to_dict(),
     )
-    return d.reset_index(drop=True), record
+    return d.reset_index(drop=True), record, table
+
+
+def onset_anchor(cfg):
+    """Return the onset definition of this config as display text."""
+    return "TCN and pAL17-sensor onset" if cfg["require_sensor_agreement"] else "TCN onset"
+
+
+def class_title(cfg, cls):
+    """Return the display description of one infection-classifier class."""
+    if cls.startswith("TAU_"):
+        return (
+            f"onset lineages ({onset_anchor(cfg)}), {tau_label(cls, cfg['bin_hours'])} from TCN onset "
+            "(phase-matched pool)"
+        )
+    if cls == "BYSTANDER":
+        anchors = "the TCN or the pAL17 sensor" if cfg["require_sensor_agreement"] else "the TCN"
+        return f"ZIKV-well lineages with no onset by {anchors} (phase-matched pool)"
+    return "control-well cells (phase-matched pool)"
+
+
+def label_rule(cfg):
+    """Describe the lineage label rule of this config."""
+    base = (
+        "lineage class = onset if any frame is infected or pre_onset, else its status; onset = TCN onset (τ from the "
+        "Phase→pAL TCN), BYSTANDER = not_infected, CONTROL = control-well uninfected; ambiguous lineages excluded"
+    )
+    if cfg["require_sensor_agreement"]:
+        return base + "; the pAL17-sensor lineage class must equal the TCN class (discordant lineages excluded)"
+    return base
 
 
 def attach_embeddings(d, cfg):
@@ -261,7 +380,7 @@ def attach_embeddings(d, cfg):
             dict(
                 dataset=ds,
                 path=str(path),
-                pca_model_checksum=checksum,
+                pca_checksum=checksum,
                 uns=uns,
                 n_dimensions=n_dims,
                 obsm_sha256=sha_bytes(x),
@@ -299,7 +418,7 @@ def nearest_to_center(frames, bin_column, value_column, width):
 
 
 def representatives(d, emb, cfg):
-    """Pick the representative frames of Model I and Model C.
+    """Pick the representative frames of Infection classifier and Cell-cycle classifier.
 
     Onset-lineage frames with τ in [tau_start, tau_stop) get 2 h τ bins and one frame per track and bin. Bystander
     and control frames are limited to each dataset's HPI span of those onset frames and get one frame per track
@@ -317,8 +436,8 @@ def representatives(d, emb, cfg):
     Returns
     -------
     tuple of (pandas.DataFrame, dict)
-        Representatives with ``row_id`` (= row position), ``tau_bin``, ``hpi_bin``, ``class_i`` and the PCs, and a
-        record of the HPI spans and counts.
+        Representatives with ``row_id`` (= row position), ``tau_bin``, ``hpi_bin``, ``infection_class`` and the PCs, and
+        a record of the HPI spans and counts.
     """
     width = cfg["bin_hours"]
     d = d.assign(_emb=np.arange(len(d)))
@@ -326,7 +445,7 @@ def representatives(d, emb, cfg):
     onset = d[window].copy()
     onset["tau_bin"] = np.floor((onset.tau_h - cfg["tau_start"]) / width) * width + cfg["tau_start"]
     onset = nearest_to_center(onset, "tau_bin", "tau_h", width)
-    onset["class_i"] = onset.tau_bin.map(tau_class)
+    onset["infection_class"] = onset.tau_bin.map(tau_class)
     span = d[window].groupby("dataset").hpi.agg(["min", "max"])
     refs = d[d.group.isin(REFERENCES)].copy()
     in_span = refs.hpi.ge(refs.dataset.map(span["min"])) & refs.hpi.le(refs.dataset.map(span["max"]))
@@ -335,7 +454,7 @@ def representatives(d, emb, cfg):
     refs["hpi_bin"] = np.floor(refs.hpi / width) * width
     refs = nearest_to_center(refs, "hpi_bin", "hpi", width)
     refs["tau_bin"] = np.nan
-    refs["class_i"] = refs.group
+    refs["infection_class"] = refs.group
     onset["hpi_bin"] = np.floor(onset.hpi / width) * width
     reps = pd.concat([onset, refs], ignore_index=True).sort_values(["dataset", "fov_name", "track_id", "t"])
     reps = reps.reset_index(drop=True)
@@ -349,8 +468,8 @@ def representatives(d, emb, cfg):
         onset_window_frames=int(window.sum()),
         reference_frames=n_refs,
         reference_frames_in_span=int(in_span.sum()),
-        representatives=pd.crosstab(reps.dataset, reps.class_i).to_dict(),
-        representatives_by_phase=pd.crosstab(reps.class_i, reps.cc_state).to_dict(),
+        representatives=pd.crosstab(reps.dataset, reps.infection_class).to_dict(),
+        representatives_by_phase=pd.crosstab(reps.infection_class, reps.cc_state).to_dict(),
     )
     return reps, record
 
@@ -484,7 +603,7 @@ def phase_match(cells, phases, rng):
 
 
 def source_balance(cells, rng):
-    """Subsample the larger of the bystander and control sources of one Model C pool to the smaller one.
+    """Subsample the larger of the bystander and control sources of one Cell-cycle classifier pool to the smaller one.
 
     Parameters
     ----------
@@ -505,10 +624,10 @@ def source_balance(cells, rng):
 
 
 def build_pools(reps, folds, cfg):
-    """Build the phase-matched Model I pools and the source-balanced Model C pools of every fold and split.
+    """Build the phase-matched infection pools and the source-balanced cell-cycle pools of every fold and split.
 
-    A class is dropped from a fold when its train pool has fewer than ``min_train_cells`` cells or its val or
-    test pool is empty; a dropped class is absent from all three splits of that fold. Model C gets an ``M`` class
+    A class is dropped from a fold when its train pool has fewer than ``min_train_cells`` cells or its val or test pool
+    is empty; a dropped class is absent from all three splits of that fold. Cell-cycle classifier gets an ``M`` class
     only if every training split has at least ``min_m_cells`` source-balanced M cells.
 
     Parameters
@@ -526,7 +645,7 @@ def build_pools(reps, folds, cfg):
         ``{(model, fold): {"classes": [...], split: {class: row_ids}}}``, the count table and the M decision.
     """
     seed, phases = cfg["seed"], cfg["phases"]
-    classes_i = model_i_classes(cfg)
+    classes_i = infection_classes(cfg)
     m_train = {}
     for fold, f in folds.items():
         refs = reps[reps.fov_key.isin(f["train"]) & reps.group.isin(REFERENCES) & reps.cc_state.eq("M")]
@@ -535,14 +654,16 @@ def build_pools(reps, folds, cfg):
     classes_c = [*phases, *(["M"] if use_m else [])]
     pools, rows = {}, []
     for fi, (fold, f) in enumerate(folds.items()):
-        for mi, (model, classes) in enumerate([("model_i", classes_i), ("model_c", classes_c)]):
+        for mi, (model, classes) in enumerate(
+            [("infection_classifier", classes_i), ("cell_cycle_classifier", classes_c)]
+        ):
             p = {split: {} for split in SPLITS}
             for si, split in enumerate(SPLITS):
                 in_split = reps.fov_key.isin(f[split])
                 for ci, c in enumerate(classes):
                     rng = np.random.default_rng([seed, mi, fi, si, ci])
-                    if model == "model_i":
-                        keep, before, n = phase_match(reps[in_split & reps.class_i.eq(c)], phases, rng)
+                    if model == "infection_classifier":
+                        keep, before, n = phase_match(reps[in_split & reps.infection_class.eq(c)], phases, rng)
                         row = dict(**{f"before_{k}": v for k, v in before.items()}, per_stratum_after=n)
                     else:
                         cells = reps[in_split & reps.group.isin(REFERENCES) & reps.cc_state.eq(c)]
@@ -578,7 +699,7 @@ def build_pools(reps, folds, cfg):
 
 
 def application_sets(reps, folds):
-    """List every fold's held-out onset-lineage representatives grouped by (τ bin x cc_state) for Model C.
+    """List every fold's held-out onset-lineage representatives grouped by (τ bin x cc_state) for Cell-cycle classifier.
 
     Parameters
     ----------
@@ -712,13 +833,18 @@ def export(cfg):
     work.mkdir(parents=True, exist_ok=True)
     (work / "dumps").mkdir(exist_ok=False)
     train_module = pinned_train(cfg)
-    d, label_record = load_labels(cfg)
+    d, label_record, label_table = load_labels(cfg)
+    label_table.rename_axis("lineage_uid").reset_index().to_csv(work / "label_lineages.csv", index=False)
     d, emb, join_audit = attach_embeddings(d, cfg)
     reps, rep_record = representatives(d, emb, cfg)
     fold_of = assign_folds(reps, cfg["n_folds"], cfg["seed"])
     reps["cv_fold"] = reps.fov_key.map(fold_of).astype(int)
     folds = {**cv_splits(fold_of, cfg["n_folds"]), **lodo_splits(reps, cfg["lodo_val_fraction"], cfg["seed"])}
     check_disjoint(folds)
+    if cfg["compare_to"] is not None:
+        other = json.loads((Path(cfg["compare_to"]["work_dir"]) / "folds.json").read_text())
+        if other["fold_of"] != fold_of or other["folds"] != folds:
+            raise ValueError(f"folds differ from attempt {cfg['compare_to']['attempt']}")
     for fold, f in folds.items():
         split_of = {k: s for s in SPLITS for k in f[s]}
         reps[f"split_{fold}"] = reps.fov_key.map(split_of).fillna("")
@@ -763,7 +889,7 @@ def export(cfg):
             labels=label_record,
             embeddings=join_audit,
             representatives=rep_record,
-            model_c_m_decision=m_decision,
+            cell_cycle_m_decision=m_decision,
             classes={f"{m}/{f}": p["classes"] for (m, f), p in pools.items()},
             dropped={f"{m}/{f}": p["dropped"] for (m, f), p in pools.items() if p["dropped"]},
             dumps_verified_with="pinned set_classifier.train.load_dataset",
@@ -776,7 +902,7 @@ def export(cfg):
 
 
 def check_members(members, reps, cfg):
-    """Assert the pool invariants: FOVs inside their split, equal phases (Model I) and references only (Model C).
+    """Assert pool invariants: FOVs inside their split, equal phases (infection), references only (cell cycle).
 
     Parameters
     ----------
@@ -787,24 +913,26 @@ def check_members(members, reps, cfg):
     cfg : dict
         Attempt config.
     """
-    m = members.merge(reps[["row_id", "fov_key", "cc_state", "group", "class_i"]], on="row_id", validate="many_to_one")
+    m = members.merge(
+        reps[["row_id", "fov_key", "cc_state", "group", "infection_class"]], on="row_id", validate="many_to_one"
+    )
     for fold in m.fold.unique():
         f = m[m.fold.eq(fold)]
         fovs = {s: set(f.fov_key[f.split.eq(s)]) for s in SPLITS}
         if fovs["train"] & fovs["val"] or fovs["train"] & fovs["test"] or fovs["val"] & fovs["test"]:
             raise ValueError(f"{fold}: a FOV is in two splits")
-    mi = m[m.model.eq("model_i")]
-    if not mi.cls.eq(mi.class_i).all() or not mi.cc_state.isin(cfg["phases"]).all():
-        raise ValueError("Model I pool holds a cell of another class or phase")
+    mi = m[m.model.eq("infection_classifier")]
+    if not mi.cls.eq(mi.infection_class).all() or not mi.cc_state.isin(cfg["phases"]).all():
+        raise ValueError("Infection classifier pool holds a cell of another class or phase")
     per_phase = pd.crosstab([mi.fold, mi.split, mi.cls], mi.cc_state)
     if not per_phase.eq(per_phase.iloc[:, 0], axis=0).all().all():
-        raise ValueError("Model I pools are not phase-matched")
-    mc = m[m.model.eq("model_c")]
+        raise ValueError("Infection classifier pools are not phase-matched")
+    mc = m[m.model.eq("cell_cycle_classifier")]
     if not mc.group.isin(REFERENCES).all() or not mc.cls.eq(mc.cc_state).all():
-        raise ValueError("Model C pool holds an onset-lineage cell or a mislabeled phase")
+        raise ValueError("Cell-cycle classifier pool holds an onset-lineage cell or a mislabeled phase")
     per_source = pd.crosstab([mc.fold, mc.split, mc.cls], mc.group)
     if not per_source.eq(per_source.iloc[:, 0], axis=0).all().all():
-        raise ValueError("Model C pools are not source-balanced")
+        raise ValueError("Cell-cycle classifier pools are not source-balanced")
 
 
 def run_env(cfg):
@@ -858,7 +986,7 @@ def train_job(cfg, root, model, fold, n_cells, num_epochs=None):
     """
     out = run_dir(root, model, fold, n_cells)
     overrides = [
-        f"name=attempt25_{model}_{fold}_n{n_cells:03d}",
+        f"name=attempt{cfg['attempt']}_{model}_{fold}_n{n_cells:03d}",
         f"load_train_dir={dump_dir(cfg, model, fold, 'train')}",
         f"load_val_dir={dump_dir(cfg, model, fold, 'val')}",
         f"n_cells_per_set={n_cells}",
@@ -1247,12 +1375,12 @@ def pair_auroc(p, labels, classes, pos, neg):
     return float(roc_auc_score(labels[sel] == pos, q))
 
 
-def model_i_fold(cfg, ctx, fold, fi):
-    """Score one fold's identical seeded test bags with Model I and the two logistic-regression baselines.
+def infection_fold(cfg, ctx, fold, fi):
+    """Score one fold's identical seeded test bags with Infection classifier and the two logistic-regression baselines.
 
-    Test bags: ``test_bags_per_class`` per class of ``ctx['size']['model_i']`` cells, without replacement inside a
-    bag. Baselines train on ``baseline_train_bags_per_class`` bags per class drawn the same way from the train pools
-    and select C on validation bags.
+    Test bags: ``test_bags_per_class`` per class of ``ctx['size']['infection_classifier']`` cells, without replacement
+    inside a bag. Baselines train on ``baseline_train_bags_per_class`` bags per class drawn the same way from the train
+    pools and select C on validation bags.
 
     Returns
     -------
@@ -1260,11 +1388,11 @@ def model_i_fold(cfg, ctx, fold, fi):
         Classes, epoch, bags, labels, probabilities per method and baseline fits.
     """
     a = cfg["analyze"]
-    path = run_dir(ctx["work"], "model_i", fold, ctx["chosen"]["model_i"]) / "checkpoint.pt"
+    path = run_dir(ctx["work"], "infection_classifier", fold, ctx["chosen"]["infection_classifier"]) / "checkpoint.pt"
     model, classes, epoch = load_classifier(ctx["train"], path, ctx["device"])
     rng = np.random.default_rng([cfg["seed"], 25, 1, fi])
-    size = ctx["size"]["model_i"]
-    pool = {s: pools_of(ctx["members"], "model_i", fold, s) for s in SPLITS}
+    size = ctx["size"]["infection_classifier"]
+    pool = {s: pools_of(ctx["members"], "infection_classifier", fold, s) for s in SPLITS}
     test, labels = draw_bags(pool["test"], classes, size, a["test_bags_per_class"], rng)
     train, y_train = draw_bags(pool["train"], classes, size, a["baseline_train_bags_per_class"], rng)
     val, y_val = draw_bags(pool["val"], classes, size, a["test_bags_per_class"], rng, cap=True)
@@ -1342,13 +1470,15 @@ def matched_reference_bags(bags, ref_rows, cells, rng):
     return out, gaps, crossed
 
 
-def model_c_fold(cfg, ctx, fold, fi):
-    """Score one fold's seeded reference test bags with Model C (``ctx['size']['model_c']`` cells per bag)."""
-    path = run_dir(ctx["work"], "model_c", fold, ctx["chosen"]["model_c"]) / "checkpoint.pt"
+def cell_cycle_fold(cfg, ctx, fold, fi):
+    """Score one fold's seeded reference test bags with the cell-cycle classifier (analysis bag size)."""
+    path = run_dir(ctx["work"], "cell_cycle_classifier", fold, ctx["chosen"]["cell_cycle_classifier"]) / "checkpoint.pt"
     model, classes, epoch = load_classifier(ctx["train"], path, ctx["device"])
     rng = np.random.default_rng([cfg["seed"], 25, 2, fi])
-    pool = pools_of(ctx["members"], "model_c", fold, "test")
-    test, labels = draw_bags(pool, classes, ctx["size"]["model_c"], cfg["analyze"]["test_bags_per_class"], rng)
+    pool = pools_of(ctx["members"], "cell_cycle_classifier", fold, "test")
+    test, labels = draw_bags(
+        pool, classes, ctx["size"]["cell_cycle_classifier"], cfg["analyze"]["test_bags_per_class"], rng
+    )
     probs = bag_probs(model, ctx["emb"], np.stack(test), ctx["device"])
     return dict(fold=fold, classes=classes, epoch=epoch, bags=test, labels=labels, probs=probs, model=model)
 
@@ -1436,15 +1566,16 @@ def confusion(results, model):
 
 
 def distortion_rows(cfg, ctx, fold, fi, model, classes):
-    """Model C's mean predicted cycle distribution for held-out onset bags per (τ bin x called phase) vs references.
+    """Compute the cell-cycle classifier's mean prediction for held-out onset bags per (τ bin x phase) vs references.
 
     Each group of ``n`` onset cells (``n >= distortion_min_cells``) is split by ``distortion_partitions`` random
     permutations into bags of ``min(distortion_max_bag, n)`` cells, so each cell is in up to that many bags. The
-    reference uses the same partitions of the fold's Model C test pool of the same called phase, at the same size.
+    reference uses the same partitions of the fold's Cell-cycle classifier test pool of the same called phase, at the
+    same size.
     """
     a = cfg["analyze"]
     app = ctx["application"][ctx["application"].fold.eq(fold)]
-    refs = pools_of(ctx["members"], "model_c", fold, "test")
+    refs = pools_of(ctx["members"], "cell_cycle_classifier", fold, "test")
     rng = np.random.default_rng([cfg["seed"], 25, 3, fi])
     rows = []
     for (tau_bin, phase), g in app.groupby(["tau_bin", "cc_state"]):
@@ -1487,7 +1618,18 @@ def load_scores(cfg, work, cells, members, chosen, folds):
             )
             out.append(s.assign(model=model, fold=fold))
     s = pd.concat(out, ignore_index=True).rename(columns={"gene": "cls", "zarr_channel_index": "row_id"})
-    keep = ["row_id", "dataset", "fov_name", "track_id", "t", "lineage_uid", "group", "class_i", "tau_bin", "tau_h"]
+    keep = [
+        "row_id",
+        "dataset",
+        "fov_name",
+        "track_id",
+        "t",
+        "lineage_uid",
+        "group",
+        "infection_class",
+        "tau_bin",
+        "tau_h",
+    ]
     keep += ["hpi", "cc_state", "p_G1", "p_S", "p_G2", "p_M", "x", "y", "umap1", "umap2", "well_type"]
     j = s.merge(cells[keep], on="row_id", how="left", validate="many_to_one")
     seg = j.track_id.astype(str) + ":" + j.t.astype(str)
@@ -1550,15 +1692,15 @@ def bootstrap_diff(a, b, n, rng):
     return float(a.mean() - b.mean()), float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))
 
 
-def cross_scoring(cfg, ctx, scores, models_i, models_c, classes_c, cv_folds):
-    """Score Model I's top infected cells with Model C (bag of 1), and Model C's top cycle cells with Model I.
+def cross_scoring(cfg, ctx, scores, infection_models, cycle_models, classes_c, cv_folds):
+    """Score the infection classifier's top infected cells with the cell-cycle classifier (bag of 1), and the reverse.
 
-    Forward: the ``cross_top`` highest-scoring cells of each post-onset τ class (pooled over CV folds) get Model C's
-    single-cell softmax from their own fold; compared with random reference cells and random same-class cells of the
-    same fold and called phase. Reverse: Model C's top cells of each phase get Model I's single-cell infection
-    score q_inf = Σ P(τ ≥ 0) / (Σ P(τ ≥ 0) + P(BYSTANDER) + P(CONTROL)); compared with random reference cells of
-    the same fold, called phase and source (bystander or control, since Model I separates the two) and random
-    post-onset cells of the same fold and called phase.
+    Forward: the ``cross_top`` highest-scoring cells of each post-onset τ class (pooled over CV folds) get the
+    cell-cycle classifier's single-cell softmax from their own fold; compared with random reference cells and random
+    same-class cells of the same fold and called phase. Reverse: the cell-cycle classifier's top cells of each phase get
+    the infection classifier's single-cell infection score q_inf = Σ P(τ ≥ 0) / (Σ P(τ ≥ 0) + P(BYSTANDER) +
+    P(CONTROL)); compared with random reference cells of the same fold, called phase and source (bystander or control,
+    since the infection classifier separates the two) and random post-onset cells of the same fold and called phase.
 
     Returns
     -------
@@ -1568,11 +1710,11 @@ def cross_scoring(cfg, ctx, scores, models_i, models_c, classes_c, cv_folds):
     a = cfg["analyze"]
     rng = np.random.default_rng([cfg["seed"], 25, 4])
     s = scores[scores.fold.isin(cv_folds)]
-    ref_c = {f: pools_of(ctx["members"], "model_c", f, "test") for f in cv_folds}
-    pool_i = {f: pools_of(ctx["members"], "model_i", f, "test") for f in cv_folds}
+    ref_c = {f: pools_of(ctx["members"], "cell_cycle_classifier", f, "test") for f in cv_folds}
+    pool_i = {f: pools_of(ctx["members"], "infection_classifier", f, "test") for f in cv_folds}
     phase = ctx["cells"].cc_state.to_numpy()
     source = ctx["cells"].group.to_numpy()
-    post = [c for c in model_i_classes(cfg) if c.startswith("TAU_p")]
+    post = [c for c in infection_classes(cfg) if c.startswith("TAU_p")]
     per_cell = []
 
     def evaluate(cells, models, direction, cls, name):
@@ -1582,7 +1724,7 @@ def cross_scoring(cfg, ctx, scores, models_i, models_c, classes_c, cv_folds):
         )
         out = cells[["fold", "row_id", "cc_state"]].assign(direction=direction, cls=cls, set=name)
         out["group"] = source[out.row_id.to_numpy()]
-        if direction == "model_i_top_to_model_c":
+        if direction == "infection_top_to_cell_cycle":
             out["argmax"] = np.array(classes_c)[p.argmax(1)]
             out["argmax_is_called"] = out.argmax.eq(out.cc_state)
             out["p_called"] = p[np.arange(len(p)), [classes_c.index(c) for c in out.cc_state]]
@@ -1609,37 +1751,53 @@ def cross_scoring(cfg, ctx, scores, models_i, models_c, classes_c, cv_folds):
         return ref_c[f][ph][source[ref_c[f][ph]] == grp]
 
     for cls in post:
-        top = s[s.model.eq("model_i") & s.cls.eq(cls)].sort_values("score", ascending=False).head(a["cross_top"])
-        evaluate(top, models_c, "model_i_top_to_model_c", cls, "top")
-        evaluate(matched_random(top, reference, rng), models_c, "model_i_top_to_model_c", cls, "random_reference")
+        top = (
+            s[s.model.eq("infection_classifier") & s.cls.eq(cls)]
+            .sort_values("score", ascending=False)
+            .head(a["cross_top"])
+        )
+        evaluate(top, cycle_models, "infection_top_to_cell_cycle", cls, "top")
+        evaluate(
+            matched_random(top, reference, rng), cycle_models, "infection_top_to_cell_cycle", cls, "random_reference"
+        )
         evaluate(
             matched_random(top, lambda f, ph, c=cls: same_class(f, ph, c), rng),
-            models_c,
-            "model_i_top_to_model_c",
+            cycle_models,
+            "infection_top_to_cell_cycle",
             cls,
             "random_same_class",
         )
     for cls in classes_c:
-        top = s[s.model.eq("model_c") & s.cls.eq(cls)].sort_values("score", ascending=False).head(a["cross_top"])
-        evaluate(top, models_i, "model_c_top_to_model_i", cls, "top")
+        top = (
+            s[s.model.eq("cell_cycle_classifier") & s.cls.eq(cls)]
+            .sort_values("score", ascending=False)
+            .head(a["cross_top"])
+        )
+        evaluate(top, infection_models, "cell_cycle_top_to_infection", cls, "top")
         evaluate(
             matched_random(top, same_source, rng, ("fold", "cc_state", "group")),
-            models_i,
-            "model_c_top_to_model_i",
+            infection_models,
+            "cell_cycle_top_to_infection",
             cls,
             "random_reference",
         )
         if cls in cfg["phases"]:
-            evaluate(matched_random(top, post_onset, rng), models_i, "model_c_top_to_model_i", cls, "random_post_onset")
+            evaluate(
+                matched_random(top, post_onset, rng),
+                infection_models,
+                "cell_cycle_top_to_infection",
+                cls,
+                "random_post_onset",
+            )
     cells = pd.concat(per_cell, ignore_index=True)
     rows = []
     groups = [(d, c, g) for (d, c), g in cells.groupby(["direction", "cls"], sort=False)]
     for direction in cells.direction.unique():
         d = cells[cells.direction.eq(direction)]
-        pooled = "TAU_p* pooled" if direction == "model_i_top_to_model_c" else "all phases pooled"
+        pooled = "TAU_p* pooled" if direction == "infection_top_to_cell_cycle" else "all phases pooled"
         groups.append((direction, pooled, d))
     for direction, cls, g in groups:
-        metrics = ["argmax_is_called", "p_called"] if direction == "model_i_top_to_model_c" else ["q_inf"]
+        metrics = ["argmax_is_called", "p_called"] if direction == "infection_top_to_cell_cycle" else ["q_inf"]
         for name, h in g.groupby("set", sort=False):
             row = dict(
                 direction=direction,
@@ -1722,7 +1880,7 @@ def plot_ranking(rank, colors, chance, size, n_train, path):
     ax.set_yticks(y, [r.label for _, r in rank.iterrows()])
     ax.set_xlim(0, 1)
     ax.set_xlabel(f"held-out per-class top-1 (eval.py, bags of {size}, 30 reps; trained at {n_train})")
-    ax.set_title("Model I class ranking (dots = folds)", fontsize=8.5)
+    ax.set_title("Infection classifier class ranking (dots = folds)", fontsize=8.5)
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="x", alpha=0.25, lw=0.5)
     fig.tight_layout()
@@ -1787,7 +1945,8 @@ def plot_auroc(summary, width, size, path):
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 0.01))
     fig.suptitle(
-        f"Model I infection AUROC on identical seeded held-out bags of {size} cells, q = P(a) / (P(a) + P(b))",
+        f"Infection classifier: infection AUROC on identical seeded held-out bags of {size} cells, "
+        "q = P(a) / (P(a) + P(b))",
         fontsize=9.5,
         y=0.985,
     )
@@ -1823,7 +1982,7 @@ def plot_confusion(mats, path):
 
 
 def plot_distortion(dist, classes_c, cfg, path):
-    """Model C mean predicted cycle distribution of held-out onset bags per τ bin and called phase, vs references."""
+    """Plot the cell-cycle classifier's mean prediction for onset bags per τ bin and called phase vs references."""
     phases = [p for p in ALL_PHASES if p in dist.cc_state.unique() and p in classes_c]
     bins = tau_bins(cfg)
     diverging = LinearSegmentedColormap.from_list("div", ["#184f95", "#f0efec", "#b2182b"])
@@ -1871,7 +2030,7 @@ def plot_distortion(dist, classes_c, cfg, path):
                 frameon=False,
                 loc="lower left",
                 bbox_to_anchor=(0, 1.12),
-                title="Model C predicted class",
+                title="Cell-cycle classifier predicted class",
                 title_fontsize=6.5,
             )
         if i == len(phases) - 1:
@@ -1898,8 +2057,8 @@ def plot_distortion(dist, classes_c, cfg, path):
     ax.set_title("Δ P(called phase): onset − reference\n(mean over folds)", fontsize=8)
     fig.colorbar(im, ax=ax, fraction=0.04, pad=0.09, orientation="horizontal", label="Δ P(called phase)")
     fig.suptitle(
-        f"Model C cycle distortion: bags of ≤ {cfg['analyze']['distortion_max_bag']} held-out onset cells per τ bin "
-        "x PCNA→Phase called phase",
+        f"Cell-cycle classifier: cycle distortion; bags of ≤ {cfg['analyze']['distortion_max_bag']} "
+        "held-out onset cells per τ bin x PCNA→Phase called phase",
         fontsize=9,
     )
     save(fig, path, ("png",))
@@ -1972,10 +2131,12 @@ def analyze(cfg):
 
     per_class = []
     for fold in cv_folds:
-        p = pd.read_csv(run_dir(work, "model_i", fold, chosen["model_i"]) / "eval" / "per_class.csv")
+        p = pd.read_csv(
+            run_dir(work, "infection_classifier", fold, chosen["infection_classifier"]) / "eval" / "per_class.csv"
+        )
         per_class.append(p.assign(fold=fold))
     per_class = pd.concat(per_class, ignore_index=True)
-    sel = per_class[per_class.n_cells.eq(ctx["size"]["model_i"])]
+    sel = per_class[per_class.n_cells.eq(ctx["size"]["infection_classifier"])]
     rank = (
         sel.groupby("gene_name")
         .top1_acc.agg(top1_mean="mean", top1_sd="std", n_folds="size")
@@ -1986,15 +2147,22 @@ def analyze(cfg):
     rank["label"] = [tau_label(c, cfg["bin_hours"]) if c.startswith("TAU_") else c for c in rank.cls]
     rank = rank.sort_values("top1_mean", ascending=False).reset_index(drop=True)
     rank["rank"] = np.arange(1, len(rank) + 1)
-    rank["eval_n_cells"], rank["train_n_cells"] = ctx["size"]["model_i"], chosen["model_i"]
+    rank["eval_n_cells"], rank["train_n_cells"] = ctx["size"]["infection_classifier"], chosen["infection_classifier"]
     rank.drop(columns="fold_values").to_csv(out / "class_ranking.csv", index=False)
-    per_class.to_csv(out / "eval_per_class_model_i.csv", index=False)
-    plot_ranking(rank, colors, 1 / len(rank), ctx["size"]["model_i"], chosen["model_i"], out / "class_ranking")
+    per_class.to_csv(out / "eval_per_infection_classnfection_classifier.csv", index=False)
+    plot_ranking(
+        rank,
+        colors,
+        1 / len(rank),
+        ctx["size"]["infection_classifier"],
+        chosen["infection_classifier"],
+        out / "class_ranking",
+    )
 
-    res_i = {f: model_i_fold(cfg, ctx, f, fi) for fi, f in enumerate([*cv_folds, *lodo_folds])}
-    res_c = {f: model_c_fold(cfg, ctx, f, fi) for fi, f in enumerate([*cv_folds, *lodo_folds])}
+    res_i = {f: infection_fold(cfg, ctx, f, fi) for fi, f in enumerate([*cv_folds, *lodo_folds])}
+    res_c = {f: cell_cycle_fold(cfg, ctx, f, fi) for fi, f in enumerate([*cv_folds, *lodo_folds])}
     bag_rows, prob_frames, acc_rows, au_rows = [], [], [], []
-    for model, results in [("model_i", res_i), ("model_c", res_c)]:
+    for model, results in [("infection_classifier", res_i), ("cell_cycle_classifier", res_c)]:
         for res in results.values():
             b, p, a = result_tables(res, model)
             bag_rows += b
@@ -2036,20 +2204,24 @@ def analyze(cfg):
         )
         .reset_index()
     )
-    au_sum["bag_size"] = ctx["size"]["model_i"]
+    au_sum["bag_size"] = ctx["size"]["infection_classifier"]
     au_sum.to_csv(out / "infection_auroc.csv", index=False)
-    plot_auroc(au_sum, cfg["bin_hours"], ctx["size"]["model_i"], out / "infection_auroc")
+    plot_auroc(au_sum, cfg["bin_hours"], ctx["size"]["infection_classifier"], out / "infection_auroc")
     record["baseline_fits"] = {f: r["fits"] for f, r in res_i.items()}
     record["checkpoint_epochs"] = {
-        "model_i": {f: r["epoch"] for f, r in res_i.items()},
-        "model_c": {f: r["epoch"] for f, r in res_c.items()},
+        "infection_classifier": {f: r["epoch"] for f, r in res_i.items()},
+        "cell_cycle_classifier": {f: r["epoch"] for f, r in res_c.items()},
     }
 
-    mi, ci, conf_i = confusion([res_i[f] for f in cv_folds], "model_i")
-    mc, cc, conf_c = confusion([res_c[f] for f in cv_folds], "model_c")
+    mi, ci, conf_i = confusion([res_i[f] for f in cv_folds], "infection_classifier")
+    mc, cc, conf_c = confusion([res_c[f] for f in cv_folds], "cell_cycle_classifier")
     pd.DataFrame(conf_i + conf_c).to_csv(out / "confusion.csv", index=False)
     plot_confusion(
-        {"model_i": (mi, ci, ctx["size"]["model_i"]), "model_c": (mc, cc, ctx["size"]["model_c"])}, out / "confusion"
+        {
+            "infection_classifier": (mi, ci, ctx["size"]["infection_classifier"]),
+            "cell_cycle_classifier": (mc, cc, ctx["size"]["cell_cycle_classifier"]),
+        },
+        out / "confusion",
     )
 
     dist = []
@@ -2071,16 +2243,18 @@ def analyze(cfg):
 
     scores = load_scores(cfg, work, cells, members, chosen, [*cv_folds, *lodo_folds])
     scores.to_parquet(out / "scores.parquet", index=False)
-    models_i = {
+    infection_models = {
         f: (
             load_classifier(
-                ctx["train"], run_dir(work, "model_i", f, chosen["model_i"]) / "checkpoint.pt", ctx["device"]
+                ctx["train"],
+                run_dir(work, "infection_classifier", f, chosen["infection_classifier"]) / "checkpoint.pt",
+                ctx["device"],
             )[:2]
         )
         for f in cv_folds
     }
-    models_c = {f: (res_c[f]["model"], res_c[f]["classes"]) for f in cv_folds}
-    cross_cells, cross = cross_scoring(cfg, ctx, scores, models_i, models_c, cc, cv_folds)
+    cycle_models = {f: (res_c[f]["model"], res_c[f]["classes"]) for f in cv_folds}
+    cross_cells, cross = cross_scoring(cfg, ctx, scores, infection_models, cycle_models, cc, cv_folds)
     cross_cells.to_csv(out / "cross_scoring_cells.csv", index=False)
     cross.to_csv(out / "cross_scoring.csv", index=False)
 
@@ -2249,10 +2423,10 @@ def render_cycle_panel(picks, crops, limits, cfg, stem):
         (
             "cycle_typical",
             "cycle-typical, uninfected",
-            "Model C top cells of that phase class\n(control + bystander cells)",
+            "Cell-cycle classifier top cells of that phase class\n(control + bystander cells)",
         ),
-        ("infected", "infected τ 0–2 h", "Model I TAU_p00 top cells\nwith that PCNA→Phase call"),
-        ("bystander", "bystander", "Model I BYSTANDER top cells\nwith that PCNA→Phase call"),
+        ("infected", "infected τ 0–2 h", "Infection classifier TAU_p00 top cells\nwith that PCNA→Phase call"),
+        ("bystander", "bystander", "Infection classifier BYSTANDER top cells\nwith that PCNA→Phase call"),
     ]
     phases = cfg["phases"]
     t, pair_gap, cell_gap, group_gap, caption, row_gap = 0.62, 0.02, 0.07, 0.24, 0.13, 0.2
@@ -2323,8 +2497,9 @@ def render_cycle_panel(picks, crops, limits, cfg, stem):
 def render_pseudotime(picks, crops, limits, cfg, stem):
     """Rows G1 / S / G2 / M x columns τ bins (Phase above merge).
 
-    G1 / S / G2: the top Model I cell (score.py) of each τ class with that call. M: the top Mantis-confirmed M cell
-    of each τ bin by Model I single-cell q_inf (M is outside Model I's training classes).
+    G1 / S / G2: the top infection-classifier cell (score.py) of each τ class with that call. M: the top
+    Mantis-confirmed M cell of each τ bin by the infection classifier's single-cell q_inf (M is outside the infection
+    classifier's training classes).
     """
     phases, bins = [*cfg["phases"], "M"], tau_bins(cfg)
     t, gap, col_gap, caption, row_gap, left, top, m_note = 0.72, 0.02, 0.07, 0.15, 0.16, 0.38, 0.5, 0.2
@@ -2348,7 +2523,8 @@ def render_pseudotime(picks, crops, limits, cfg, stem):
     fig.text(
         left / width,
         1 - 0.04 / height,
-        "Model I top cell per τ class and PCNA→Phase call (held-out test FOVs; τ from the Phase→pAL TCN onset)",
+        "Infection classifier top cell per τ class and PCNA→Phase call "
+        "(held-out test FOVs; τ from the Phase→pAL TCN onset)",
         fontsize=7.5,
         va="top",
     )
@@ -2358,8 +2534,9 @@ def render_pseudotime(picks, crops, limits, cfg, stem):
             fig.text(
                 left / width,
                 1 - (y - 0.07) / height,
-                "M (Mantis-confirmed division, same track ±1 frame) — outside Model I's training classes (M excluded "
-                "from phase-matched pools); ranked by Model I infection score",
+                "M (Mantis-confirmed division, same track ±1 frame) — outside the infection classifier's "
+                "training classes (M excluded "
+                "from phase-matched pools); ranked by the infection classifier's infection score",
                 fontsize=6.5,
                 color=PHASE_COLORS["M"],
                 va="bottom",
@@ -2398,12 +2575,14 @@ def render_pseudotime(picks, crops, limits, cfg, stem):
     fig.text(
         left / width,
         0.36 / height,
-        "G1 / S / G2: ranked by pinned score.py within each phase-matched τ pool. M: onset-lineage frames called M "
+        "G1 / S / G2: ranked by pinned score.py within each phase-matched τ pool. M: frames of the kept onset "
+        "lineages called M "
         f"with a Mantis division event on the same track at t−1…t+1 (division ≥ {m_cfg['division_min']}, death ≤ "
-        f"{m_cfg['death_max']}), one per track and τ bin,\nranked by Model I single-cell q_inf = ΣP(τ ≥ 0) / "
+        f"{m_cfg['death_max']}), one per track and τ bin,\nranked by the infection classifier's "
+        "single-cell q_inf = ΣP(τ ≥ 0) / "
         "(ΣP(τ ≥ 0) + P(BYSTANDER) + P(CONTROL)) from the fold that holds the FOV out. All rows: held-out test FOVs; "
         "≤ 1 cell per lineage and ≤ 2 per FOV in the figure; attempt-13 crop QC.\nPhase focus slice above TOMM20 "
-        "green + pAL magenta MIP; 5 µm bar; display limits as in the other attempt-25 figures.",
+        f"green + pAL magenta MIP; 5 µm bar; display limits as in the other attempt-{cfg['attempt']} figures.",
         fontsize=5.5,
         color="#52514e",
         va="top",
@@ -2411,7 +2590,7 @@ def render_pseudotime(picks, crops, limits, cfg, stem):
     save(fig, stem)
 
 
-def render_montage(pages_spec, crops, limits, a13, pdf_path, pages_dir):
+def render_montage(pages_spec, crops, limits, a13, pdf_path, pages_dir, attempt):
     """One page per class (top 10 by score, Phase | merge strips) with attempt-13 ``render_strips(n_tiles=2)``."""
     with PdfPages(pdf_path) as pdf:
         for page, (stem, header, cells, info) in enumerate(pages_spec, start=1):
@@ -2454,7 +2633,8 @@ def render_montage(pages_spec, crops, limits, a13, pdf_path, pages_dir):
             footer = [
                 (
                     0.1,
-                    "Contrast: 1st–99.5th percentile per dataset and channel over every crop selected for attempt 25.",
+                    "Contrast: 1st–99.5th percentile per dataset and channel over every crop "
+                    f"selected for attempt {attempt}.",
                     dict(size=7),
                 )
             ]
@@ -2487,14 +2667,18 @@ def render_montage(pages_spec, crops, limits, a13, pdf_path, pages_dir):
 
 
 def render_umap(cfg, scores, path):
-    """Top cells of every class on the attempt-23 Phase UMAP over all frames: Model I by τ, Model C by phase."""
+    """Plot each class's top cells on the attempt-23 Phase UMAP (infection classes by τ, cell-cycle by phase)."""
     allframes = pd.read_parquet(labels_path(cfg), columns=["umap1", "umap2"])
     colors = class_colors(cfg)
     top = cfg["render"]["umap_top"]
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.8))
     panels = [
-        ("model_i", model_i_classes(cfg), "Model I top cells (colour = τ bin; references black / grey)"),
-        ("model_c", [*cfg["phases"], "M"], "Model C top cells (colour = phase class)"),
+        (
+            "infection_classifier",
+            infection_classes(cfg),
+            "Infection classifier top cells (colour = τ bin; references black / grey)",
+        ),
+        ("cell_cycle_classifier", [*cfg["phases"], "M"], "Cell-cycle classifier top cells (colour = phase class)"),
     ]
     for ax, (model, classes, title) in zip(axes, panels):
         ax.scatter(allframes.umap1, allframes.umap2, s=0.6, color="#e3e3e3", lw=0, rasterized=True)
@@ -2561,12 +2745,13 @@ def infection_score(p, classes):
 
 
 def m_row_candidates(cfg, train_module, device):
-    """Build the pseudotime M-row candidates: Mantis-confirmed M frames of onset lineages, scored by Model I.
+    """Build the pseudotime M-row candidates: Mantis-confirmed M frames of onset lineages, scored for infection.
 
-    Onset-lineage frames (pre_onset + infected, not Mantis death) with τ in [tau_start, tau_stop) and ``cc_state``
-    M are kept only with a Mantis-confirmed division on the same track within the window, then reduced to one frame
-    per (track, τ bin) nearest the bin centre. Each candidate is joined to its TOMM20 embedding and scored with the
-    single-cell q_inf of the Model I checkpoint (chosen size) of the CV fold that holds its FOV out.
+    Frames of the onset lineages kept by the label rule (not Mantis death) with τ in [tau_start, tau_stop) and
+    ``cc_state`` M are kept only with a Mantis-confirmed division on the same track within the window, then reduced to
+    one frame per (track, τ bin) nearest the bin centre. Each candidate is joined to its TOMM20 embedding and scored
+    with the single-cell q_inf of the infection-classifier checkpoint (chosen size) of the CV fold that holds its FOV
+    out.
 
     Returns
     -------
@@ -2574,11 +2759,11 @@ def m_row_candidates(cfg, train_module, device):
         Candidates (negative ``row_id`` keys, ``score`` = q_inf) and per-bin counts before and after the Mantis rule.
     """
     work, width, m_cfg = Path(cfg["work_dir"]), cfg["bin_hours"], cfg["render"]["m_row"]
+    kept, _, _ = load_labels(cfg)
+    onset_lineages = set(kept.lineage_uid[kept.group.eq("onset")])
     d = pd.read_parquet(labels_path(cfg))
     d["confirmed"] = confirmed_divisions(d, m_cfg)
-    window = (
-        d.infection_status.isin(["pre_onset", "infected"]) & d.tau_h.ge(cfg["tau_start"]) & d.tau_h.lt(cfg["tau_stop"])
-    )
+    window = d.lineage_uid.isin(onset_lineages) & d.tau_h.ge(cfg["tau_start"]) & d.tau_h.lt(cfg["tau_stop"])
     m = d[window & ~d.mantis_death & d.cc_state.eq("M")].copy()
     m["tau_bin"] = np.floor((m.tau_h - cfg["tau_start"]) / width) * width + cfg["tau_start"]
     before = nearest_to_center(m, "tau_bin", "tau_h", width)
@@ -2597,11 +2782,11 @@ def m_row_candidates(cfg, train_module, device):
     fold_of = json.loads((work / "folds.json").read_text())["fold_of"]
     after["fold"] = "fold" + (after.dataset + "::" + after.fov_name).map(fold_of).astype(int).astype(str)
     after, emb, _ = attach_embeddings(after, cfg)
-    chosen = json.loads((work / "run_summary.json").read_text())["chosen"]["model_i"]
+    chosen = json.loads((work / "run_summary.json").read_text())["chosen"]["infection_classifier"]
     after["score"] = np.nan
     for fold, g in after.groupby("fold"):
         model, classes, _ = load_classifier(
-            train_module, run_dir(work, "model_i", fold, chosen) / "checkpoint.pt", device
+            train_module, run_dir(work, "infection_classifier", fold, chosen) / "checkpoint.pt", device
         )
         p = bag_probs(model, emb, g.index.to_numpy()[:, None], device)
         after.loc[g.index, "score"] = infection_score(p, classes)
@@ -2641,7 +2826,7 @@ def render(cfg):
         panel[("cycle_typical", phase)] = take(
             "panel_cycle_vs_infection",
             f"cycle_typical_{phase}",
-            ranked(scores, "model_c", phase),
+            ranked(scores, "cell_cycle_classifier", phase),
             r_cfg["per_column"],
             used,
             fovs,
@@ -2650,7 +2835,7 @@ def render(cfg):
         panel[("infected", phase)] = take(
             "panel_cycle_vs_infection",
             f"infected_TAU_p00_{phase}",
-            ranked(scores, "model_i", "TAU_p00", phase),
+            ranked(scores, "infection_classifier", "TAU_p00", phase),
             r_cfg["per_column"],
             used,
             fovs,
@@ -2659,7 +2844,7 @@ def render(cfg):
         panel[("bystander", phase)] = take(
             "panel_cycle_vs_infection",
             f"bystander_{phase}",
-            ranked(scores, "model_i", "BYSTANDER", phase),
+            ranked(scores, "infection_classifier", "BYSTANDER", phase),
             r_cfg["per_column"],
             used,
             fovs,
@@ -2673,15 +2858,15 @@ def render(cfg):
             pseudo[(c, phase)] = take(
                 "pseudotime_representatives",
                 f"{c}_{phase}",
-                ranked(scores, "model_i", c, phase),
+                ranked(scores, "infection_classifier", c, phase),
                 1,
                 used,
                 fovs,
                 r_cfg["per_fov"],
             )
     pages_spec = []
-    montage_classes = [("model_i", c) for c in model_i_classes(cfg)] + [
-        ("model_c", c) for c in scores[scores.model.eq("model_c")].cls.unique()
+    montage_classes = [("infection_classifier", c) for c in infection_classes(cfg)] + [
+        ("cell_cycle_classifier", c) for c in scores[scores.model.eq("cell_cycle_classifier")].cls.unique()
     ]
     for model, c in montage_classes:
         cands = ranked(scores, model, c)
@@ -2689,10 +2874,8 @@ def render(cfg):
             "montage_top_cells", f"{model}_{c}", cands, r_cfg["montage_per_class"], set(), Counter(), r_cfg["per_fov"]
         )
         info = report[f"montage_top_cells/{model}_{c}"]
-        if c.startswith("TAU_"):
-            title = f"onset lineages, {tau_label(c, cfg['bin_hours'])} from TCN onset (phase-matched pool)"
-        elif model == "model_i":
-            title = CLASS_TITLES[c]
+        if model == "infection_classifier":
+            title = class_title(cfg, c)
         else:
             title = f"{c}, uninfected (control + bystander, source-balanced pool)"
         rejected = (
@@ -2748,7 +2931,7 @@ def render(cfg):
             row.update(picked_cell=f"{r.dataset} {r.fov_name} track {int(r.track_id)} t {int(r.t)} q_inf {r.score:.3f}")
     render_cycle_panel(panel, crops, limits, cfg, out / "panel_cycle_vs_infection")
     render_pseudotime(pseudo, crops, limits, cfg, out / "pseudotime_representatives")
-    render_montage(pages_spec, crops, limits, a13, out / "montage_top_cells.pdf", pages)
+    render_montage(pages_spec, crops, limits, a13, out / "montage_top_cells.pdf", pages, cfg["attempt"])
     render_umap(cfg, scores, out / "umap_top_cells")
     pd.DataFrame(selection).to_csv(out / "selection.csv", index=False)
     audit = pd.DataFrame(crops.audit)
@@ -2770,11 +2953,13 @@ def render(cfg):
             crop_outcomes=audit.outcome.value_counts().to_dict(),
             m_row=dict(
                 rule=(
-                    "onset-lineage frames (pre_onset + infected, not Mantis death) in each τ bin with cc_state M and "
+                    "frames of the onset lineages kept by the label rule (not Mantis death) in each τ bin with "
+                    "cc_state M and "
                     "a Mantis division event on the same track at t-1, t or t+1 (evidence available, "
                     f"probability__division >= {r_cfg['m_row']['division_min']}, probability__death <= "
                     f"{r_cfg['m_row']['death_max']}); one frame per (track, τ bin) nearest the bin centre; ranked by "
-                    "Model I single-cell q_inf from the chosen-size checkpoint of the fold holding the FOV out; same "
+                    "the infection classifier's single-cell q_inf from the chosen-size checkpoint "
+                    "of the fold holding the FOV out; same "
                     "diversity (shared with the G1/S/G2 rows) and crop QC; the M crops do not enter the contrast limits"
                 ),
                 per_bin=m_counts,
@@ -2801,6 +2986,126 @@ def md_table(df, digits=3):
 def pm(mean, sd, digits=3):
     """Format ``mean ± sd``."""
     return f"{mean:.{digits}f} ± {sd:.{digits}f}"
+
+
+def attempt_metrics(work, renames):
+    """Collect the cross-attempt comparison metrics from one attempt's work directory.
+
+    Parameters
+    ----------
+    work : pathlib.Path
+        The attempt's ``work_dir``.
+    renames : dict
+        Identifier renames applied to that attempt's ``model`` / ``direction`` values and chosen-size keys (empty for
+        the current attempt).
+
+    Returns
+    -------
+    dict
+        ``{metric: value}`` in display order.
+    """
+    analysis = work / "analysis"
+
+    def read(name):
+        df = pd.read_csv(analysis / name)
+        for col in ("model", "direction"):
+            if col in df:
+                df[col] = df[col].replace(renames)
+        return df
+
+    out = {}
+    cells = pd.read_parquet(work / "cells.parquet", columns=["group", "lineage_uid"])
+    used = json.loads((work / "export.json").read_text())["labels"]["used_by_group"]
+    for group in ["onset", *REFERENCES]:
+        out[f"lineages with a representative ({group})"] = int(cells.lineage_uid[cells.group.eq(group)].nunique())
+        out[f"representative frames ({group})"] = int(cells.group.eq(group).sum())
+        out[f"live labelled frames ({group})"] = int(sum(used[group].values()))
+    chosen = {renames.get(k, k): v for k, v in json.loads((work / "run_summary.json").read_text())["chosen"].items()}
+    size = json.loads((analysis / "analysis.json").read_text())["analysis_bag_size"]
+    for model in MODELS:
+        out[f"chosen n_cells_per_set ({model})"] = chosen[model]
+        out[f"analysis bag size for AUROC / test-bag top-1 ({model})"] = {
+            renames.get(k, k): v for k, v in size.items()
+        }[model]
+    sweep = read("bag_size_sweep.csv")
+    for n in (5, 10):
+        g = sweep[
+            sweep.model.eq("infection_classifier")
+            & sweep.n_train.eq(chosen["infection_classifier"])
+            & sweep.n_eval.eq(n)
+        ]
+        out[f"infection eval.py 12-class top-1 at {n} cells (folds)"] = (
+            f"{g['mean'].iloc[0]:.3f} ({int(g.n_folds.iloc[0])})"
+        )
+    au = read("infection_auroc.csv")
+    post = au[au.cls.str.startswith("TAU_p")].groupby(["reference_bags", "reference", "method"])["mean"].mean()
+    for (variant, ref, method), v in post.items():
+        out[f"post-onset AUROC vs {ref} ({variant}, {method})"] = float(v)
+    for (variant, method), v in au[au.cls.eq("BYSTANDER")].set_index(["reference_bags", "method"])["mean"].items():
+        out[f"BYSTANDER vs CONTROL AUROC ({variant}, {method})"] = float(v)
+    acc = read("test_bag_accuracy.csv")
+    acc = acc[acc.cls.eq("__all__") & acc.model.eq("infection_classifier")]
+    for method, v in acc[acc.fold.str.startswith("fold")].groupby("method").top1.mean().items():
+        out[f"infection 12-class top-1, CV test bags ({method})"] = float(v)
+    for (fold, method), v in acc[~acc.fold.str.startswith("fold")].set_index(["fold", "method"]).top1.items():
+        out[f"infection 12-class top-1, {fold} test bags ({method})"] = float(v)
+    lodo = read("lodo_eval.csv")
+    for r in lodo[lodo.n_eval.eq(10)].itertuples():
+        out[f"eval.py top-1 at 10 cells, {r.fold} ({r.model})"] = float(r.top1)
+    folds = read("infection_auroc_folds.csv")
+    lp = folds[folds.split.eq("lodo") & folds.cls.str.startswith("TAU_p") & folds.method.eq("set_classifier")]
+    for (fold, variant, ref), v in lp.groupby(["fold", "reference_bags", "reference"]).auroc.mean().items():
+        out[f"post-onset AUROC vs {ref}, {fold} ({variant}, set_classifier)"] = float(v)
+    cc = sweep[sweep.model.eq("cell_cycle_classifier") & sweep.n_train.eq(chosen["cell_cycle_classifier"])]
+    for n in (1, 10, 50):
+        g = cc[cc.n_eval.eq(n)]
+        out[f"cell-cycle classifier eval.py top-1 at {n} cells (folds)"] = (
+            f"{g['mean'].iloc[0]:.3f} ({int(g.n_folds.iloc[0])})" if len(g) else "n/a"
+        )
+    dist = read("cycle_distortion.csv")
+    s = dist[dist.cc_state.eq("S")]
+    out["S-called onset bags: Δ P(S) range"] = f"{s.delta_called.min():+.2f} … {s.delta_called.max():+.2f}"
+    g2 = s.p_G2 - s.ref_p_G2
+    out["S-called onset bags: Δ P(G2) range"] = f"{g2.min():+.2f} … {g2.max():+.2f}"
+    cross = read("cross_scoring.csv")
+    pooled = cross[cross.cls.str.contains("pooled")]
+    fwd = pooled[pooled.direction.eq("infection_top_to_cell_cycle") & pooled.set.eq("top")].iloc[0]
+    rev = pooled[pooled.direction.eq("cell_cycle_top_to_infection") & pooled.set.eq("top")].iloc[0]
+    for metric in ("argmax_is_called", "p_called"):
+        out[f"cross-scoring: infection top cells, {metric} minus reference [95% CI]"] = (
+            f"{fwd[f'{metric}_minus_reference']:+.3f} [{fwd[f'{metric}_ci_low']:+.3f}, {fwd[f'{metric}_ci_high']:+.3f}]"
+        )
+    out["cross-scoring: cell-cycle top cells, q_inf minus reference [95% CI]"] = (
+        f"{rev.q_inf_minus_reference:+.3f} [{rev.q_inf_ci_low:+.3f}, {rev.q_inf_ci_high:+.3f}]"
+    )
+    return out
+
+
+def comparison_table(cfg):
+    """Return the metric table of the configured earlier attempt next to this attempt.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``metric``, ``attempt_<earlier>``, ``attempt_<this>``.
+    """
+    other = cfg["compare_to"]
+    before = attempt_metrics(Path(other["work_dir"]), other["renames"])
+    after = attempt_metrics(Path(cfg["work_dir"]), {})
+    metrics = [*before, *(m for m in after if m not in before)]
+
+    def fmt(v):
+        if isinstance(v, float):
+            return f"{v:.3f}"
+        return "" if v is None else str(v)
+
+    return pd.DataFrame(
+        {
+            "metric": metrics,
+            f"attempt_{other['attempt']}": [fmt(before.get(m)) for m in metrics],
+            f"attempt_{cfg['attempt']}": [fmt(after.get(m)) for m in metrics],
+        }
+    )
 
 
 def source_shas(cfg):
@@ -2832,10 +3137,10 @@ def cross_verdict(cross):
     """Return one sentence per direction from the pooled cross-scoring rows (bootstrap 95% interval vs references)."""
     lines = []
     f = cross[
-        (cross.direction.eq("model_i_top_to_model_c")) & cross.cls.eq("TAU_p* pooled") & cross.set.eq("top")
+        (cross.direction.eq("infection_top_to_cell_cycle")) & cross.cls.eq("TAU_p* pooled") & cross.set.eq("top")
     ].iloc[0]
     ref = cross[
-        (cross.direction.eq("model_i_top_to_model_c"))
+        (cross.direction.eq("infection_top_to_cell_cycle"))
         & cross.cls.eq("TAU_p* pooled")
         & cross.set.eq("random_reference")
     ].iloc[0]
@@ -2844,7 +3149,8 @@ def cross_verdict(cross):
         return "no detectable difference" if lo <= 0 <= hi else ("higher" if lo > 0 else "lower")
 
     lines.append(
-        f"Model I's top post-onset cells (n = {f.n}) get Model C's argmax = their PCNA→Phase call in "
+        f"The infection classifier's top post-onset cells (n = {f.n}) get the cell-cycle classifier's argmax "
+        "= their PCNA→Phase call in "
         f"{f.argmax_is_called:.1%} "
         f"vs {ref.argmax_is_called:.1%} for random reference cells of the same fold and call (difference "
         f"{f.argmax_is_called_minus_reference:+.3f}, "
@@ -2854,10 +3160,11 @@ def cross_verdict(cross):
         f"[{f.p_called_ci_low:+.3f}, {f.p_called_ci_high:+.3f}]: "
         f"{side(f.p_called_ci_low, f.p_called_ci_high)})."
     )
-    r = cross[(cross.direction.eq("model_c_top_to_model_i")) & cross.cls.eq("all phases pooled")].set_index("set")
+    r = cross[(cross.direction.eq("cell_cycle_top_to_infection")) & cross.cls.eq("all phases pooled")].set_index("set")
     t = r.loc["top"]
     lines.append(
-        f"Model C's top cycle cells (n = {t.n}) get Model I's single-cell infection score q_inf {t.q_inf:.3f} vs "
+        f"The cell-cycle classifier's top cycle cells (n = {t.n}) get the infection classifier's single-cell "
+        f"infection score q_inf {t.q_inf:.3f} vs "
         f"{r.loc['random_reference'].q_inf:.3f} "
         f"for random reference cells of the same fold and call ({t.q_inf_minus_reference:+.3f} [{t.q_inf_ci_low:+.3f}, "
         f"{t.q_inf_ci_high:+.3f}]: "
@@ -2868,33 +3175,35 @@ def cross_verdict(cross):
 
 
 def write_readme(cfg, ctx):
-    """Write the attempt-25 README from the export, run, analysis and render records."""
+    """Write the attempt README from the export, run, analysis and render records."""
     e, a, rj = ctx["export"], ctx["analysis"], ctx["render"]
     sel, sweep, rank = ctx["selection"], ctx["sweep"], ctx["rank"]
     au, dist, cross, counts = ctx["auroc"], ctx["distortion"], ctx["cross"], ctx["counts"]
     chosen, size = a["chosen"], a["analysis_bag_size"]
     cv = counts[counts.fold.str.startswith("fold")]
     lines = [
-        "# Attempt 25 — OPS set classifier (unchanged) on TOMM20 embeddings: cell cycle vs infection",
+        f"# Attempt {cfg['attempt']} — OPS set classifier (unchanged) on TOMM20 embeddings: cell cycle vs infection",
         "",
         "Alex Lin's set classifier (`czbiohub-sf/ops_monorepo@ab11b56`, "
         "`ops_model/src/ops_model/models/interpretability/classifier/`, run unchanged as `python -m "
         "set_classifier.{train,eval,score}`) on cached DynaCLR TOMM20 `obsm/X_normalized_pca80` (49 PCs, control-MAD "
         "normalized per experiment × HPI, PCA checksum `c81187f1…`) of 2026_07_01 and 2026_04_10.",
         "",
-        "- **Model I** — classes: TCN τ bins of 2 h over [−8, 12) for onset lineages (`TAU_m08` … `TAU_p10`), "
-        "`BYSTANDER` (ZIKV-well lineages without TCN onset) and `CONTROL` (control wells 07_01 A/3, 04_10 A/2). Every "
-        "pool is phase-matched (equal G1/S/G2, M excluded) within each fold × split, so cycle composition cannot drive "
-        "the call.",
-        f"- **Model C** — classes {', '.join(e['model_c_m_decision']['classes'])} of uninfected cells only (control + "
-        "bystander, each phase pool balanced between the two sources). M is included because every training split has "
-        f"≥ {e['model_c_m_decision']['min_m_cells']} source-balanced M cells (min "
-        f"{min(e['model_c_m_decision']['m_train_balanced'].values())}).",
+        "- **Infection classifier** — classes: TCN τ bins of 2 h over [−8, 12) for onset lineages "
+        f"({onset_anchor(cfg)}; `TAU_m08` … `TAU_p10`), `BYSTANDER` ({class_title(cfg, 'BYSTANDER').split(' (')[0]}) "
+        "and `CONTROL` (control wells 07_01 A/3, 04_10 A/2). Every pool is phase-matched (equal G1/S/G2, M excluded) "
+        "within each fold × split, so cycle composition cannot drive the call.",
+        f"- **Cell-cycle classifier** — classes {', '.join(e['cell_cycle_m_decision']['classes'])} of uninfected cells "
+        "only (control + bystander, each phase pool balanced between the two sources). M is "
+        + ("included" if e["cell_cycle_m_decision"]["include_m"] else "not included")
+        + f" because {'every' if e['cell_cycle_m_decision']['include_m'] else 'not every'} training split has "
+        f"≥ {e['cell_cycle_m_decision']['min_m_cells']} source-balanced M cells (min "
+        f"{min(e['cell_cycle_m_decision']['m_train_balanced'].values())}).",
         "- Both use the same FOV folds and representative frames.",
         "",
         "## Inputs",
         "",
-        f"- Labels: snapshot `{ctx['labels']['path']}` of `{ctx['labels']['origin']}`, sha256 "
+        f"- TCN labels: snapshot `{ctx['labels']['path']}` of `{ctx['labels']['origin']}`, sha256 "
         f"`{ctx['labels']['sha256']}` (asserted at export, render and report)."
         + (
             f" The export stage read the identical bytes (same sha256) from the origin path "
@@ -2902,14 +3211,32 @@ def write_readme(cfg, ctx):
             if ctx["labels"]["export_read"]["path"] != ctx["labels"]["path"]
             else ""
         )
-        + f" {e['labels']['frames']:,} frames; Mantis-death frames excluded "
-        f"({e['labels']['mantis_death_excluded']:,}); ambiguous lineages excluded "
-        f"({e['labels']['ambiguous_excluded']:,} live frames); {e['labels']['used_frames']:,} frames used.",
+        + f" {e['labels']['frames']:,} frames.",
+    ]
+    if e["labels"]["sensor"] is not None:
+        lines.append(
+            f"- pAL17-sensor labels: `{e['labels']['sensor']['path']}`, sha256 `{e['labels']['sensor']['sha256']}` "
+            "(asserted); same frame keys and frame → lineage assignment as the TCN table (asserted)."
+        )
+    lines += [
+        f"- Label rule: {e['labels']['rule']}. "
+        f"Mantis-death frames excluded ({e['labels']['mantis_death_excluded']:,}); "
+        f"live frames of excluded lineages {e['labels']['live_frames_excluded_by_rule']:,}; "
+        f"{e['labels']['used_frames']:,} frames used. "
+        "Lineages per class (all frames; `source_data/label_lineages.csv`):",
+        "",
+        md_table(pd.DataFrame(e["labels"]["lineage_crosstab"])),
+        "",
+        "Kept lineages per class, those with at least one live (not Mantis-death) frame and those with at least one "
+        "representative frame (a kept lineage without live frames cannot contribute):",
+        "",
+        md_table(ctx["lineage_counts"]),
+        "",
     ]
     for j in e["embeddings"]:
         lines.append(
             f"- {j['dataset']}: `{j['path']}` `obsm/X_normalized_pca80` sha256 `{j['obsm_sha256'][:16]}…`, checksum "
-            f"`{j['pca_model_checksum'][:16]}…`; {j['matched_rows']:,} used frames all joined on (fov_name, track_id, "
+            f"`{j['pca_checksum'][:16]}…`; {j['matched_rows']:,} used frames all joined on (fov_name, track_id, "
             f"t) to nonblank rows ({j['nonblank_rows']:,} nonblank of {j['store_rows']:,})."
         )
     lines += [
@@ -2930,20 +3257,29 @@ def write_readme(cfg, ctx):
         "fold k test = its FOVs, val = fold k+1 (used only by `train.py` checkpoint selection and the baselines' C), "
         "train = the rest. Two leave-one-dataset-out (LODO) folds: train/val from one dataset (val = 20% of FOVs per "
         "well type), test on the other. No FOV is in two splits of a fold (asserted). Each CV fold has 2 control FOVs; "
-        "fold0's test has no 07_01 control FOV (07_01 has only 4).",
+        "fold0's test has no 07_01 control FOV (07_01 has only 4)."
+        + (
+            f" The FOV folds are identical to attempt {cfg['compare_to']['attempt']}'s (asserted at export)."
+            if cfg["compare_to"] is not None
+            else ""
+        ),
         "",
         "## Pools (phase matching)",
         "",
-        "Counts before matching are representative frames per called phase; after = phase-matched pool (Model I) or "
-        "source-balanced pool (Model C). CV test pools partition the FOVs, so their sum is every matched cell once. "
-        "Per fold × split × class counts: `source_data/pool_counts.csv`. No class was dropped (train ≥ 20 cells and "
-        "non-empty val/test everywhere).",
+        "Counts before matching are representative frames per called phase; "
+        "after = phase-matched pool (Infection classifier) or "
+        "source-balanced pool (Cell-cycle classifier). "
+        "CV test pools partition the FOVs, so their sum is every matched cell once. "
+        "Per fold × split × class counts: `source_data/pool_counts.csv`. A class is dropped from a fold when its train "
+        f"pool has < {cfg['min_train_cells']} cells or its val/test pool is empty: "
+        + (json.dumps(e["dropped"]) if e["dropped"] else "no class was dropped")
+        + ".",
         "",
     ]
     rep = pd.DataFrame(e["representatives"]["representatives_by_phase"]).fillna(0).astype(int)
     rows = []
-    for c in model_i_classes(cfg):
-        g = cv[cv.model.eq("model_i") & cv.cls.eq(c)]
+    for c in infection_classes(cfg):
+        g = cv[cv.model.eq("infection_classifier") & cv.cls.eq(c)]
         rows.append(
             dict(
                 cls=c,
@@ -2959,8 +3295,8 @@ def write_readme(cfg, ctx):
         )
     lines += [md_table(pd.DataFrame(rows)), ""]
     rows = []
-    for c in e["model_c_m_decision"]["classes"]:
-        g = cv[cv.model.eq("model_c") & cv.cls.eq(c)]
+    for c in e["cell_cycle_m_decision"]["classes"]:
+        g = cv[cv.model.eq("cell_cycle_classifier") & cv.cls.eq(c)]
         rows.append(
             dict(
                 cls=c,
@@ -2971,7 +3307,7 @@ def write_readme(cfg, ctx):
                 matched_total=int(g[g.split.eq("test")]["after"].sum()),
             )
         )
-    lines += ["Model C (bystander = control within every pool):", "", md_table(pd.DataFrame(rows)), ""]
+    lines += ["Cell-cycle classifier (bystander = control within every pool):", "", md_table(pd.DataFrame(rows)), ""]
     s = (
         sel.groupby(["model", "n_cells_per_set"])
         .agg(
@@ -2992,7 +3328,8 @@ def write_readme(cfg, ctx):
         "",
         md_table(s),
         "",
-        f"Chosen: Model I **{chosen['model_i']}**, Model C **{chosen['model_c']}**. "
+        f"Chosen: Infection classifier **{chosen['infection_classifier']}**, "
+        f"Cell-cycle classifier **{chosen['cell_cycle_classifier']}**. "
         + "; ".join(
             f"{m}: mean val spans {g.mean_val.min():.3f}–{g.mean_val.max():.3f} across sizes, fold SD "
             f"{g.sd_val.min():.3f}–{g.sd_val.max():.3f}"
@@ -3031,17 +3368,20 @@ def write_readme(cfg, ctx):
             "",
         ]
     lines += [
-        "## Model I class ranking (gKO-ranking analogue)",
+        "## Infection classifier class ranking (gKO-ranking analogue)",
         "",
-        f"`class_ranking.{{png,csv}}`: eval.py per-class held-out top-1 at training size {chosen['model_i']} and "
-        f"evaluation bags of {size['model_i']} (the largest size in every fold), mean ± SD over 5 folds:",
+        f"`class_ranking.{{png,csv}}`: eval.py per-class held-out top-1 at training size "
+        f"{chosen['infection_classifier']} and "
+        f"evaluation bags of {size['infection_classifier']} (the largest size in every fold), mean ± SD over 5 folds:",
         "",
         md_table(rank[["rank", "cls", "label", "top1_mean", "top1_sd", "n_folds"]]),
         "",
         "## Infection AUROC (identical seeded bags, three methods)",
         "",
-        f"Our own held-out bags: 30 per class of **{size['model_i']} cells** (without replacement inside a bag), per "
-        "fold; bag size = largest eval size ≤ the chosen size and ≤ half the smallest CV test pool (21), so the "
+        f"Our own held-out bags: 30 per class of **{size['infection_classifier']} cells** "
+        "(without replacement inside a bag), per "
+        f"fold; bag size = largest eval size ≤ the chosen size and ≤ half the smallest CV test pool "
+        f"({ctx['smallest_pool'][0]}), so the "
         "smallest τ pools still give distinct bags. q = P(τ) / (P(τ) + P(ref)) from the full softmax (pinned "
         "`build_model`). Baselines on the identical bags: mean-pooled multinomial logistic regression on the 49 PCs "
         "and an HPI-only multinomial logistic regression (bag HPI mean, SD), both trained on 200 bags per class drawn "
@@ -3056,7 +3396,7 @@ def write_readme(cfg, ctx):
     for variant in ["pool", "hpi_matched"]:
         v = au[au.reference_bags.eq(variant) & au.cls.str.startswith("TAU_")]
         rows = []
-        for c in model_i_classes(cfg)[:-2]:
+        for c in infection_classes(cfg)[:-2]:
             row = dict(cls=c)
             for ref in REFERENCES:
                 for method, short in [("set_classifier", "set"), ("mean_logreg", "mean LR"), ("hpi_logreg", "HPI LR")]:
@@ -3112,13 +3452,15 @@ def write_readme(cfg, ctx):
     )
     lines += ["LODO BYSTANDER vs CONTROL AUROC:", "", md_table(lb), ""]
     lines += [
-        "## Model C",
+        "## Cell-cycle classifier",
         "",
-        f"Confusion on reference test bags of {size['model_c']} cells (`confusion.png`, right): diagonal "
-        f"{', '.join(f'{c} {v:.2f}' for c, v in ctx['diag_c'].items())}. Model I confusion (left): diagonal "
+        f"Confusion on reference test bags of {size['cell_cycle_classifier']} cells (`confusion.png`, right): diagonal "
+        f"{', '.join(f'{c} {v:.2f}' for c, v in ctx['diag_c'].items())}. "
+        "Infection classifier confusion (left): diagonal "
         f"{', '.join(f'{c} {v:.2f}' for c, v in ctx['diag_i'].items())}.",
         "",
-        "Distortion map (`cycle_distortion.{png,csv}`): Model C's mean predicted distribution for held-out "
+        "Distortion map (`cycle_distortion.{png,csv}`): "
+        "the cell-cycle classifier's mean predicted distribution for held-out "
         "onset-lineage bags (all called phases, not phase-matched) per τ bin × called phase, bags of ≤ "
         f"{cfg['analyze']['distortion_max_bag']} cells from {cfg['analyze']['distortion_partitions']} random "
         "partitions (each cell in up to 30 bags), vs reference test bags of the same called phase and size. Groups "
@@ -3167,6 +3509,18 @@ def write_readme(cfg, ctx):
         f"- M crop outcomes: {m_row['crop_outcomes']}. A bin without a QC-passing, diversity-compatible confirmed M "
         "cell is left blank ('no confirmed M'); unconfirmed M frames are never used.",
     ]
+    if ctx["comparison"] is not None:
+        other = cfg["compare_to"]
+        lines += [
+            "",
+            f"## Attempt {other['attempt']} → attempt {cfg['attempt']}",
+            "",
+            f"`{ctx['comparison_file']}`. Attempt {other['attempt']}: `{other['work_dir']}` (its model identifiers are "
+            "mapped to the infection / cell-cycle classifier names by the config's `compare_to.renames`). AUROCs are "
+            "means over post-onset τ bins of the per-fold means; top-1 values are CV means on the analysis bags.",
+            "",
+            md_table(ctx["comparison"]),
+        ]
     lines += [
         "",
         "## Deviations from the brief",
@@ -3184,25 +3538,25 @@ def write_readme(cfg, ctx):
         f"{ctx['set_pool']:.2f}; with HPI-matched references (B) the HPI-only regression drops to "
         f"{ctx['hpi_matched']:.2f} while the set classifier gives {ctx['set_matched']:.2f} and the mean-pooled "
         f"regression {ctx['mean_matched']:.2f}.",
-        "- Only 2 datasets, 46 ZIKV and 10 control FOVs: fold SD measures split sensitivity, not biological "
-        "replication; test bags overlap within a pool.",
+        f"- Only {ctx['fovs']['datasets']} datasets, {ctx['fovs']['zikv']} ZIKV and {ctx['fovs']['control']} control "
+        "FOVs: fold SD measures split sensitivity, not biological replication; test bags overlap within a pool.",
         "- eval.py's SEM is across repetitions of one fold's test pools and understates uncertainty; there is no "
         "permutation null. Training is not bit-reproducible (`train.py` does not seed Python's `random`, which "
         "shuffles bag order).",
-        "- Late τ pools are small (21–48 cells per CV test fold), which caps evaluation bag sizes; checkpoint "
-        "selection uses 60 val bags.",
+        f"- The smallest infection-classifier test pool per CV fold is {ctx['smallest_pool'][0]}–"
+        f"{ctx['smallest_pool'][1]} cells (late τ bins), which caps evaluation bag sizes; checkpoint selection uses "
+        "5 val bags per class.",
         "- The montage ranking is predictive attribution of the classifier on these embeddings, not causality.",
         "- Crop QC selects against dim TOMM20: TOMM20-gate rejections while filling the 10 montage cells per class: "
         + ", ".join(
-            f"{k.split('/')[1].removeprefix('model_i_').removeprefix('model_c_')} {v.get('reject_tomm20_dim', 0)}"
+            f"{k.split('/')[1].removeprefix('infection_classifier_').removeprefix('cell_cycle_classifier_')} "
+            f"{v.get('reject_tomm20_dim', 0)}"
             for k, v in rj["selection"].items()
             if k.startswith("montage_top_cells/")
         )
         + ". Where many top cells are rejected (late τ bins), the montage shows lower-ranked cells (see each caption's "
         "rank and score).",
-        "- Visual check of the montages: a few top BYSTANDER and Model C G2 cells, including one control-well G2 cell, "
-        "show diffuse nuclear pAL17. Whether these are infected cells without a TCN onset call or cycle-linked sensor "
-        "redistribution is not resolved here; the reference pools are not sensor-verified.",
+        *[f"- {note}" for note in cfg["report_notes"]],
         "",
         "## Files",
         "",
@@ -3215,33 +3569,8 @@ def write_readme(cfg, ctx):
     (Path(cfg["fig_dir"]) / "README.md").write_text("\n".join(lines) + "\n")
 
 
-DEVIATIONS = [
-    "Infection AUROC: added variant B with reference bags matched to each τ bag's (dataset, 2 h HPI bin) composition "
-    "(cross-dataset only where a fold's reference test pool lacks that dataset), because the HPI-only baseline "
-    "separates τ bags from pool references almost perfectly; variant A is the specified analysis.",
-    "Analysis bags (AUROC, confusion, cross-checks) use the largest eval size ≤ the chosen size and ≤ half the "
-    "smallest CV test pool (10 cells), not the chosen training size, because late τ test pools (21–48 cells) are "
-    "smaller than the chosen size; eval.py lists are capped per fold at the smallest test pool.",
-    "Classes are also dropped from a fold if their val or test pool is empty (an empty pool would give all-masked "
-    "bags); no class was dropped.",
-    "Hydra configs: num_workers 0 (≤ 8 threads on the shared node) and eval show_progress false; everything else as "
-    "shipped. Training seed 42 as shipped; our sampling uses seed 17.",
-    "Cross-scoring adds a random same-class (forward) and random post-onset (reverse) comparator next to the specified "
-    "random reference cells; the reverse random reference is also matched on source (bystander or control); the UMAP "
-    "figure adds a Model C panel.",
-    "Provenance: the export and run stages ran with an earlier revision of this wrapper (same export/run logic; later "
-    "edits changed analyze/render/report, export-record tabulation, the label-path check and line wrapping); "
-    "analyze, render and report were re-run with the revision recorded in manifest.json.",
-    "Labels are read from the fixed snapshot fig6_inputs/attempt23_phase_embedding_e017ba39.parquet (sha256 asserted) "
-    "because attempt 23 is being rewritten; the export stage had read the identical bytes from attempt 23's "
-    "source_data/phase_embedding.parquet (sha256 checked against attempt 23's manifest at that time).",
-    "Folds deal FOVs round-robin within well type across datasets, so each fold has 2 control FOVs but 07_01's 4 "
-    "control FOVs cannot reach all 5 folds (fold0 test lacks one).",
-]
-
-
 def report(cfg):
-    """Stage ``report``: claim the attempt-25 figure directory and write figures, tables, code, README and manifest."""
+    """Stage ``report``: claim the attempt's figure directory and write figures, tables, code, README and manifest."""
     work = Path(cfg["work_dir"])
     fig_dir = Path(cfg["fig_dir"])
     analysis, figures = work / "analysis", work / "figures"
@@ -3275,12 +3604,18 @@ def report(cfg):
     for p in sorted((figures / "pages").glob("*.png")):
         shutil.copyfile(p, fig_dir / "pages" / p.name)
     shutil.copyfile(work / "bag_size_selection.csv", fig_dir / "bag_size_selection.csv")
-    for p in [work / "pool_counts.csv", work / "folds.json", work / "eval_caps.csv", work / "export.json"]:
+    for p in [
+        work / "pool_counts.csv",
+        work / "folds.json",
+        work / "eval_caps.csv",
+        work / "export.json",
+        work / "label_lineages.csv",
+    ]:
         shutil.copyfile(p, fig_dir / "source_data" / p.name)
     for name in [
         "eval_runs.csv",
         "lodo_eval.csv",
-        "eval_per_class_model_i.csv",
+        "eval_per_infection_classnfection_classifier.csv",
         "infection_auroc_folds.csv",
         "test_bag_accuracy.csv",
         "test_bags.parquet",
@@ -3355,15 +3690,46 @@ def report(cfg):
         counts=pd.read_csv(work / "pool_counts.csv"),
         caps=pd.read_csv(work / "eval_caps.csv", converters=dict(eval_n_cells=json.loads)),
         n_cells=len(pd.read_parquet(work / "cells.parquet", columns=["row_id"])),
-        diag_i=diag("model_i"),
-        diag_c=diag("model_c"),
+        diag_i=diag("infection_classifier"),
+        diag_c=diag("cell_cycle_classifier"),
         hpi_pool=mean_of("pool", "hpi_logreg"),
         set_pool=mean_of("pool", "set_classifier"),
         hpi_matched=mean_of("hpi_matched", "hpi_logreg"),
         set_matched=mean_of("hpi_matched", "set_classifier"),
         mean_matched=mean_of("hpi_matched", "mean_logreg"),
-        deviations=DEVIATIONS,
+        deviations=cfg["deviations"],
     )
+    fovs = pd.DataFrame(json.loads((work / "folds.json").read_text())["fovs"])
+    ctx["fovs"] = dict(
+        datasets=int(fovs.dataset.nunique()),
+        zikv=int(fovs.well_type.eq("zikv").sum()),
+        control=int(fovs.well_type.eq("control").sum()),
+    )
+    caps = ctx["caps"]
+    smallest = caps.smallest_test_pool[caps.model.eq("infection_classifier") & caps.fold.str.startswith("fold")]
+    ctx["smallest_pool"] = (int(smallest.min()), int(smallest.max()))
+    lineages = pd.read_csv(work / "label_lineages.csv")
+    snapshot = pd.read_parquet(labels_path(cfg), columns=["lineage_uid", "mantis_death"])
+    live = set(snapshot.lineage_uid[~snapshot.mantis_death])
+    represented = pd.read_parquet(work / "cells.parquet", columns=["lineage_uid", "group"])
+    rows = []
+    for cls, group in LINEAGE_GROUP.items():
+        kept = set(lineages.lineage_uid[lineages.kept & lineages.tcn.eq(cls)])
+        rows.append(
+            dict(
+                group=group,
+                kept_lineages=len(kept),
+                with_live_frames=len(kept & live),
+                with_representative=len(kept & set(represented.lineage_uid[represented.group.eq(group)])),
+            )
+        )
+    ctx["lineage_counts"] = pd.DataFrame(rows)
+    ctx["comparison"] = None
+    if cfg["compare_to"] is not None:
+        ctx["comparison"] = comparison_table(cfg)
+        name = f"attempt{cfg['compare_to']['attempt']}_vs_attempt{cfg['attempt']}.csv"
+        ctx["comparison"].to_csv(fig_dir / name, index=False)
+        ctx["comparison_file"] = name
     write_readme(cfg, ctx)
     outputs = {str(p.relative_to(fig_dir)): sha(p) for p in sorted(fig_dir.rglob("*")) if p.is_file()}
     manifest = dict(
@@ -3395,7 +3761,7 @@ def report(cfg):
         analysis_bag_size=a["analysis_bag_size"],
         checkpoint_epochs=a["checkpoint_epochs"],
         baseline_fits=a["baseline_fits"],
-        model_c_m_decision=export_record["model_c_m_decision"],
+        cell_cycle_m_decision=export_record["cell_cycle_m_decision"],
         runs=run_records(work),
         run_context=dict(
             host=cfg["run"]["host"],
@@ -3406,7 +3772,7 @@ def report(cfg):
             threads_per_job=cfg["run"]["threads_per_job"],
             parallel=cfg["run"]["parallel"],
         ),
-        deviations=DEVIATIONS,
+        deviations=cfg["deviations"],
         versions=dict(
             python=platform.python_version(),
             **{
