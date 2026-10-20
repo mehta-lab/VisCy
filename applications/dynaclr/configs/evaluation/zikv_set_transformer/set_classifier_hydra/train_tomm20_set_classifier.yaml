@@ -1,0 +1,45 @@
+# Attempt 25 train config for the pinned OPS set classifier (czbiohub-sf/ops_monorepo@ab11b56, unchanged).
+# Values copy configs/train_set_classifier_phase_1K.yaml. Data come from attempt-25 dumps (load_train_dir /
+# load_val_dir), so the parquet, z-standardization and dump_* keys do not apply. Changed: num_workers 0 (the
+# shared GPU node is limited to 8 threads), seed 42 kept, and the run-specific keys below are set per run by
+# applications/dynaclr/tools/tomm20_set_classifier.py.
+
+name: "attempt25-tomm20-pca80"
+
+seed: 42
+device: "cuda"
+
+data:
+  label_map_path: null
+  max_train_cells: null
+
+n_cells_per_set: 100
+train_n_cell_sets_per_gene: 32
+val_n_cell_sets_per_gene: 5
+channel_drop_fraction: 0.0
+mixed_channels_mode: true
+val_n_cells_per_set: [500, 200]
+phase2d_val: false
+eval_every: 1
+batch_size: 64
+num_epochs: 100
+learning_rate: 1e-4
+weight_decay: 0.0
+max_grad_norm: null
+warmup_epochs: 20
+num_workers: 0
+
+load_train_dir: null
+load_val_dir: null
+save_path: null
+metrics_out: null
+
+model:
+  d_model: 512
+  n_heads: 4
+  d_ff: null
+  dropout: 0.0
+  n_layers_cell: 2
+  n_inducing_cell: 32
+  channel_conditioning: "concat"
+  cosine_classifier: True

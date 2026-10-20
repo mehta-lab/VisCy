@@ -1,0 +1,27 @@
+# Attempt 25 eval config for the pinned OPS set classifier eval.py (czbiohub-sf/ops_monorepo@ab11b56, unchanged).
+# Keys copy configs/eval_set_classifier.yaml. checkpoint_path, val_dump_dir (a held-out test/ dump),
+# output_plot_path, per_class_output_file and n_cells_list are set per run by
+# applications/dynaclr/tools/tomm20_set_classifier.py. Changed: sample_without_replacement true, num_workers 0,
+# show_progress false (log size).
+
+seed: 42
+device: cuda
+
+checkpoint_path: null
+val_dump_dir: null
+output_plot_path: null
+per_class_output_file: null
+
+plot_title: "Attempt 25 held-out test accuracy vs. N cells per set"
+plot_x_log: true
+
+n_cells_list: [1, 2, 5, 10, 25, 50, 100, 200]
+n_repetitions: 30
+sample_without_replacement: true
+
+batch_size: 64
+num_workers: 0
+show_progress: false
+
+mixed_channels_mode: true
+split_channels: false
