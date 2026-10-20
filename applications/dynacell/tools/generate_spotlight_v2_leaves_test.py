@@ -18,6 +18,7 @@ from generate_spotlight_v2_leaves import (
     FORK_CKPTS,
     FORK_SCHEDULES,
     ORGANELLES,
+    P1_FOLLOWUPS,
     POOL,
     SEED_SOURCES,
     SEG_AUX_WEIGHTS,
@@ -64,7 +65,8 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
     segaux 19+76, segauxself 8+32, seed1 9+36, v2 7+28, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
     l1segaux 1+4, l1seed1 1+4, segaux_seed1 10+40, v2_seed1 7+28,
     segaux_halfw 2+8, segaux_doublew 2+8, segaux_sauna 5+20, segaux_sauna_seed1 1+4, segaux_cldice 3+12,
-    segaux_cpout 1+4, bglp 2+8, bgflat 2+8, segcons 3+12, segcons_ctrl 3+12.
+    segaux_cpout 1+4, bglp 2+8, bgflat 2+8, segcons 3+12, segcons_ctrl 3+12, segcons_s1 1+4,
+    segcons_ctrl_s1 1+4, segcons_x10 1+4.
 
     The jointsteps and safecrop probes are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
@@ -94,6 +96,9 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "bgflat": 2,
         "segcons": 3,
         "segcons_ctrl": 3,
+        "segcons_s1": 1,
+        "segcons_ctrl_s1": 1,
+        "segcons_x10": 1,
     }
     assert predicts == {
         "segaux": 76,
@@ -120,6 +125,9 @@ def test_leaf_counts_per_arm(leaves: dict) -> None:
         "bgflat": 8,
         "segcons": 12,
         "segcons_ctrl": 12,
+        "segcons_s1": 4,
+        "segcons_ctrl_s1": 4,
+        "segcons_x10": 4,
     }
 
 
@@ -386,3 +394,37 @@ def test_segcons_builds_with_its_calibrated_weight(baseline: str) -> None:
     assert term.segmenter.checkpoint_tiles == 1
     assert (term.slab_halfwidth, term.crop_size) == (1, 240)
     assert not any(k.startswith("seg_consistency") for k in module.state_dict())
+
+
+@pytest.mark.parametrize("suffix", list(P1_FOLLOWUPS))
+def test_p1_followups_differ_from_their_source_arm_by_fork_seed_or_weight_only(suffix: str) -> None:
+    """Composed: `_s1` = its source arm + the seed1 fork + seed 1; `_x10` = segcons with 10x the weight."""
+    source_suffix, fork_run, seed, factor = P1_FOLLOWUPS[suffix]
+    src, arm = (_load_nucleus_fit(f"pix2pix2d_unetvit_{x}") for x in (source_suffix, suffix))
+    renames, _ = allowed_diff(Arm("pix2pix2d_unetvit", suffix, ("nucleus",), a549=False), "fit")
+    expected = set()
+    if fork_run is not None:
+        expected.add("model.init_args.ckpt_path")
+        assert f"/{fork_run}/checkpoints/" in arm["model"]["init_args"]["ckpt_path"]
+    if seed is not None:
+        expected.add("seed_everything")
+        assert arm["seed_everything"] == seed and src.get("seed_everything") != seed
+    if factor != 1.0:
+        expected.add("model.init_args.seg_consistency_weight")
+        w = arm["model"]["init_args"]["seg_consistency_weight"]
+        assert w == pytest.approx(src["model"]["init_args"]["seg_consistency_weight"] * factor)
+    assert changed_keys(src, arm) - renames == expected
+
+
+def test_p1_replication_control_builds_from_the_seed1_checkpoint() -> None:
+    """The replication fork source exists and loads strictly into the composed segcons_ctrl_s1."""
+    model_cfg = _load_nucleus_fit("pix2pix2d_unetvit_segcons_ctrl_s1")["model"]
+    ckpt = model_cfg["init_args"]["ckpt_path"]
+    if not Path(ckpt).is_file():
+        pytest.skip(f"fork checkpoint not reachable: {ckpt}")
+    module = _instantiate_model(model_cfg)
+    state = torch.load(ckpt, map_location="cpu", weights_only=True, mmap=True)["state_dict"]
+    loaded = module.state_dict()
+    assert loaded.keys() == state.keys()
+    for key, value in state.items():
+        assert torch.equal(loaded[key], value), key

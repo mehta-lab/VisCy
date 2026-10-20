@@ -302,6 +302,18 @@ SEG_CONSISTENCY_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "pix2pix2d_unetvit_segcons"): 0.19,
 }
 _FORK_SUFFIXES: tuple[str, ...] = ("segcons", "segcons_ctrl")
+# P1 pix2pix2d follow-ups (user-approved 2026-10-19; experiments/2026-10-15_conditional-generation-review/p1/
+# PREREG_followups.md): suffix -> (the fork arm it re-runs, fork-source run dir or None for the original, seed or None
+# for the original, seg_consistency_weight factor). `_s1` is a replication pair forked from the converged second
+# baseline draw (pix2pix2d_unetvit_seed1, latest-epoch=39-step=20000 = 40/40 epochs) with fine-tune seed 1 (the
+# original pair used the leaf's 42); `_x10` is the positive control of the hacking check: the original segcons arm at
+# 10x lambda (0.19 -> 1.9), same fork and seed, compared against the existing segcons_ctrl.
+P1_FOLLOWUPS: dict[str, tuple[str, str | None, int | None, float]] = {
+    "segcons_s1": ("segcons", "pix2pix2d_unetvit_seed1", 1, 1.0),
+    "segcons_ctrl_s1": ("segcons_ctrl", "pix2pix2d_unetvit_seed1", 1, 1.0),
+    "segcons_x10": ("segcons", None, None, 10.0),
+}
+FOLLOWUP_FORK_CKPT_NAME = "latest-epoch=39-step=20000.ckpt"
 SAFE_CROP_SIZE = [1, 384, 384]
 MASK_VELOCITY_WEIGHT = 1.0
 # C-cond predict conditions on the same-dimensionality FNet `_segaux` prediction for the
@@ -476,6 +488,8 @@ ARMS: tuple[Arm, ...] = (
     *(Arm("celldiff_2d", s, ORGANELLES, a549=True) for s in BG_TARGET_ARGS),
     # P1 (2026-10-15): segmenter-consistency fine-tunes and their no-term controls, nucleus only.
     *(Arm(m, s, ("nucleus",), a549=True) for m in SEGCONS_BASELINES for s in _FORK_SUFFIXES),
+    # ... and the pix2pix2d follow-ups (P1_FOLLOWUPS): a replication pair and the 10x-lambda positive control.
+    *(Arm("pix2pix2d_unetvit", s, ("nucleus",), a549=True) for s in P1_FOLLOWUPS),
 )
 # Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
 SEED_SOURCES: dict[str, str] = {
@@ -535,6 +549,12 @@ _DESCRIPTION: dict[str, str] = {
         + "), a training-only target transform; validation and prediction see the raw target"
         for suffix, args in BG_TARGET_ARGS.items()
     },
+    "segcons_s1": "the segcons arm's recipe (same lambda 0.19) forked from the converged pix2pix2d_unetvit_seed1 "
+    "checkpoint with seed_everything: 1 (P1 replication draw)",
+    "segcons_ctrl_s1": "the segcons_ctrl fork forked from the converged pix2pix2d_unetvit_seed1 checkpoint with "
+    "seed_everything: 1 (no-term control of segcons_s1)",
+    "segcons_x10": "the segcons arm's recipe with seg_consistency_weight x10 (0.19 -> 1.9): the hacking check's "
+    "positive control, same fork and seed as segcons",
     "segcons_ctrl": "fork: model ckpt_path (the converged baseline checkpoint, weights only) + the fine-tune "
     "budget and LR of FORK_SCHEDULES; no other change (the no-term control of segcons)",
     "segcons": "the segcons_ctrl fork + model seg_consistency (SegConsistencyLoss, Cellpose-SAM cpsam, slab "
@@ -610,6 +630,9 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
         return renames, recipe_keys | {"seed_everything"}
     if arm.suffix in WEIGHT_SCALES:
         return allowed_diff(replace(arm, suffix="segaux"), kind)
+    if arm.suffix in P1_FOLLOWUPS:
+        renames, recipe_keys = allowed_diff(replace(arm, suffix=P1_FOLLOWUPS[arm.suffix][0]), kind)
+        return renames, recipe_keys | ({"seed_everything"} if P1_FOLLOWUPS[arm.suffix][2] is not None else set())
     if arm.suffix == "l1segaux":
         renames, l1_keys = allowed_diff(replace(arm, suffix="l1"), kind)
         return renames, l1_keys | allowed_diff(replace(arm, suffix="segaux"), kind)[1]
@@ -694,6 +717,17 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
     if arm.suffix in WEIGHT_SCALES:
         _apply_recipe(replace(arm, suffix="segaux"), organelle, cfg)
         cfg["model"]["init_args"]["seg_aux_weight"] *= WEIGHT_SCALES[arm.suffix]
+        return
+    if arm.suffix in P1_FOLLOWUPS:
+        source_suffix, fork_run, seed, weight_factor = P1_FOLLOWUPS[arm.suffix]
+        _apply_recipe(replace(arm, suffix=source_suffix), organelle, cfg)
+        model_args = cfg["model"]["init_args"]
+        if fork_run is not None:
+            model_args["ckpt_path"] = f"{MODELS_ROOT}/ipsc/{organelle}/{fork_run}/checkpoints/{FOLLOWUP_FORK_CKPT_NAME}"
+        if seed is not None:
+            cfg["seed_everything"] = seed
+        if weight_factor != 1.0:
+            model_args["seg_consistency_weight"] = round(model_args["seg_consistency_weight"] * weight_factor, 6)
         return
     if arm.suffix == "l1segaux":
         # The l1 recipe plus the segaux terms, at the weight calibrated on the l1 probe.
@@ -852,7 +886,7 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
         lines.append("# Inference is identical to the baseline's; only the checkpoint, store and names differ.")
         if not arm.fit:
             lines.append("# Predict-only arm: the baseline's own last.ckpt, own store; submit with `--ckpt last`.")
-        elif arm.suffix in _FORK_SUFFIXES:
+        elif arm.suffix in _FORK_SUFFIXES or arm.suffix in P1_FOLLOWUPS:
             lines.append("# Fine-tune arm: predict the end of the fine-tune; submit with `--ckpt last`.")
         else:
             lines.append("# ckpt_path is a PLACEHOLDER (last.ckpt): submit with `--ckpt best`, re-bake afterwards.")

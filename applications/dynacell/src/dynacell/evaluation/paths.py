@@ -359,6 +359,11 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_scratch_segcons_ctrl": "unext2_segcons_ctrl",
     "pix2pix2d_unetvit_segcons": "pix2pix2d_segcons",
     "pix2pix2d_unetvit_segcons_ctrl": "pix2pix2d_segcons_ctrl",
+    # P1 pix2pix2d follow-ups (2026-10-19): a replication pair forked from pix2pix2d_unetvit_seed1, and the
+    # 10x-lambda positive control of the hacking check.
+    "pix2pix2d_unetvit_segcons_s1": "pix2pix2d_segcons_s1",
+    "pix2pix2d_unetvit_segcons_ctrl_s1": "pix2pix2d_segcons_ctrl_s1",
+    "pix2pix2d_unetvit_segcons_x10": "pix2pix2d_segcons_x10",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

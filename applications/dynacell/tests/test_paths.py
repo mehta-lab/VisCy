@@ -105,6 +105,9 @@ _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_scratch_segcons_ctrl",
     "pix2pix2d_unetvit_segcons",
     "pix2pix2d_unetvit_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons_s1",
+    "pix2pix2d_unetvit_segcons_ctrl_s1",
+    "pix2pix2d_unetvit_segcons_x10",
 )
 # Spotlight-v2 post-hoc control stores (no training leaf): each 3D nucleus baseline
 # histogram-matched to its segaux arm. Same longest-prefix hazard as the arms.

@@ -1131,7 +1131,7 @@ _WIDE_GPU_TRAIN_LEAVES = (
         # starting weights. The segcons arm adds cpsam: ~1.2 GB of bf16 weights plus ~0.07 GB per
         # sample with per-tile checkpointing (A40 bench, 2026-10-15), so ~15 GiB/rank at bs=4.
         f"nucleus/pix2pix2d_unetvit_{suffix}/ipsc_confocal/train.yml"
-        for suffix in ("segcons", "segcons_ctrl")
+        for suffix in ("segcons", "segcons_ctrl", "segcons_s1", "segcons_ctrl_s1", "segcons_x10")
     )
 )
 _WIDE_GPU_EXTRA = frozenset({"a40", "a6000", "l40s"})

@@ -145,6 +145,9 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto3d_scratch_segcons_ctrl": "unext2_segcons_ctrl",
     "pix2pix2d_unetvit_segcons": "pix2pix2d_segcons",
     "pix2pix2d_unetvit_segcons_ctrl": "pix2pix2d_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons_s1": "pix2pix2d_segcons_s1",
+    "pix2pix2d_unetvit_segcons_ctrl_s1": "pix2pix2d_segcons_ctrl_s1",
+    "pix2pix2d_unetvit_segcons_x10": "pix2pix2d_segcons_x10",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -254,6 +257,9 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_scratch_segcons_ctrl",
     "pix2pix2d_unetvit_segcons",
     "pix2pix2d_unetvit_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons_s1",
+    "pix2pix2d_unetvit_segcons_ctrl_s1",
+    "pix2pix2d_unetvit_segcons_x10",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = (
     "celldiff_2d_segauxself",
