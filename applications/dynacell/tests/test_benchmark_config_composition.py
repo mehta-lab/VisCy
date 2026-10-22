@@ -1133,6 +1133,16 @@ _WIDE_GPU_TRAIN_LEAVES = (
         f"nucleus/pix2pix2d_unetvit_{suffix}/ipsc_confocal/train.yml"
         for suffix in ("segcons", "segcons_ctrl")
     )
+    | frozenset(
+        # Warmup-matched refit of every baseline fit, plus its second draw: only
+        # warmup_steps (and the seed) change, so the bs=4 footprint is the baseline's.
+        f"{organelle}/pix2pix2d_unetvit_wmatch/{pool}/train.yml"
+        for organelle in ("nucleus", "membrane", "er", "mito")
+        for pool in ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
+    )
+    | frozenset(
+        f"{organelle}/pix2pix2d_unetvit_wmatch_seed1/ipsc_confocal/train.yml" for organelle in ("nucleus", "membrane")
+    )
 )
 _WIDE_GPU_EXTRA = frozenset({"a40", "a6000", "l40s"})
 

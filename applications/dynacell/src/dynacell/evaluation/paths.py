@@ -227,6 +227,11 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto2d_scratch_samplematched": "unext2_2d_samplematched",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
+    # pix2pix2d refit with warmup matched to Run-D's schedule shape (the baseline's
+    # absolute 8500-batch warmup left 5 of 12 2D fits still warming up), and its
+    # second draw. Own keys for the longest-prefix reason given below.
+    "pix2pix2d_unetvit_wmatch": "pix2pix2d_wmatch",
+    "pix2pix2d_unetvit_wmatch_seed1": "pix2pix2d_wmatch_seed1",
     # Spotlight-loss arms (masked MSE + soft-Dice, Otsu-centred target), iPSC-trained
     # nucleus + membrane. Each is a recipe variant of the baseline directly above it,
     # so it needs its own key: `canonical_model_name` resolves by LONGEST PREFIX, and

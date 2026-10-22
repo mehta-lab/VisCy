@@ -74,6 +74,10 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto2d_scratch_samplematched": "unext2_2d_samplematched",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
+    # Warmup-matched pix2pix2d refit and its second draw. Parse-only registration,
+    # same rule as fnet2d_voxelmatched: evaluate in focused sibling buckets.
+    "pix2pix2d_unetvit_wmatch": "pix2pix2d_wmatch",
+    "pix2pix2d_unetvit_wmatch_seed1": "pix2pix2d_wmatch_seed1",
     # Spotlight-loss arms (iPSC-trained nucleus + membrane). Must agree with
     # PAPER_KEY in dynacell.evaluation.paths -- test_paper_key_maps_agree_on_overlap
     # pins the two maps against each other.
