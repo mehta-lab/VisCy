@@ -1,0 +1,44 @@
+# pix2pix2d `wmatch_seed1` arm (predict) of membrane/pix2pix2d_unetvit/ipsc_confocal/predict__a549_mantis_mock.yml.
+# Checkpoint: the arm's best loss/validate_ema epoch, from a fit whose log reads
+# `Trainer.fit stopped: max_epochs=40 reached`. Output store, run root and job name
+# gain the arm name; the slab3 predict_z_planes and everything else are the baseline's.
+# Written by applications/dynacell/experiments/2026-10-22_2d-benchmark-paper-appendix/make_wmatch_predict_and_buckets.py.
+base:
+- ../../../_internal/shared/model/predict_sets/a549_mantis_caax_mock.yml
+- ../../../_internal/shared/model/targets/membrane.yml
+- ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_predict.yml
+- ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+- ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+- ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_caax_mock
+  model_name: pix2pix2d_unetvit_wmatch_seed1
+  experiment_id: membrane__ipsc_confocal__pix2pix2d_unetvit_wmatch_seed1__a549_mantis_caax_mock
+  dataset_ref:
+    target: caax
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/pix2pix2d_unetvit_wmatch_seed1/checkpoints/epoch=24-step=12500-loss=0.469.ckpt
+data:
+  init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/membrane/a549__mock__h1.json
+    normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys:
+        - Phase3D
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    augmentations: []
+trainer:
+  callbacks:
+  - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+    init_args:
+      output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__mock/prediction.zarr
+launcher:
+  job_name: pix2pix2d_unetvit_wmatch_seed1_PRED_MEMB_ON_A549_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__mock
