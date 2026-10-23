@@ -11,6 +11,7 @@ from iohub import open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
+from viscy_data.sliding_window import SlidingWindowDataset
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in
 from viscy_utils.prediction_metadata import (
     PREDICTED_Z_PLANES_KEY,
@@ -280,6 +281,30 @@ def test_buffered_volume_takes_the_dtype_of_an_existing_array(tmp_path):
         stores[writer_cls] = _read_store(output)
     assert {voxels.dtype for voxels, _, _ in stores[HCSPredictionWriter].values()} == {np.dtype(np.float32)}
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+def test_cached_volume_windows_equal_per_window_reads(tmp_path):
+    """Windows cut from a cached (position, t) volume equal windows read from zarr one by one."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    with open_ome_zarr(source, mode="r") as plate:
+        positions = [position for _, position in plate.positions()]
+        datasets = [
+            SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase3D", "Nuclei"]},
+                z_window_size=4,
+                load_normalization_metadata=False,
+                cache_volume=cache_volume,
+            )
+            for cache_volume in (False, True)
+        ]
+        assert len(datasets[0]) == len(datasets[1]) == 2 * 2 * 8
+        for index in range(len(datasets[0])):
+            reference, cached = datasets[0][index], datasets[1][index]
+            assert reference["index"] == cached["index"]
+            assert torch.equal(reference["source"], cached["source"])
+        assert datasets[1]._volume_key is not None
 
 
 class _OnesModule(LightningModule):
