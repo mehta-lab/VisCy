@@ -143,8 +143,7 @@ def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
 # predicted voxels. ``data_path`` is among them: the marker records the source
 # shape, and a moved input must still resume. ``predict_z_planes`` names a file
 # whose content the run identity hashes separately (``z_planes_sha256_12``), so
-# a moved or copied plane file must still resume too. ``predict_read_once`` only
-# changes how often zarr is read and written; the voxels are bitwise identical.
+# a moved or copied plane file must still resume too.
 _LOADING_ONLY_DATA_ARGS = frozenset(
     {
         "data_path",
@@ -169,7 +168,6 @@ _LOADING_ONLY_DATA_ARGS = frozenset(
         "max_nonzero_retries",
         "fg_mask_key",
         "predict_z_planes",
-        "predict_read_once",
     }
 )
 

@@ -125,12 +125,6 @@ class HCSDataModule(LightningDataModule):
         the in-focus slab of a 2D model. Requires ``z_window_size == 1``. The
         prediction writer allocates the full source shape and records the planes
         on each position. Default None predicts every plane. Predict only.
-    predict_read_once : bool, optional
-        Read each (position, timepoint) volume once and cut its depth windows from
-        memory, and have :class:`~viscy_utils.callbacks.HCSPredictionWriter` assemble
-        the volume in memory and write it once, instead of a zarr read and a zarr
-        write per window. The predictions are bitwise identical either way. Ignored
-        with ``predict_z_planes``. Default True. Predict only.
     """
 
     def __init__(
@@ -164,7 +158,6 @@ class HCSDataModule(LightningDataModule):
         include_fov_names: Iterable[str] | None = None,
         exclude_fov_names: Iterable[str] | None = None,
         predict_z_planes: str | Path | None = None,
-        predict_read_once: bool = True,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -200,7 +193,6 @@ class HCSDataModule(LightningDataModule):
         self.include_fov_names = set(include_fov_names) if include_fov_names is not None else None
         self.exclude_fov_names = set(exclude_fov_names) if exclude_fov_names is not None else None
         self.predict_z_planes = Path(predict_z_planes) if predict_z_planes is not None else None
-        self.predict_read_once = predict_read_once
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         if val_gpu_augmentations and self.fg_mask_key is not None:
@@ -691,7 +683,9 @@ class HCSDataModule(LightningDataModule):
             positions=self._positions_maybe_single(),
             transform=predict_transform,
             z_planes=z_planes,
-            cache_volume=self.predict_read_once and z_planes is None,
+            # Read each volume once and cut its depth windows from memory; a plane
+            # selection reads single planes, where a whole-volume read would only cost.
+            cache_volume=z_planes is None,
             **dataset_settings,
         )
 

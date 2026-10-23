@@ -133,11 +133,10 @@ class HCSPredictionWriter(BasePredictionWriter):
     appended to the store without cross-rank coordination, so a multi-device
     predict is refused before the store is opened.
 
-    With ``HCSDataModule.predict_read_once`` (the default) each (position,
-    timepoint) volume is assembled in memory from its depth windows and written
-    once, when its last window arrives (or at predict end), instead of a zarr
-    read-modify-write per window. The voxels are bitwise identical either way.
-    Not used with ``write_input``, ``target_2d`` padding or ``predict_z_planes``.
+    Each (position, timepoint) volume is assembled in memory from its depth
+    windows and written once, when its last window arrives (or at predict end),
+    instead of a zarr read-modify-write per window; the stored bytes are the
+    same. ``write_input`` keeps the per-window writes.
 
     Parameters
     ----------
@@ -274,11 +273,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         # planes are predicted, the rest keep the fill value, and the planes are part
         # of the run identity so a resume never mixes them with another selection.
         self._z_planes = dm.predict_dataset.z_planes
-        # HCSDataModule.predict_read_once: assemble each (position, timepoint) volume in
-        # memory and write it once, instead of a zarr read-modify-write per depth window.
-        self._write_once = (
-            dm.predict_read_once and self.z_padding == 0 and self._z_planes is None and not self.write_input
-        )
+        # write_input stores source/target slices beside each window, so it writes per window.
+        self._write_once = not self.write_input
         self._volumes: dict[tuple[str, int], tuple[NDArray, int]] = {}
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
@@ -500,11 +496,13 @@ class HCSPredictionWriter(BasePredictionWriter):
         # account for lost slices in 2.5D
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
+        # Blend reads and the write go to the in-memory volume, or to the store per window.
         if self._write_once:
-            volume = self._buffer_volume(img_name, t_index, sample_prediction, z_slice.stop)
+            dest, lead = self._buffer_volume(img_name, t_index, sample_prediction, z_slice.stop), (slice(None),)
         else:
             image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
             _resize_image(image, t_index, z_slice)
+            dest, lead = image.oindex, (t_index, self.prediction_index)
         if self.write_input:
             source_stack = batch["source"][sample_index].cpu()
             center_slice_index = source_stack.shape[-3] // 2
@@ -514,11 +512,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         # write CZYX
         if self.z_padding == 0 and sample_prediction.shape[-3] > 1:
             if self.z_reduction == "blend":
-                if self._write_once:
-                    old_stack = volume[:, z_slice]
-                else:
-                    old_stack = image.oindex[t_index, self.prediction_index, z_slice]
-                sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
+                sample_prediction = _blend_in(dest[(*lead, z_slice)], sample_prediction, z_slice)
             else:
                 # Drop the planes before this window's center: the window centered on
                 # each of them writes it later and wins. The first window keeps all of
@@ -526,11 +520,8 @@ class HCSPredictionWriter(BasePredictionWriter):
                 keep = 0 if z_index == 0 else sample_prediction.shape[-3] // 2
                 sample_prediction = sample_prediction[..., keep:, :, :]
                 z_slice = slice(z_slice.start + keep, z_slice.stop)
-        if self._write_once:
-            # Casts like the zarr write does, so blending reads back what the store would hold.
-            volume[:, z_slice] = sample_prediction
-        else:
-            image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
+        # Casts like the zarr write does, so blending reads back what the store would hold.
+        dest[(*lead, z_slice)] = sample_prediction
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
         if self._write_once and written[t_index].all():
@@ -582,10 +573,9 @@ class HCSPredictionWriter(BasePredictionWriter):
             Timepoint of the volume.
         """
         volume, stop = self._volumes.pop((img_name, t_index))
-        planes = volume[:, :stop]
-        image = self._create_image(img_name, planes.shape, planes.dtype)
+        image = self._create_image(img_name, volume[:, :stop].shape, volume.dtype)
         _resize_image(image, t_index, slice(0, stop))
-        image.oindex[t_index, self.prediction_index, slice(0, stop)] = planes
+        image.oindex[t_index, self.prediction_index, slice(0, stop)] = volume[:, :stop]
 
     def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
         """Return whether the existing output array outruns this run's source in T or Z.

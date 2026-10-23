@@ -148,64 +148,106 @@ def test_completion_helpers_keep_other_channels(tmp_path):
 
 
 class _WindowFunctionModule(LightningModule):
-    """Predict a nonlinear function of each window's input and position, so blending and window order matter."""
+    """Predict a nonlinear function of each window's input and position, so blending and window order matter.
+
+    ``center_plane`` returns only the window's center plane (a 2D model, ``target_2d``).
+    """
+
+    def __init__(self, center_plane: bool = False) -> None:
+        super().__init__()
+        self.center_plane = center_plane
 
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
         source = batch["source"]
         offsets = torch.arange(source.shape[-3], dtype=source.dtype, device=source.device).view(1, 1, -1, 1, 1)
         starts = torch.as_tensor([int(z) for z in batch["index"][2]], dtype=source.dtype, device=source.device)
-        return torch.sin(source * (1.0 + 0.1 * offsets)) + 0.01 * starts.view(-1, 1, 1, 1, 1)
+        out = torch.sin(source * (1.0 + 0.1 * offsets)) + 0.01 * starts.view(-1, 1, 1, 1, 1)
+        if self.center_plane:
+            mid = out.shape[-3] // 2
+            out = out[:, :, mid : mid + 1]
+        return out
 
 
-@pytest.mark.parametrize("z_reduction", ["blend", "center"])
+class _PerWindowWriter(HCSPredictionWriter):
+    """Reference: the per-window zarr read-modify-write (the ``write_input`` path) in every mode."""
+
+    def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        super().on_predict_start(trainer, pl_module)
+        self._write_once = False
+
+
+#: Per-timepoint planes of the two FOVs of ``_write_random_source``.
+RANDOM_SOURCE_PLANES = {"0/0/0": [[0, 1, 2], [4, 5, 6]], "0/0/1": [[8, 9, 10], [3, 4, 5]]}
+
+
+def _write_random_source(path) -> None:
+    """Two FOVs of random ``(2, 2, 11, 8, 8)`` float32 Phase3D/Nuclei."""
+    rng = np.random.default_rng(0)
+    with open_ome_zarr(path, layout="hcs", mode="w-", channel_names=["Phase3D", "Nuclei"]) as plate:
+        for fov in RANDOM_SOURCE_PLANES:
+            plate.create_position(*fov.split("/")).create_image(
+                "0", rng.normal(size=(2, 2, 11, 8, 8)).astype(np.float32)
+            )
+
+
+def _read_store(path) -> dict:
+    with open_ome_zarr(path, mode="r") as plate:
+        return {name: (np.asarray(pos["0"]), pos["0"].chunks, dict(pos.zattrs)) for name, pos in plate.positions()}
+
+
+def _assert_same_bytes(reference: dict, buffered: dict) -> None:
+    assert buffered.keys() == reference.keys()
+    for name, (voxels, chunks, attrs) in reference.items():
+        new_voxels, new_chunks, new_attrs = buffered[name]
+        assert (new_voxels.shape, new_voxels.dtype, new_chunks) == (voxels.shape, voxels.dtype, chunks)
+        assert new_voxels.tobytes() == voxels.tobytes()
+        assert new_attrs == attrs
+
+
+@pytest.mark.parametrize("mode", ["blend", "center", "target_2d", "z_planes"])
 @pytest.mark.parametrize("batch_size", [1, 3])
 @pytest.mark.parametrize("limit_batches", [None, 5])
-def test_read_once_predict_is_bitwise_identical_to_per_window_io(tmp_path, z_reduction, batch_size, limit_batches):
-    """Reading each volume once and writing it once stores the same bytes and markers as per-window zarr I/O.
+def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mode, batch_size, limit_batches):
+    """Assembling each volume in memory and writing it once stores the bytes and markers per-window writes store.
 
+    Covers 3D windows (blend, center), a 2D model's padded center plane (``target_2d``) and a plane selection.
     ``limit_batches=5`` stops inside a volume, so the partial volume flushed at predict end is compared too.
     """
     source = tmp_path / "source.zarr"
-    rng = np.random.default_rng(0)
-    with open_ome_zarr(source, layout="hcs", mode="w-", channel_names=["Phase3D", "Nuclei"]) as plate:
-        for fov in ("0", "1"):
-            plate.create_position("0", "0", fov).create_image("0", rng.normal(size=(2, 2, 11, 8, 8)).astype(np.float32))
+    _write_random_source(source)
+    planes_file = None
+    if mode == "z_planes":
+        planes_file = tmp_path / "planes.json"
+        planes_file.write_text(json.dumps({"positions": RANDOM_SOURCE_PLANES}))
     stores = {}
-    for read_once in (False, True):
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
         data_module = HCSDataModule(
             data_path=str(source),
             source_channel=["Phase3D"],
             target_channel=["Nuclei"],
-            z_window_size=4,
+            z_window_size=1 if mode == "z_planes" else 4,
+            target_2d=mode == "target_2d",
             batch_size=batch_size,
             num_workers=0,
             yx_patch_size=[8, 8],
             normalizations=[],
             augmentations=[],
-            predict_read_once=read_once,
+            predict_z_planes=planes_file,
         )
-        output = tmp_path / f"pred_{read_once}.zarr"
-        writer = HCSPredictionWriter(str(output), z_reduction=z_reduction)
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        writer = writer_cls(str(output), z_reduction="center" if mode == "center" else "blend")
         Trainer(
             accelerator="cpu",
             logger=False,
             enable_progress_bar=False,
             limit_predict_batches=limit_batches,
             callbacks=[writer],
-        ).predict(_WindowFunctionModule(), datamodule=data_module, return_predictions=False)
-        # Both paths ran: the dataset cut windows from a cached volume, the writer buffered volumes.
-        assert writer._write_once is read_once
-        assert (data_module.predict_dataset._volume_key is not None) is read_once
-        with open_ome_zarr(output, mode="r") as plate:
-            stores[read_once] = {
-                name: (np.asarray(pos["0"]), pos["0"].chunks, dict(pos.zattrs)) for name, pos in plate.positions()
-            }
-    assert stores[True].keys() == stores[False].keys()
-    for name, (voxels, chunks, attrs) in stores[False].items():
-        new_voxels, new_chunks, new_attrs = stores[True][name]
-        assert (new_voxels.shape, new_voxels.dtype, new_chunks) == (voxels.shape, voxels.dtype, chunks)
-        assert new_voxels.tobytes() == voxels.tobytes()
-        assert new_attrs == attrs
+        ).predict(
+            _WindowFunctionModule(center_plane=mode == "target_2d"), datamodule=data_module, return_predictions=False
+        )
+        assert writer._write_once is (writer_cls is HCSPredictionWriter)
+        stores[writer_cls] = _read_store(output)
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
 
 
 class _OnesModule(LightningModule):
