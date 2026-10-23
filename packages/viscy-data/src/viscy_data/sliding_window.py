@@ -99,9 +99,9 @@ class SlidingWindowDataset(Dataset):
         otherwise read each plane once per window covering it. Pays off when the
         windows of a volume are requested consecutively (the sequential predict
         loader); random access (training) would read a whole volume per window.
-        Each DataLoader worker keeps its own copy, so with ``num_workers > 0`` a
-        volume is read up to once per worker. Not combinable with
-        ``fg_mask_key``. Default False.
+        Each DataLoader worker would keep its own copy and read the whole volume,
+        so :class:`HCSDataModule` enables it only with ``num_workers == 0``. Not
+        combinable with ``fg_mask_key``. Default False.
     """
 
     def __init__(
