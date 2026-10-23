@@ -1,0 +1,20 @@
+# Hardware profile: one H100 for a CELL-Diff predict on the DynaCell-lite test set
+# with the fast recipe (model_overlays/celldiff_predict_lite.yml).
+#
+# Sized from measurement (experiments/2026-10-01_celldiff-fast-inference): one lite
+# condition takes 5-35 min on an H100 (A549 conditions are the long ones). 2 h is
+# >3x that; production CELL-Diff predicts keep hardware_predict_celldiff.yml.
+# Peak RSS was 5.3-6.2 GB, so 32G is ample; larger requests miss H100 nodes whose
+# memory is otherwise allocated.
+# Pinned to H100 because the 2 h per-fit target is an H100 number; other GPUs run it
+# correctly, just slower.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 16
+    gpus: 1
+    mem: "32G"
+    constraint: "h100"
+    time: "02:00:00"

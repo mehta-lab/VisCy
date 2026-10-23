@@ -17,6 +17,21 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
 
+from viscy_utils.prediction_metadata import (
+    PREDICTION_COMPLETE_KEY,
+    canonical_z_planes,
+    checkpoint_signature,
+    completion_marker,
+    mark_complete,
+    mark_started,
+    outruns,
+    predicted_z_planes,
+    prediction_run,
+    record_z_planes,
+    same_run,
+    tzyx_shape,
+    z_planes_sha256_12,
+)
 from viscy_utils.tensor_utils import to_numpy
 
 if TYPE_CHECKING:
@@ -114,6 +129,17 @@ def _blend_in(
 class HCSPredictionWriter(BasePredictionWriter):
     """Callback to store virtual staining predictions as HCS OME-Zarr.
 
+    Single-process only: completion is tracked per process and channels are
+    appended to the store without cross-rank coordination, so a multi-device
+    predict is refused before the store is opened.
+
+    Each (position, timepoint) volume is assembled in memory from its depth
+    windows and written once, when its last window arrives (or at predict end),
+    instead of a zarr read-modify-write per window; the stored bytes are the
+    same. ``write_input`` and plane-restricted predicts (``predict_z_planes``) keep
+    the per-window writes: the first stores slices beside each window, and the
+    second writes single planes, which a volume flush would fill in between.
+
     Parameters
     ----------
     output_store : str
@@ -126,6 +152,52 @@ class HCSPredictionWriter(BasePredictionWriter):
         (must be writing to a new store), by default False.
     write_interval : {'batch', 'epoch', 'batch_and_epoch'}, optional
         When to write, by default "batch".
+    z_reduction : {'blend', 'center'}, optional
+        How to combine the depth windows that cover one output plane, by
+        default "blend".
+
+        ``'blend'`` feathers each window in with :func:`_blend_in`. With the
+        usual stride-1 depth windows that recurrence is the incremental mean,
+        so every plane ends up the *unweighted mean of ``z_window_size``
+        forward passes*. That is a real sharpness cost for a generative model:
+        on an iPSC-trained pix2pix3d membrane prediction the mean over 8
+        windows halves the mid-band power relative to a single pass
+        (0.045 -> 0.021 of ground truth), and because all 8 share one XY grid
+        it cancels none of the decoder's XY lattice.
+
+        ``'center'`` writes each window from its center plane onward, so a
+        later window overwrites everything but that center plane and the
+        volume is assembled one plane per forward pass with no averaging.
+        The leading ``z_window_size // 2`` planes come from the first window
+        and the trailing ``z_window_size - 1 - z_window_size // 2`` from the
+        last, since no window is centered on them. For odd ``z_window_size``
+        that trailing count equals ``z_window_size // 2`` -- at ``w=5`` it is
+        2, not 1. Every dynacell leaf that sets ``z_window_size`` uses an odd
+        value.
+
+        Both modes assume windows arrive in increasing ``z`` order within a
+        ``(position, timepoint)`` -- ``'blend'`` because its factors are
+        derived from ``z_slice.start``, ``'center'`` because it relies on
+        last-write-wins. The predict dataloader is sequential and iterates
+        ``z`` innermost, which is what makes that hold.
+    checkpoint_path : str or None, optional
+        Checkpoint the model predicts with. Its path and content hash are
+        recorded in every FOV's completion marker, so a resume can tell
+        predictions made with different weights apart and refuses to mix
+        them in one store. The file's size and mtime are taken when the
+        writer is constructed -- the same instantiation pass that loads the
+        model's weights -- and ``on_predict_start`` refuses a file changed
+        since, so the recorded hash names the bytes the model loaded rather
+        than whatever sits at the path later. Default None records no
+        checkpoint.
+    settings_sha256_12 : str or None, optional
+        Hash of the other settings that shape the predicted voxels (model
+        inference arguments, input normalization, precision), recorded in the
+        marker alongside the checkpoint so a resume with the same weights but
+        other settings is refused as well. The submitter computes it from the
+        resolved config (``submit_benchmark_job.prediction_settings_sha256_12``);
+        the writer cannot derive it from live objects. Default None records
+        none.
     """
 
     def __init__(
@@ -134,11 +206,20 @@ class HCSPredictionWriter(BasePredictionWriter):
         overwrite: bool = False,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
+        z_reduction: Literal["blend", "center"] = "blend",
+        checkpoint_path: str | None = None,
+        settings_sha256_12: str | None = None,
     ) -> None:
         super().__init__(write_interval)
+        if z_reduction not in ("blend", "center"):
+            raise ValueError(f"z_reduction must be 'blend' or 'center', got {z_reduction!r}")
         self.output_store = output_store
         self.overwrite = overwrite
         self.write_input = write_input
+        self.z_reduction = z_reduction
+        self.checkpoint_path = checkpoint_path
+        self._checkpoint_signature = None if checkpoint_path is None else checkpoint_signature(checkpoint_path)
+        self.settings_sha256_12 = settings_sha256_12
         self._dataset_scale = None
 
     def _get_scale_metadata(self, metadata_store: os.PathLike | None) -> None:
@@ -169,6 +250,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         pl_module : LightningModule
             The Lightning module being used for prediction.
         """
+        if trainer.world_size > 1:
+            raise NotImplementedError(
+                f"HCSPredictionWriter tracks completion per process and appends channels without "
+                f"cross-rank coordination; run predict on a single device (got world_size={trainer.world_size})."
+            )
         dm: HCSDataModule = trainer.datamodule
         self._get_scale_metadata(dm.data_path)
         self.z_padding = dm.z_window_size // 2 if dm.target_2d else 0
@@ -176,16 +262,64 @@ class HCSPredictionWriter(BasePredictionWriter):
         source_channel = dm.source_channel
         target_channel = dm.target_channel
         prediction_channel = [ch + "_prediction" for ch in target_channel]
+        self._prediction_channels = prediction_channel
+        if (
+            self.checkpoint_path is not None
+            and checkpoint_signature(self.checkpoint_path) != self._checkpoint_signature
+        ):
+            raise RuntimeError(
+                f"Checkpoint '{self.checkpoint_path}' changed since this writer was constructed alongside the "
+                "model, so its hash would not name the weights actually loaded. Restart the predict."
+            )
+        # Plane-restricted predict (HCSDataModule.predict_z_planes): only the listed
+        # planes are predicted, the rest keep the fill value, and the planes are part
+        # of the run identity so a resume never mixes them with another selection.
+        self._z_planes = dm.predict_dataset.z_planes
+        # write_input stores source/target slices beside each window, and a plane selection
+        # writes single planes that a [first, last] flush would fill in between: both write
+        # per window.
+        self._write_once = not self.write_input and self._z_planes is None
+        self._volumes: dict[tuple[str, int], tuple[NDArray, int, int]] = {}
+        # Hashes the checkpoint once; every FOV's marker records this identity.
+        self._run = prediction_run(
+            array_key=dm.array_key,
+            z_window_size=dm.z_window_size,
+            z_reduction=self.z_reduction,
+            checkpoint_path=self.checkpoint_path,
+            settings_sha256_12=self.settings_sha256_12,
+            z_planes_sha256_12=None if self._z_planes is None else z_planes_sha256_12(self._z_planes),
+        )
+        window_arrays = dm.predict_dataset.window_arrays
+        self._source_shapes = {f"/{array.path}": tzyx_shape(array) for array in window_arrays}
+        # Array dimensions grow before writes, so only a successful write of every
+        # distinct (T, Z-window) establishes completion, including overlapping windows.
+        # A plane-restricted run marks the windows it skips as written up front.
+        self._written_windows: dict[str, NDArray[np.bool_]] = {}
+        for array in window_arrays:
+            written = np.zeros((array.frames, array.slices - dm.z_window_size + 1), dtype=bool)
+            if self._z_planes is not None:
+                written[:] = True
+                for t, planes in enumerate(self._z_planes[array.path.rsplit("/", 1)[0]]):
+                    written[t, list(planes)] = False
+            self._written_windows[f"/{array.path}"] = written
+        run_positions = {array.path.rsplit("/", 1)[0] for array in window_arrays}
         if os.path.exists(self.output_store):
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
             else:
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
                 # Validate all positions before mutating any.
-                needs_append: list[tuple[Position, list[str]]] = []
-                for _, pos in self.plate.positions():
+                positions = dict(self.plate.positions())
+                needs_append: list[tuple[str, list[str]]] = []
+                overwritten: list[str] = []
+                mixed: list[str] = []
+                oversized: list[str] = []
+                foreign: list[str] = []
+                channel_orders: set[tuple[str, ...]] = set()
+                for name, pos in positions.items():
                     existing = set(pos.channel_names)
                     missing = [ch for ch in prediction_channel if ch not in existing]
+                    channel_orders.add((*pos.channel_names, *missing))
                     for ch in prediction_channel:
                         if ch in existing and not self.overwrite:
                             self.plate.close()
@@ -201,10 +335,67 @@ class HCSPredictionWriter(BasePredictionWriter):
                                 self.output_store,
                             )
                     if missing:
-                        needs_append.append((pos, missing))
-                for pos, channels in needs_append:
+                        needs_append.append((name, missing))
+                    if name in run_positions:
+                        overwritten.append(name)
+                        if self._outruns_source(pos, name, dm.array_key):
+                            oversized.append(name)
+                        if self._holds_other_planes(pos, name, prediction_channel):
+                            foreign.append(name)
+                    elif self._cannot_share(pos, prediction_channel):
+                        mixed.append(name)
+                if oversized:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(oversized)} FOVs in '{self.output_store}' hold more timepoints or depth "
+                        f"slices than their source (e.g. {oversized[:3]}); arrays only grow, so the stale "
+                        "planes would survive every rewrite yet the FOVs would be marked complete. "
+                        "Predict into a new output store."
+                    )
+                if foreign:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(foreign)} FOVs in '{self.output_store}' hold {prediction_channel} that another run "
+                        f"predicted on other planes (e.g. {foreign[:3]}); a plane-restricted predict rewrites only "
+                        "its own planes, so remove that store (or predict into a new one) first."
+                    )
+                if mixed:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(mixed)} FOVs outside this run already hold {prediction_channel} "
+                        f"in '{self.output_store}' that were predicted before completion markers "
+                        f"existed or with a different checkpoint or settings (e.g. {mixed[:3]}); "
+                        "predict into a new output store instead of mixing them."
+                    )
+                if len(channel_orders) > 1:
+                    self.plate.close()
+                    raise ValueError(
+                        f"Positions of '{self.output_store}' would disagree on channel order after "
+                        f"appending {prediction_channel} ({sorted(channel_orders)}); the writer addresses "
+                        "channels by one plate-wide index. Predict into a new output store."
+                    )
+                # A started marker names this run as the writer of a channel's voxels.
+                # Run positions get one for every prediction channel: this run
+                # replaces their voxels, so an interrupted run must never reuse an
+                # old completion, and the next resume sees unfinished FOVs, not
+                # legacy ones. FOVs outside the run (e.g. excluded on resume) keep
+                # their markers, except for the channels appended below: those hold
+                # zeros this run allocated, and without a marker a later resume
+                # could not tell them from data predicted before markers existed.
+                started = {name: prediction_channel for name in overwritten}
+                for name, channels in needs_append:
+                    started.setdefault(name, channels)
                     for ch in channels:
-                        pos.append_channel(ch, resize_arrays=True)
+                        positions[name].append_channel(ch, resize_arrays=True)
+                if needs_append:
+                    # Plate.channel_names is cached from the first position when the
+                    # store is opened; reopen so channel indices and positions created
+                    # later in this run see the appended channel.
+                    self.plate.close()
+                    self.plate = open_ome_zarr(self.output_store, mode="r+")
+                    positions = {name: self.plate[name] for name in started}
+                for name, channels in started.items():
+                    mark_started(positions[name], channels, self._run)
         else:
             channel_names = prediction_channel
             if self.write_input:
@@ -279,6 +470,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         pl_module : LightningModule
             The Lightning module.
         """
+        for img_name, t_index in list(self._volumes):
+            self._flush_volume(img_name, t_index)
         self.plate.close()
 
     def write_sample(
@@ -303,11 +496,17 @@ class HCSPredictionWriter(BasePredictionWriter):
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
         z_index = int(z_index)
+        window_z_index = z_index
         # account for lost slices in 2.5D
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
-        image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
-        _resize_image(image, t_index, z_slice)
+        # Blend reads and the write go to the in-memory volume, or to the store per window.
+        if self._write_once:
+            dest, lead = self._buffer_volume(img_name, t_index, sample_prediction, z_slice), (slice(None),)
+        else:
+            image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
+            _resize_image(image, t_index, z_slice)
+            dest, lead = image.oindex, (t_index, self.prediction_index)
         if self.write_input:
             source_stack = batch["source"][sample_index].cpu()
             center_slice_index = source_stack.shape[-3] // 2
@@ -316,9 +515,147 @@ class HCSPredictionWriter(BasePredictionWriter):
                 image[t_index, self.target_index, z_index] = batch["target"][sample_index][:, center_slice_index].cpu()
         # write CZYX
         if self.z_padding == 0 and sample_prediction.shape[-3] > 1:
-            old_stack = image.oindex[t_index, self.prediction_index, z_slice]
-            sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
-        image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
+            if self.z_reduction == "blend":
+                sample_prediction = _blend_in(dest[(*lead, z_slice)], sample_prediction, z_slice)
+            else:
+                # Drop the planes before this window's center: the window centered on
+                # each of them writes it later and wins. The first window keeps all of
+                # them because nothing is centered on the leading planes.
+                keep = 0 if z_index == 0 else sample_prediction.shape[-3] // 2
+                sample_prediction = sample_prediction[..., keep:, :, :]
+                z_slice = slice(z_slice.start + keep, z_slice.stop)
+        # The buffer has the store's dtype, so this casts like the zarr write and blending
+        # reads back what the store would hold.
+        dest[(*lead, z_slice)] = sample_prediction
+        written = self._written_windows[img_name]
+        written[t_index, window_z_index] = True
+        if self._write_once and written[t_index].all():
+            self._flush_volume(img_name, t_index)
+        if written.all():
+            name = img_name.strip("/").rsplit("/", 1)[0]
+            position = self.plate[name]
+            planes = None if self._z_planes is None else self._z_planes[name]
+            record_z_planes(position, self._prediction_channels, planes)
+            marker = completion_marker(self._source_shapes[img_name], self._run)
+            mark_complete(position, self._prediction_channels, marker)
+
+    def _buffer_volume(self, img_name: str, t_index: int, sample_prediction: NDArray, z_slice: slice) -> NDArray:
+        """Return the in-memory CZYX volume of ``(img_name, t_index)``, allocating it on first use.
+
+        Parameters
+        ----------
+        img_name : str
+            Hierarchical path name of the source image.
+        t_index : int
+            Timepoint of the volume.
+        sample_prediction : NDArray
+            First window of the volume; sets channel count, YX shape, and the dtype
+            unless the store already holds this array (then its dtype, as the per-window
+            writes would cast to it).
+        z_slice : slice
+            Planes of the incoming window. The flush writes from the first plane any
+            window reached to the last, so planes no window predicts (``target_2d``
+            padding, unselected planes) keep what the store holds, as with per-window
+            writes.
+
+        Returns
+        -------
+        NDArray
+            Zero-filled ``(C, Z, Y, X)`` buffer spanning the source depth, like a new zarr array.
+        """
+        key = (img_name, t_index)
+        if key not in self._volumes:
+            depth = self._source_shapes[img_name][1]
+            shape = (sample_prediction.shape[0], depth, *sample_prediction.shape[-2:])
+            try:
+                dtype = self.plate[img_name].dtype
+            except KeyError:
+                dtype = sample_prediction.dtype
+            self._volumes[key] = (np.zeros(shape, dtype=dtype), z_slice.start, z_slice.stop)
+        volume, start, stop = self._volumes[key]
+        if z_slice.stop > volume.shape[1]:
+            # A prediction deeper than its window: grow like the per-window resize does.
+            extra = np.zeros((volume.shape[0], z_slice.stop - volume.shape[1], *volume.shape[2:]), dtype=volume.dtype)
+            volume = np.concatenate([volume, extra], axis=1)
+        self._volumes[key] = (volume, min(start, z_slice.start), max(stop, z_slice.stop))
+        return volume
+
+    def _flush_volume(self, img_name: str, t_index: int) -> None:
+        """Write one buffered volume to the store, over the planes its windows reached.
+
+        Parameters
+        ----------
+        img_name : str
+            Hierarchical path name of the source image.
+        t_index : int
+            Timepoint of the volume.
+        """
+        volume, start, stop = self._volumes.pop((img_name, t_index))
+        image = self._create_image(img_name, volume[:, :stop].shape, volume.dtype)
+        _resize_image(image, t_index, slice(start, stop))
+        image.oindex[t_index, self.prediction_index, slice(start, stop)] = volume[:, start:stop]
+
+    def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
+        """Return whether the existing output array outruns this run's source in T or Z.
+
+        Parameters
+        ----------
+        position : Position
+            Existing output position that this run rewrites.
+        name : str
+            Plate-relative position name.
+        array_key : str
+            Array level this run writes.
+
+        Returns
+        -------
+        bool
+            True when the array exists and :func:`outruns` the source.
+        """
+        try:
+            output = position[array_key]
+        except KeyError:
+            return False
+        return outruns(output, self._source_shapes[f"/{name}/{array_key}"])
+
+    def _cannot_share(self, position: Position, channels: list[str]) -> bool:
+        """Return whether ``position`` holds any of ``channels`` that this run cannot vouch for.
+
+        Parameters
+        ----------
+        position : Position
+            Existing output position outside this run.
+        channels : list of str
+            This run's prediction channels.
+
+        Returns
+        -------
+        bool
+            True when a channel present in the position has no marker of its
+            own (written before markers existed, so unverifiable even if other
+            channels are marked), or a marker written with other weights or
+            settings, or in a layout this version cannot read.
+        """
+        completed = position.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+        return any(
+            channel in position.channel_names and not same_run(completed.get(channel), self._run)
+            for channel in channels
+        )
+
+    def _holds_other_planes(self, position: Position, name: str, channels: list[str]) -> bool:
+        """Return whether a plane-restricted run would leave another run's planes in ``position``.
+
+        Overwrite rewrites in place and this run writes only its own planes, so a
+        channel another run wrote survives off them unless that run predicted exactly
+        these planes (e.g. the same slab with a new checkpoint). A full-volume run
+        rewrites every plane and never holds any.
+        """
+        if self._z_planes is None or not self._cannot_share(position, channels):
+            return False
+        planes = canonical_z_planes(self._z_planes[name])
+        return any(
+            predicted_z_planes(position, channel) != planes for channel in channels if channel in position.channel_names
+        )
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.
@@ -351,7 +688,15 @@ class HCSPredictionWriter(BasePredictionWriter):
         _logger.debug(f"Creating image '{img_name}'")
         _, row_name, col_name, pos_name, arr_name = img_name.split("/")
         position = self.plate.create_position(row_name, col_name, pos_name)
+        # A started marker from the first write on distinguishes an interrupted FOV
+        # from one written before completion markers existed.
+        mark_started(position, self._prediction_channels, self._run)
         shape = [1] + list(shape)
+        if self._z_planes is not None:
+            # Allocate the full source extent: the planes this run skips must still
+            # exist (at the fill value) so the store aligns plane by plane with its
+            # source, instead of ending at the last predicted plane.
+            shape[0], shape[2] = self._source_shapes[img_name][:2]
         shape[1] = len(position.channel_names)
         return position.create_zeros(
             arr_name,

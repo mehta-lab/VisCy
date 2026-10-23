@@ -18,6 +18,7 @@ prebuilt mask caches) is a follow-up CPU integration test — see the plan
 from __future__ import annotations
 
 import importlib
+import inspect
 import pickle
 
 import numpy as np
@@ -63,6 +64,7 @@ def _make_synthetic_result(
     dinov3 = _BackboneLists()
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
+    morphem = _BackboneLists()
     for t in range(t_count):
         fov_arr = np.full(cells_per_t, pos_name)
         t_arr = np.full(cells_per_t, t, dtype=np.int32)
@@ -72,7 +74,7 @@ def _make_synthetic_result(
         cp.gt_fovs.append(fov_arr)
         cp.pred_ts.append(t_arr)
         cp.gt_ts.append(t_arr)
-        for bl in (dinov3, dynaclr, celldino):
+        for bl in (dinov3, dynaclr, celldino, morphem):
             bl.pred_feats.append(np.full((cells_per_t, deep_dim), float(t), dtype=np.float32))
             bl.gt_feats.append(np.full((cells_per_t, deep_dim), float(t) + 0.5, dtype=np.float32))
             bl.pred_fovs.append(fov_arr)
@@ -93,6 +95,7 @@ def _make_synthetic_result(
         dinov3=dinov3,
         dynaclr=dynaclr,
         celldino=celldino,
+        morphem=morphem,
         timings=[(pos_name, None, "mask_gt", 0.05), (pos_name, 0, "pixel_metrics", 0.02)],
     )
 
@@ -107,7 +110,7 @@ def test_fov_result_pickle_round_trip_preserves_arrays():
     assert restored.seg_array.shape == result.seg_array.shape
     assert restored.seg_array.dtype == np.bool_
     assert np.array_equal(restored.seg_array, result.seg_array)
-    for backbone_attr in ("cp", "dinov3", "dynaclr", "celldino"):
+    for backbone_attr in ("cp", "dinov3", "dynaclr", "celldino", "morphem"):
         original = getattr(result, backbone_attr)
         restored_bb = getattr(restored, backbone_attr)
         for list_name in ("pred_feats", "gt_feats", "pred_fovs", "gt_fovs", "pred_ts", "gt_ts"):
@@ -185,3 +188,57 @@ def test_aggregate_fov_result_extends_backbone_lists():
         assert len(bb.gt_fovs) == 2
         assert len(bb.pred_ts) == 2
         assert len(bb.gt_ts) == 2
+
+
+def test_worker_run_fov_hands_the_cp_space_to_process_one_fov(tmp_path, monkeypatch):
+    """``_worker_run_fov`` forwards the parent's CP space, and the space survives the pickle hop.
+
+    Under ``executor=process`` the parent ships the verified CP space with every
+    submission; the worker must score with that object, not reload or drop it.
+    """
+    from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, load_cp_reference, write_cp_reference
+
+    from ._eval_fixtures import build_eval_config, make_hcs_plate
+
+    pipeline = _live_pipeline_module()
+    names = tuple(f"f{i}" for i in range(5))
+    fit = DatasetFit(
+        dataset="ds",
+        cells=np.random.default_rng(0).standard_normal((40, 5)),
+        record={"positions": ["A/1/0"], "gt_cache_dir": None, "cp_cache_built_at": None},
+        in_mask_fit=True,
+    )
+    write_cp_reference(
+        fit_cp_reference([fit], target_name="er", feature_names=names, cp_identity={}), tmp_path / "er.json"
+    )
+    cp_space = pickle.loads(pickle.dumps(load_cp_reference(tmp_path / "er.json", target_name="er").for_dataset("ds")))
+
+    make_hcs_plate(tmp_path / "pred.zarr", "prediction", seed=0, n_positions=1)
+    make_hcs_plate(tmp_path / "gt.zarr", "target", seed=1, n_positions=1)
+    config = build_eval_config(
+        tmp_path / "pred.zarr",
+        tmp_path / "gt.zarr",
+        tmp_path / "g",
+        tmp_path / "p",
+        tmp_path,
+        executor="process",
+        fov_workers=1,
+    )
+    seen = {}
+    signature = inspect.signature(pipeline._process_one_fov)
+
+    def _capture(*args, **kwargs):
+        seen["cp_space"] = signature.bind(*args, **kwargs).arguments["cp_space"]
+        return "result"
+
+    monkeypatch.setattr(pipeline, "_worker_setup", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "_process_one_fov", _capture)
+    monkeypatch.setattr(pipeline, "flush_manifest", lambda ctx: None)
+    monkeypatch.setitem(pipeline._WORKER_STATE, "cache_ctx", None)
+    monkeypatch.setitem(pipeline._WORKER_STATE, "pred_cache_ctx", None)
+    for key in ("seg_model", "dinov3", "dynaclr", "celldino", "morphem"):
+        monkeypatch.setitem(pipeline._WORKER_STATE, key, None)
+
+    assert pipeline._worker_run_fov(config, "A/1/0", 0, None, cp_space) == "result"
+    assert seen["cp_space"] is cp_space
+    np.testing.assert_array_equal(seen["cp_space"].mean, cp_space.mean)

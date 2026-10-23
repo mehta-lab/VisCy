@@ -1,0 +1,25 @@
+# A549 mantis splits — 2024_11_21_A549_TOMM20_DENV
+#
+# Plan: 3 mock + 8 DENV test (all DENV → test, same pattern as 2024_11_07).
+# Available positions after Airtable ∩ zarr (16 total, full match):
+#   B/1 (mock, 4), B/3 (mock, 4)  → 8 mock
+#   B/2 (DENV, 4), C/2 (DENV, 4)  → 8 DENV
+# Rule: lexicographic sort across mock FOVs, take first 3 for test.
+
+experiment: 2024_11_21_A549_TOMM20_DENV
+targets:
+  tomm20:
+    train:
+    - B/1/001001
+    test:
+    - B/1/000000
+    - B/1/000001
+    - B/1/001000
+    - B/2/000000
+    - B/2/000001
+    - B/2/001000
+    - B/2/001001
+    - C/2/000000
+    - C/2/000001
+    - C/2/001000
+    - C/2/001001
