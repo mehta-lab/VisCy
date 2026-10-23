@@ -286,6 +286,40 @@ def test_overwrite_keeps_the_planes_a_padded_run_does_not_predict(tmp_path):
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
 
 
+class _DeeperModule(_WindowFunctionModule):
+    """Predict one plane more than the window, so the last windows reach past the source depth."""
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
+        out = super().predict_step(batch, batch_idx, dataloader_idx)
+        return torch.cat([out, out[:, :, -1:] + 1.0], dim=2)
+
+
+def test_buffered_volume_grows_for_a_prediction_deeper_than_its_window(tmp_path):
+    """Planes past the source depth extend the volume, as the per-window resize does."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        data_module = HCSDataModule(
+            data_path=str(source),
+            source_channel=["Phase3D"],
+            target_channel=["Nuclei"],
+            z_window_size=4,
+            batch_size=1,
+            num_workers=0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+        )
+        Trainer(
+            accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer_cls(str(output))]
+        ).predict(_DeeperModule(), datamodule=data_module, return_predictions=False)
+        stores[writer_cls] = _read_store(output)
+    assert {voxels.shape[2] for voxels, _, _ in stores[HCSPredictionWriter].values()} == {12}
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
 def test_buffered_volume_takes_the_dtype_of_an_existing_array(tmp_path):
     """Overwriting a float32 store with float16 predictions blends in float32, as per-window writes do."""
     source = tmp_path / "source.zarr"

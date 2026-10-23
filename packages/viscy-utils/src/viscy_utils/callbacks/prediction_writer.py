@@ -569,6 +569,10 @@ class HCSPredictionWriter(BasePredictionWriter):
                 dtype = sample_prediction.dtype
             self._volumes[key] = (np.zeros(shape, dtype=dtype), z_slice.start, z_slice.stop)
         volume, start, stop = self._volumes[key]
+        if z_slice.stop > volume.shape[1]:
+            # A prediction deeper than its window: grow like the per-window resize does.
+            extra = np.zeros((volume.shape[0], z_slice.stop - volume.shape[1], *volume.shape[2:]), dtype=volume.dtype)
+            volume = np.concatenate([volume, extra], axis=1)
         self._volumes[key] = (volume, min(start, z_slice.start), max(stop, z_slice.stop))
         return volume
 
