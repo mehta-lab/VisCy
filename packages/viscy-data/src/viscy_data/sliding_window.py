@@ -289,6 +289,8 @@ class SlidingWindowDataset(Dataset):
             # Keyed on the array object: positions of different plates can share a path.
             key = (id(img), t, tuple(ch_idx), as_float)
             if self._volume_key != key:
+                # Release the previous volume first, so two never coexist; windows own copies.
+                self._volume, self._volume_key = None, None
                 # Per-channel basic slices, not oindex: the coordinate indexer peaks at ~7x
                 # the output size, which a whole volume makes large (see HCSDataModule's
                 # mmap preload). Filling one preallocated array keeps the peak at its size.
