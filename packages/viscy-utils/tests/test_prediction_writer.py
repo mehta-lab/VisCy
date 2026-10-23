@@ -147,6 +147,67 @@ def test_completion_helpers_keep_other_channels(tmp_path):
         assert not prediction_complete(position, ["A", "B"], marker)
 
 
+class _WindowFunctionModule(LightningModule):
+    """Predict a nonlinear function of each window's input and position, so blending and window order matter."""
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
+        source = batch["source"]
+        offsets = torch.arange(source.shape[-3], dtype=source.dtype, device=source.device).view(1, 1, -1, 1, 1)
+        starts = torch.as_tensor([int(z) for z in batch["index"][2]], dtype=source.dtype, device=source.device)
+        return torch.sin(source * (1.0 + 0.1 * offsets)) + 0.01 * starts.view(-1, 1, 1, 1, 1)
+
+
+@pytest.mark.parametrize("z_reduction", ["blend", "center"])
+@pytest.mark.parametrize("batch_size", [1, 3])
+@pytest.mark.parametrize("limit_batches", [None, 5])
+def test_read_once_predict_is_bitwise_identical_to_per_window_io(tmp_path, z_reduction, batch_size, limit_batches):
+    """Reading each volume once and writing it once stores the same bytes and markers as per-window zarr I/O.
+
+    ``limit_batches=5`` stops inside a volume, so the partial volume flushed at predict end is compared too.
+    """
+    source = tmp_path / "source.zarr"
+    rng = np.random.default_rng(0)
+    with open_ome_zarr(source, layout="hcs", mode="w-", channel_names=["Phase3D", "Nuclei"]) as plate:
+        for fov in ("0", "1"):
+            plate.create_position("0", "0", fov).create_image("0", rng.normal(size=(2, 2, 11, 8, 8)).astype(np.float32))
+    stores = {}
+    for read_once in (False, True):
+        data_module = HCSDataModule(
+            data_path=str(source),
+            source_channel=["Phase3D"],
+            target_channel=["Nuclei"],
+            z_window_size=4,
+            batch_size=batch_size,
+            num_workers=0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+            predict_read_once=read_once,
+        )
+        output = tmp_path / f"pred_{read_once}.zarr"
+        writer = HCSPredictionWriter(str(output), z_reduction=z_reduction)
+        Trainer(
+            accelerator="cpu",
+            logger=False,
+            enable_progress_bar=False,
+            limit_predict_batches=limit_batches,
+            callbacks=[writer],
+        ).predict(_WindowFunctionModule(), datamodule=data_module, return_predictions=False)
+        # Both paths ran: the dataset cut windows from a cached volume, the writer buffered volumes.
+        assert writer._write_once is read_once
+        assert (data_module.predict_dataset._volume_key is not None) is read_once
+        with open_ome_zarr(output, mode="r") as plate:
+            stores[read_once] = {
+                name: (np.asarray(pos["0"]), pos["0"].chunks, dict(pos.zattrs)) for name, pos in plate.positions()
+            }
+    assert stores[True].keys() == stores[False].keys()
+    for name, (voxels, chunks, attrs) in stores[False].items():
+        new_voxels, new_chunks, new_attrs = stores[True][name]
+        assert (new_voxels.shape, new_voxels.dtype, new_chunks) == (voxels.shape, voxels.dtype, chunks)
+        assert new_voxels.tobytes() == voxels.tobytes()
+        assert new_attrs == attrs
+
+
 class _OnesModule(LightningModule):
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
         return torch.ones_like(batch["source"])

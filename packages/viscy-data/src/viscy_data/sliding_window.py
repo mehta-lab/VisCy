@@ -93,6 +93,13 @@ class SlidingWindowDataset(Dataset):
         Requires ``z_window_size == 1``; every position needs an entry with one list
         per timepoint. Windows stay in increasing ``z`` order within a timepoint.
         Default None takes every plane.
+    cache_volume : bool
+        Read each (position, timepoint) volume from zarr once and cut its windows
+        from that copy, instead of re-reading every window. Stride-1 depth windows
+        otherwise read each plane once per window covering it. Pays off when the
+        windows of a volume are requested consecutively (the sequential predict
+        loader); random access (training) would read a whole volume per window.
+        Default False.
     """
 
     def __init__(
@@ -110,8 +117,12 @@ class SlidingWindowDataset(Dataset):
         fg_mask_key: str | None = None,
         preloaded_fovs: list[Tensor] | None = None,
         z_planes: Mapping[str, Sequence[Sequence[int]]] | None = None,
+        cache_volume: bool = False,
     ) -> None:
         super().__init__()
+        self.cache_volume = cache_volume
+        self._volume_key: tuple | None = None
+        self._volume: np.ndarray | None = None
         if z_planes is not None and z_window_size != 1:
             raise ValueError(f"z_planes selects single planes and needs z_window_size=1, got {z_window_size}")
         self.z_planes = z_planes
@@ -270,6 +281,15 @@ class SlidingWindowDataset(Dataset):
             window = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size]
             data = window.to(torch.float32 if as_float else window.dtype, copy=True)
             return data.unbind(dim=1), (f"/{img.path}", t, z)
+        if self.cache_volume:
+            key = (img.path, t, tuple(ch_idx), as_float)
+            if self._volume_key != key:
+                volume = img.oindex[slice(t, t + 1), [int(i) for i in ch_idx], slice(None)]
+                self._volume = volume.astype(np.float32) if as_float else volume
+                self._volume_key = key
+            # Copy: transforms must not reach the cached volume the next window is cut from.
+            data = self._volume[:, :, z : z + self.z_window_size].copy()
+            return torch.from_numpy(data).unbind(dim=1), (f"/{img.path}", t, z)
         data = img.oindex[
             slice(t, t + 1),
             [int(i) for i in ch_idx],
