@@ -520,7 +520,8 @@ class HCSPredictionWriter(BasePredictionWriter):
                 keep = 0 if z_index == 0 else sample_prediction.shape[-3] // 2
                 sample_prediction = sample_prediction[..., keep:, :, :]
                 z_slice = slice(z_slice.start + keep, z_slice.stop)
-        # Casts like the zarr write does, so blending reads back what the store would hold.
+        # The buffer has the store's dtype, so this casts like the zarr write and blending
+        # reads back what the store would hold.
         dest[(*lead, z_slice)] = sample_prediction
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
@@ -544,7 +545,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         t_index : int
             Timepoint of the volume.
         sample_prediction : NDArray
-            First window of the volume; sets channel count, YX shape and dtype.
+            First window of the volume; sets channel count, YX shape, and the dtype
+            unless the store already holds this array (then its dtype, as the per-window
+            writes would cast to it).
         stop : int
             End plane of the incoming window; the flush writes up to the furthest one.
 
@@ -557,7 +560,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         if key not in self._volumes:
             depth = self._source_shapes[img_name][1]
             shape = (sample_prediction.shape[0], depth, *sample_prediction.shape[-2:])
-            self._volumes[key] = (np.zeros(shape, dtype=sample_prediction.dtype), stop)
+            try:
+                dtype = self.plate[img_name].dtype
+            except KeyError:
+                dtype = sample_prediction.dtype
+            self._volumes[key] = (np.zeros(shape, dtype=dtype), stop)
         volume, reached = self._volumes[key]
         self._volumes[key] = (volume, max(reached, stop))
         return volume

@@ -150,12 +150,14 @@ def test_completion_helpers_keep_other_channels(tmp_path):
 class _WindowFunctionModule(LightningModule):
     """Predict a nonlinear function of each window's input and position, so blending and window order matter.
 
-    ``center_plane`` returns only the window's center plane (a 2D model, ``target_2d``).
+    ``center_plane`` returns only the window's center plane (a 2D model, ``target_2d``); ``dtype`` sets the
+    prediction dtype.
     """
 
-    def __init__(self, center_plane: bool = False) -> None:
+    def __init__(self, center_plane: bool = False, dtype: torch.dtype = torch.float32) -> None:
         super().__init__()
         self.center_plane = center_plane
+        self.out_dtype = dtype
 
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
         source = batch["source"]
@@ -165,7 +167,7 @@ class _WindowFunctionModule(LightningModule):
         if self.center_plane:
             mid = out.shape[-3] // 2
             out = out[:, :, mid : mid + 1]
-        return out
+        return out.to(self.out_dtype)
 
 
 class _PerWindowWriter(HCSPredictionWriter):
@@ -247,6 +249,36 @@ def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mo
         )
         assert writer._write_once is (writer_cls is HCSPredictionWriter)
         stores[writer_cls] = _read_store(output)
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+def test_buffered_volume_takes_the_dtype_of_an_existing_array(tmp_path):
+    """Overwriting a float32 store with float16 predictions blends in float32, as per-window writes do."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        for dtype, overwrite in ((torch.float32, False), (torch.float16, True)):
+            output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+            data_module = HCSDataModule(
+                data_path=str(source),
+                source_channel=["Phase3D"],
+                target_channel=["Nuclei"],
+                z_window_size=4,
+                batch_size=1,
+                num_workers=0,
+                yx_patch_size=[8, 8],
+                normalizations=[],
+                augmentations=[],
+            )
+            Trainer(
+                accelerator="cpu",
+                logger=False,
+                enable_progress_bar=False,
+                callbacks=[writer_cls(str(output), overwrite=overwrite)],
+            ).predict(_WindowFunctionModule(dtype=dtype), datamodule=data_module, return_predictions=False)
+        stores[writer_cls] = _read_store(output)
+    assert {voxels.dtype for voxels, _, _ in stores[HCSPredictionWriter].values()} == {np.dtype(np.float32)}
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
 
 
