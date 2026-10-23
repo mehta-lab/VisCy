@@ -275,7 +275,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         self._z_planes = dm.predict_dataset.z_planes
         # write_input stores source/target slices beside each window, so it writes per window.
         self._write_once = not self.write_input
-        self._volumes: dict[tuple[str, int], tuple[NDArray, int]] = {}
+        self._volumes: dict[tuple[str, int], tuple[NDArray, int, int]] = {}
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
             array_key=dm.array_key,
@@ -498,7 +498,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
         # Blend reads and the write go to the in-memory volume, or to the store per window.
         if self._write_once:
-            dest, lead = self._buffer_volume(img_name, t_index, sample_prediction, z_slice.stop), (slice(None),)
+            dest, lead = self._buffer_volume(img_name, t_index, sample_prediction, z_slice), (slice(None),)
         else:
             image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
             _resize_image(image, t_index, z_slice)
@@ -535,7 +535,7 @@ class HCSPredictionWriter(BasePredictionWriter):
             marker = completion_marker(self._source_shapes[img_name], self._run)
             mark_complete(position, self._prediction_channels, marker)
 
-    def _buffer_volume(self, img_name: str, t_index: int, sample_prediction: NDArray, stop: int) -> NDArray:
+    def _buffer_volume(self, img_name: str, t_index: int, sample_prediction: NDArray, z_slice: slice) -> NDArray:
         """Return the in-memory CZYX volume of ``(img_name, t_index)``, allocating it on first use.
 
         Parameters
@@ -548,8 +548,11 @@ class HCSPredictionWriter(BasePredictionWriter):
             First window of the volume; sets channel count, YX shape, and the dtype
             unless the store already holds this array (then its dtype, as the per-window
             writes would cast to it).
-        stop : int
-            End plane of the incoming window; the flush writes up to the furthest one.
+        z_slice : slice
+            Planes of the incoming window. The flush writes from the first plane any
+            window reached to the last, so planes no window predicts (``target_2d``
+            padding, unselected planes) keep what the store holds, as with per-window
+            writes.
 
         Returns
         -------
@@ -564,9 +567,9 @@ class HCSPredictionWriter(BasePredictionWriter):
                 dtype = self.plate[img_name].dtype
             except KeyError:
                 dtype = sample_prediction.dtype
-            self._volumes[key] = (np.zeros(shape, dtype=dtype), stop)
-        volume, reached = self._volumes[key]
-        self._volumes[key] = (volume, max(reached, stop))
+            self._volumes[key] = (np.zeros(shape, dtype=dtype), z_slice.start, z_slice.stop)
+        volume, start, stop = self._volumes[key]
+        self._volumes[key] = (volume, min(start, z_slice.start), max(stop, z_slice.stop))
         return volume
 
     def _flush_volume(self, img_name: str, t_index: int) -> None:
@@ -579,10 +582,10 @@ class HCSPredictionWriter(BasePredictionWriter):
         t_index : int
             Timepoint of the volume.
         """
-        volume, stop = self._volumes.pop((img_name, t_index))
+        volume, start, stop = self._volumes.pop((img_name, t_index))
         image = self._create_image(img_name, volume[:, :stop].shape, volume.dtype)
-        _resize_image(image, t_index, slice(0, stop))
-        image.oindex[t_index, self.prediction_index, slice(0, stop)] = volume[:, :stop]
+        _resize_image(image, t_index, slice(start, stop))
+        image.oindex[t_index, self.prediction_index, slice(start, stop)] = volume[:, start:stop]
 
     def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
         """Return whether the existing output array outruns this run's source in T or Z.

@@ -253,6 +253,39 @@ def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mo
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
 
 
+def test_overwrite_keeps_the_planes_a_padded_run_does_not_predict(tmp_path):
+    """A ``target_2d`` run over a 3D store leaves its padding planes as stored, as per-window writes do."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+
+    def predict(output, writer, z_window_size: int, target_2d: bool) -> None:
+        data_module = HCSDataModule(
+            data_path=str(source),
+            source_channel=["Phase3D"],
+            target_channel=["Nuclei"],
+            z_window_size=z_window_size,
+            target_2d=target_2d,
+            batch_size=1,
+            num_workers=0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+        )
+        Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
+            _WindowFunctionModule(center_plane=target_2d), datamodule=data_module, return_predictions=False
+        )
+
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        predict(output, HCSPredictionWriter(str(output)), z_window_size=4, target_2d=False)
+        predict(output, writer_cls(str(output), overwrite=True), z_window_size=5, target_2d=True)
+        stores[writer_cls] = _read_store(output)
+    voxels = next(iter(stores[_PerWindowWriter].values()))[0]
+    assert np.abs(voxels[:, -1, :2]).sum() > 0, "the 3D run's planes below the padding must survive"
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
 def test_buffered_volume_takes_the_dtype_of_an_existing_array(tmp_path):
     """Overwriting a float32 store with float16 predictions blends in float32, as per-window writes do."""
     source = tmp_path / "source.zarr"
