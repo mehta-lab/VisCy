@@ -11,6 +11,7 @@ from iohub import open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
+from viscy_data.sliding_window import SlidingWindowDataset
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in
 from viscy_utils.prediction_metadata import (
     PREDICTED_Z_PLANES_KEY,
@@ -145,6 +146,235 @@ def test_completion_helpers_keep_other_channels(tmp_path):
         assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"A": started_marker(run), "B": marker}
         assert prediction_complete(position, ["B"], marker)
         assert not prediction_complete(position, ["A", "B"], marker)
+
+
+class _WindowFunctionModule(LightningModule):
+    """Predict a nonlinear function of each window's input and position, so blending and window order matter.
+
+    ``center_plane`` returns only the window's center plane (a 2D model, ``target_2d``); ``dtype`` sets the
+    prediction dtype.
+    """
+
+    def __init__(self, center_plane: bool = False, dtype: torch.dtype = torch.float32) -> None:
+        super().__init__()
+        self.center_plane = center_plane
+        self.out_dtype = dtype
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
+        source = batch["source"]
+        offsets = torch.arange(source.shape[-3], dtype=source.dtype, device=source.device).view(1, 1, -1, 1, 1)
+        starts = torch.as_tensor([int(z) for z in batch["index"][2]], dtype=source.dtype, device=source.device)
+        out = torch.sin(source * (1.0 + 0.1 * offsets)) + 0.01 * starts.view(-1, 1, 1, 1, 1)
+        if self.center_plane:
+            mid = out.shape[-3] // 2
+            out = out[:, :, mid : mid + 1]
+        return out.to(self.out_dtype)
+
+
+class _PerWindowWriter(HCSPredictionWriter):
+    """Reference: the per-window zarr read-modify-write (the ``write_input`` path) in every mode."""
+
+    def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        super().on_predict_start(trainer, pl_module)
+        self._write_once = False
+
+
+#: Per-timepoint planes of the two FOVs of ``_write_random_source``.
+RANDOM_SOURCE_PLANES = {"0/0/0": [[0, 1, 2], [4, 5, 6]], "0/0/1": [[8, 9, 10], [3, 4, 5]]}
+
+
+def _write_random_source(path) -> None:
+    """Two FOVs of random ``(2, 2, 11, 8, 8)`` float32 Phase3D/Nuclei."""
+    rng = np.random.default_rng(0)
+    with open_ome_zarr(path, layout="hcs", mode="w-", channel_names=["Phase3D", "Nuclei"]) as plate:
+        for fov in RANDOM_SOURCE_PLANES:
+            plate.create_position(*fov.split("/")).create_image(
+                "0", rng.normal(size=(2, 2, 11, 8, 8)).astype(np.float32)
+            )
+
+
+def _read_store(path) -> dict:
+    with open_ome_zarr(path, mode="r") as plate:
+        return {name: (np.asarray(pos["0"]), pos["0"].chunks, dict(pos.zattrs)) for name, pos in plate.positions()}
+
+
+def _assert_same_bytes(reference: dict, buffered: dict) -> None:
+    assert buffered.keys() == reference.keys()
+    for name, (voxels, chunks, attrs) in reference.items():
+        new_voxels, new_chunks, new_attrs = buffered[name]
+        assert (new_voxels.shape, new_voxels.dtype, new_chunks) == (voxels.shape, voxels.dtype, chunks)
+        assert new_voxels.tobytes() == voxels.tobytes()
+        assert new_attrs == attrs
+
+
+@pytest.mark.parametrize("mode", ["blend", "center", "target_2d", "z_planes"])
+@pytest.mark.parametrize("batch_size", [1, 3])
+@pytest.mark.parametrize("limit_batches", [None, 5])
+def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mode, batch_size, limit_batches):
+    """Assembling each volume in memory and writing it once stores the bytes and markers per-window writes store.
+
+    Covers 3D windows (blend, center) and a 2D model's padded center plane (``target_2d``); a plane selection
+    takes the per-window path on both sides.
+    ``limit_batches=5`` stops inside a volume, so the partial volume flushed at predict end is compared too. The
+    reference reads per window too (``num_workers=1`` disables the volume cache).
+    """
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    planes_file = None
+    if mode == "z_planes":
+        planes_file = tmp_path / "planes.json"
+        planes_file.write_text(json.dumps({"positions": RANDOM_SOURCE_PLANES}))
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        data_module = HCSDataModule(
+            data_path=str(source),
+            source_channel=["Phase3D"],
+            target_channel=["Nuclei"],
+            z_window_size=1 if mode == "z_planes" else 4,
+            target_2d=mode == "target_2d",
+            batch_size=batch_size,
+            num_workers=1 if writer_cls is _PerWindowWriter else 0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+            predict_z_planes=planes_file,
+        )
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        writer = writer_cls(str(output), z_reduction="center" if mode == "center" else "blend")
+        Trainer(
+            accelerator="cpu",
+            logger=False,
+            enable_progress_bar=False,
+            limit_predict_batches=limit_batches,
+            callbacks=[writer],
+        ).predict(
+            _WindowFunctionModule(center_plane=mode == "target_2d"), datamodule=data_module, return_predictions=False
+        )
+        assert writer._write_once is (writer_cls is HCSPredictionWriter and mode != "z_planes")
+        assert data_module.predict_dataset.cache_volume is (writer_cls is HCSPredictionWriter and mode != "z_planes")
+        stores[writer_cls] = _read_store(output)
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+def test_overwrite_keeps_the_planes_a_padded_run_does_not_predict(tmp_path):
+    """A ``target_2d`` run over a 3D store leaves its padding planes as stored, as per-window writes do."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+
+    def predict(output, writer, z_window_size: int, target_2d: bool) -> None:
+        data_module = HCSDataModule(
+            data_path=str(source),
+            source_channel=["Phase3D"],
+            target_channel=["Nuclei"],
+            z_window_size=z_window_size,
+            target_2d=target_2d,
+            batch_size=1,
+            num_workers=0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+        )
+        Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
+            _WindowFunctionModule(center_plane=target_2d), datamodule=data_module, return_predictions=False
+        )
+
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        predict(output, HCSPredictionWriter(str(output)), z_window_size=4, target_2d=False)
+        predict(output, writer_cls(str(output), overwrite=True), z_window_size=5, target_2d=True)
+        stores[writer_cls] = _read_store(output)
+    voxels = next(iter(stores[_PerWindowWriter].values()))[0]
+    assert np.abs(voxels[:, -1, :2]).sum() > 0, "the 3D run's planes below the padding must survive"
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+class _DeeperModule(_WindowFunctionModule):
+    """Predict one plane more than the window, so the last windows reach past the source depth."""
+
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
+        out = super().predict_step(batch, batch_idx, dataloader_idx)
+        return torch.cat([out, out[:, :, -1:] + 1.0], dim=2)
+
+
+def test_buffered_volume_grows_for_a_prediction_deeper_than_its_window(tmp_path):
+    """Planes past the source depth extend the volume, as the per-window resize does."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        data_module = HCSDataModule(
+            data_path=str(source),
+            source_channel=["Phase3D"],
+            target_channel=["Nuclei"],
+            z_window_size=4,
+            batch_size=1,
+            num_workers=0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+        )
+        Trainer(
+            accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer_cls(str(output))]
+        ).predict(_DeeperModule(), datamodule=data_module, return_predictions=False)
+        stores[writer_cls] = _read_store(output)
+    assert {voxels.shape[2] for voxels, _, _ in stores[HCSPredictionWriter].values()} == {12}
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+def test_buffered_volume_takes_the_dtype_of_an_existing_array(tmp_path):
+    """Overwriting a float32 store with float16 predictions blends in float32, as per-window writes do."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        for dtype, overwrite in ((torch.float32, False), (torch.float16, True)):
+            output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+            data_module = HCSDataModule(
+                data_path=str(source),
+                source_channel=["Phase3D"],
+                target_channel=["Nuclei"],
+                z_window_size=4,
+                batch_size=1,
+                num_workers=0,
+                yx_patch_size=[8, 8],
+                normalizations=[],
+                augmentations=[],
+            )
+            Trainer(
+                accelerator="cpu",
+                logger=False,
+                enable_progress_bar=False,
+                callbacks=[writer_cls(str(output), overwrite=overwrite)],
+            ).predict(_WindowFunctionModule(dtype=dtype), datamodule=data_module, return_predictions=False)
+        stores[writer_cls] = _read_store(output)
+    assert {voxels.dtype for voxels, _, _ in stores[HCSPredictionWriter].values()} == {np.dtype(np.float32)}
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+def test_cached_volume_windows_equal_per_window_reads(tmp_path):
+    """Windows cut from a cached (position, t) volume equal windows read from zarr one by one."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    with open_ome_zarr(source, mode="r") as plate:
+        positions = [position for _, position in plate.positions()]
+        datasets = [
+            SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase3D", "Nuclei"]},
+                z_window_size=4,
+                load_normalization_metadata=False,
+                cache_volume=cache_volume,
+            )
+            for cache_volume in (False, True)
+        ]
+        assert len(datasets[0]) == len(datasets[1]) == 2 * 2 * 8
+        for index in range(len(datasets[0])):
+            reference, cached = datasets[0][index], datasets[1][index]
+            assert reference["index"] == cached["index"]
+            assert torch.equal(reference["source"], cached["source"])
+        assert datasets[1]._volume_key is not None
 
 
 class _OnesModule(LightningModule):

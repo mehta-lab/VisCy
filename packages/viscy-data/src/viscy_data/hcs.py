@@ -683,6 +683,11 @@ class HCSDataModule(LightningDataModule):
             positions=self._positions_maybe_single(),
             transform=predict_transform,
             z_planes=z_planes,
+            # Read each volume once and cut its depth windows from memory. A plane
+            # selection reads single planes, where a whole-volume read would only cost,
+            # and loader workers each take every Nth batch, so each would read the whole
+            # volume.
+            cache_volume=z_planes is None and self.num_workers == 0,
             **dataset_settings,
         )
 
