@@ -213,7 +213,8 @@ def _assert_same_bytes(reference: dict, buffered: dict) -> None:
 def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mode, batch_size, limit_batches):
     """Assembling each volume in memory and writing it once stores the bytes and markers per-window writes store.
 
-    Covers 3D windows (blend, center), a 2D model's padded center plane (``target_2d``) and a plane selection.
+    Covers 3D windows (blend, center) and a 2D model's padded center plane (``target_2d``); a plane selection
+    takes the per-window path on both sides.
     ``limit_batches=5`` stops inside a volume, so the partial volume flushed at predict end is compared too. The
     reference reads per window too (``num_workers=1`` disables the volume cache).
     """
@@ -249,7 +250,7 @@ def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mo
         ).predict(
             _WindowFunctionModule(center_plane=mode == "target_2d"), datamodule=data_module, return_predictions=False
         )
-        assert writer._write_once is (writer_cls is HCSPredictionWriter)
+        assert writer._write_once is (writer_cls is HCSPredictionWriter and mode != "z_planes")
         assert data_module.predict_dataset.cache_volume is (writer_cls is HCSPredictionWriter and mode != "z_planes")
         stores[writer_cls] = _read_store(output)
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])

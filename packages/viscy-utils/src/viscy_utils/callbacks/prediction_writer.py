@@ -136,7 +136,9 @@ class HCSPredictionWriter(BasePredictionWriter):
     Each (position, timepoint) volume is assembled in memory from its depth
     windows and written once, when its last window arrives (or at predict end),
     instead of a zarr read-modify-write per window; the stored bytes are the
-    same. ``write_input`` keeps the per-window writes.
+    same. ``write_input`` and plane-restricted predicts (``predict_z_planes``) keep
+    the per-window writes: the first stores slices beside each window, and the
+    second writes single planes, which a volume flush would fill in between.
 
     Parameters
     ----------
@@ -273,8 +275,10 @@ class HCSPredictionWriter(BasePredictionWriter):
         # planes are predicted, the rest keep the fill value, and the planes are part
         # of the run identity so a resume never mixes them with another selection.
         self._z_planes = dm.predict_dataset.z_planes
-        # write_input stores source/target slices beside each window, so it writes per window.
-        self._write_once = not self.write_input
+        # write_input stores source/target slices beside each window, and a plane selection
+        # writes single planes that a [first, last] flush would fill in between: both write
+        # per window.
+        self._write_once = not self.write_input and self._z_planes is None
         self._volumes: dict[tuple[str, int], tuple[NDArray, int, int]] = {}
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
