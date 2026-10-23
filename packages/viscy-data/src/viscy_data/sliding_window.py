@@ -291,9 +291,11 @@ class SlidingWindowDataset(Dataset):
             if self._volume_key != key:
                 # Per-channel basic slices, not oindex: the coordinate indexer peaks at ~7x
                 # the output size, which a whole volume makes large (see HCSDataModule's
-                # mmap preload).
-                volume = np.concatenate([np.asarray(img[t : t + 1, int(c) : int(c) + 1]) for c in ch_idx], axis=1)
-                self._volume = volume.astype(np.float32, copy=False) if as_float else volume
+                # mmap preload). Filling one preallocated array keeps the peak at its size.
+                volume = np.empty((1, len(ch_idx), *img.shape[-3:]), dtype=np.float32 if as_float else img.dtype)
+                for j, c in enumerate(ch_idx):
+                    volume[:, j] = img[t : t + 1, int(c)]
+                self._volume = volume
                 self._volume_key = key
             # Copy: transforms must not reach the cached volume the next window is cut from.
             data = self._volume[:, :, z : z + self.z_window_size].copy()
