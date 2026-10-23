@@ -286,7 +286,8 @@ class SlidingWindowDataset(Dataset):
             data = window.to(torch.float32 if as_float else window.dtype, copy=True)
             return data.unbind(dim=1), (f"/{img.path}", t, z)
         if self.cache_volume:
-            key = (img.path, t, tuple(ch_idx), as_float)
+            # Keyed on the array object: positions of different plates can share a path.
+            key = (id(img), t, tuple(ch_idx), as_float)
             if self._volume_key != key:
                 # Per-channel basic slices, not oindex: the coordinate indexer peaks at ~7x
                 # the output size, which a whole volume makes large (see HCSDataModule's
