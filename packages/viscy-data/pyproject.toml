@@ -43,9 +43,10 @@ dependencies = [
   "zarr",
 ]
 
-optional-dependencies.all = [ "viscy-data[livecell,mmap,triplet]" ]
+optional-dependencies.all = [ "viscy-data[livecell,mmap,tracks,triplet]" ]
 optional-dependencies.livecell = [ "pycocotools", "tifffile", "torchvision" ]
 optional-dependencies.mmap = [ "tensordict" ]
+optional-dependencies.tracks = [ "geff>=1.3" ]
 optional-dependencies.triplet = [ "tensorstore" ]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
@@ -53,7 +54,7 @@ urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
-test = [ "pytest>=9.0.2", "pytest-cov>=7", "tensorstore", "viscy-transforms" ]
+test = [ "geff>=1.3", "pytest>=9.0.2", "pytest-cov>=7", "tensorstore", "viscy-transforms" ]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

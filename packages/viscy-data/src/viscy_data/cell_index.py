@@ -4,7 +4,7 @@ Provides:
 
 * ``CELL_INDEX_SCHEMA`` — canonical pyarrow schema for the parquet contract.
 * ``validate_cell_index`` / ``read_cell_index`` / ``write_cell_index`` — I/O utilities.
-* ``build_timelapse_cell_index`` — builder from an experiment registry YAML + tracking CSVs.
+* ``build_timelapse_cell_index`` — builder from an experiment registry YAML + per-FOV tracks (GEFF or CSV).
 * ``build_ops_cell_index`` — builder from OPS zarr + per-well label tables.
 """
 
@@ -31,6 +31,7 @@ from viscy_data._typing import (
     CELL_INDEX_OPS_COLUMNS,
     CELL_INDEX_TIMELAPSE_COLUMNS,
 )
+from viscy_data.tracks import read_fov_tracks
 
 _logger = logging.getLogger(__name__)
 
@@ -475,13 +476,7 @@ def _build_experiment_tracks(
 
         perturbation = _resolve_perturbation(perturbation_wells, well_name)
 
-        tracks_dir = Path(exp.tracks_path) / fov_path
-        csv_files = list(tracks_dir.glob("*.csv"))
-        if not csv_files:
-            raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")
-        if len(csv_files) > 1:
-            raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
-        tracks_df = pd.read_csv(csv_files[0])
+        tracks_df = read_fov_tracks(exp.tracks_path, fov_path)
 
         # TCZYX shape from zarr metadata (same for all positions in a well)
         img_arr = position["0"]

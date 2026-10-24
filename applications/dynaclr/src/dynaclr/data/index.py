@@ -19,6 +19,7 @@ from iohub.ngff import Plate, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
 from viscy_data.cell_index import read_cell_index
+from viscy_data.tracks import read_fov_tracks
 
 _logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def _load_experiment_fovs(
     data_path : str
         Path to the OME-Zarr plate store.
     tracks_path : str
-        Root directory of tracking CSVs.
+        Root holding per-FOV tracks (``tracks.geff`` or one CSV per FOV).
     perturbation_wells : dict[str, list[str]]
         Mapping of perturbation label to list of well names.
     marker : str
@@ -107,14 +108,7 @@ def _load_experiment_fovs(
                     f"for experiment '{exp_name}'. Available wells: {dict(perturbation_wells)}"
                 )
 
-            # Read tracking CSV
-            tracks_dir = Path(tracks_path) / fov_name
-            csv_files = list(tracks_dir.glob("*.csv"))
-            if not csv_files:
-                raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")
-            if len(csv_files) > 1:
-                raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
-            tracks_df = pd.read_csv(csv_files[0])
+            tracks_df = read_fov_tracks(tracks_path, fov_name)
 
             # Enrich columns
             tracks_df["store_path"] = data_path

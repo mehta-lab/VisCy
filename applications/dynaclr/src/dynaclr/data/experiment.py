@@ -387,7 +387,6 @@ class ExperimentRegistry:
                 ExperimentEntry(
                     name=exp_name,
                     data_path=store_path,
-                    tracks_path="",
                     channels=exp_channels.get(exp_name, []),
                     channel_names=channel_names,
                     perturbation_wells=dict(perturbation_wells),

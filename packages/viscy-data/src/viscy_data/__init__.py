@@ -12,6 +12,7 @@ Optional Extras:
     - ``pip install 'viscy-data[triplet]'`` for TripletDataModule (tensorstore, pandas)
     - ``pip install 'viscy-data[livecell]'`` for LiveCellDataModule (pycocotools, tifffile, torchvision)
     - ``pip install 'viscy-data[mmap]'`` for MmappedDataModule (tensordict)
+    - ``pip install 'viscy-data[tracks]'`` for reading ``tracks.geff`` track graphs (geff)
     - ``pip install 'viscy-data[all]'`` for all optional dependencies
 
 Version:

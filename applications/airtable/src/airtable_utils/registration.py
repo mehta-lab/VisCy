@@ -289,9 +289,10 @@ def format_register_summary(result: RegisterResult, dry_run: bool = False) -> st
 
 # Fields required for a complete flat parquet cell index.
 # "zarr" = written by register, "platemap" = biologist fills in Airtable.
+# tracks_path is optional: when empty, tracks are read from inside the plate
+# (data_path/<row>/<col>/<fov>/tracks.geff), as written by ``biahub track``.
 PARQUET_REQUIRED_FIELDS: list[tuple[str, str]] = [
     ("data_path", "zarr"),
-    ("tracks_path", "platemap"),
     ("channel_0_name", "zarr"),
     ("channel_0_marker", "zarr"),
     ("pixel_size_xy_um", "zarr"),

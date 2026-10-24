@@ -44,7 +44,7 @@ dependencies = [
   "seaborn",
   "tabulate",
   "torchvision",
-  "viscy-data[triplet]",
+  "viscy-data[tracks,triplet]",
   "viscy-models",
   "viscy-transforms",
   "viscy-utils[eval]",

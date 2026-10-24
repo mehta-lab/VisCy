@@ -36,6 +36,7 @@ from viscy_data._utils import (
 )
 from viscy_data.hcs import HCSDataModule
 from viscy_data.select import _filter_fovs, _filter_wells
+from viscy_data.tracks import read_fov_tracks
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -324,7 +325,8 @@ class TripletDataModule(HCSDataModule):
         data_path : str
             Image dataset path
         tracks_path : str
-            Tracks labels dataset path
+            Root of per-FOV tracks (``tracks.geff`` or one CSV per FOV);
+            the image plate itself when tracks are stored in-plate
         source_channel : str | Sequence[str]
             List of input channel names
         z_range : tuple[int, int]
@@ -436,7 +438,7 @@ class TripletDataModule(HCSDataModule):
         for well in _filter_wells(images_plate, include_wells=self._include_wells):
             for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
                 positions.append(fov)
-                tracks_df = pd.read_csv(next((self.tracks_path / fov.zgroup.name.strip("/")).glob("*.csv"))).astype(int)
+                tracks_df = read_fov_tracks(self.tracks_path, fov.zgroup.name.strip("/")).astype(int)
                 tracks_tables.append(tracks_df)
 
         return positions, tracks_tables
