@@ -26,6 +26,13 @@ def test_has_in_plate_tracks(tmp_path):
     assert has_in_plate_tracks(plate)
 
 
+def test_has_in_plate_tracks_named_geff(tmp_path):
+    """A track run with output_label writes tracks_<name>.geff instead of tracks.geff."""
+    plate = tmp_path / "plate.zarr"
+    (plate / "A" / "1" / "0" / "tracks_nuclei_run2.geff").mkdir(parents=True)
+    assert has_in_plate_tracks(plate)
+
+
 def test_legacy_tracking_zarr_rsync(tmp_path):
     script = _script(tmp_path)
     assert "biahub concatenate" in script
@@ -39,7 +46,10 @@ def test_in_plate_tracks_copy(tmp_path):
     script = _script(tmp_path, nfs_tracking_path=None, vast_tracking_path=None, nfs_zarr_path=nfs_zarr)
     assert "Copy in-plate tracks" in script
     assert f'src_root="{nfs_zarr}"' in script
-    assert "--include='tracks.geff/***'" in script
+    # The GEFF(s), the CSV and the label images the GEFF links to (concatenate copies
+    # image arrays only).
+    assert "--include='tracks*.geff/***'" in script
+    assert "--include='labels/***'" in script
     assert "tracking.zarr" not in script
 
 

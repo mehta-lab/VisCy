@@ -4,12 +4,19 @@ Tracks for a FOV ``<row>/<col>/<fov>`` live under ``<tracks_root>/<row>/<col>/<f
 in one of two layouts:
 
 * ``tracks.geff`` — a GEFF graph (https://liveimagetrackingtools.org/geff/), as written
-  by ``biahub track`` inside the image plate FOV. Preferred when present.
+  by ``biahub track`` inside the image plate FOV. Preferred when present. A track run
+  that names its tracked label image (``output_label`` in the track config) writes
+  ``tracks_<output_label>.geff`` instead; a FOV with exactly one such GEFF and no
+  ``tracks.geff`` is read from it.
 * exactly one ``*.csv`` — the ultrack ``to_tracks_layer`` table, either inside the plate
   FOV (``tracks_<row>_<col>_<fov>.csv``) or in a separate tracking zarr.
 
 Both are returned as the same DataFrame: ``track_id, t, [z], y, x, id,
 parent_track_id, parent_id``, with ``-1`` marking roots.
+
+The GEFF's ``seg_id`` equals ``track_id``, the value painted into the tracked label
+image beside it (``labels/tracks_<name>``, linked through the GEFF's
+``related_objects``); the segmentation it was tracked from is ``labels/<name>``.
 """
 
 from __future__ import annotations
@@ -45,14 +52,23 @@ def read_fov_tracks(tracks_root: str | Path, fov_path: str) -> pd.DataFrame:
     Raises
     ------
     FileNotFoundError
-        If the FOV has neither a ``tracks.geff`` nor a tracking CSV.
+        If the FOV has neither a GEFF nor a tracking CSV.
     ValueError
-        If the FOV has no ``tracks.geff`` and more than one CSV.
+        If the FOV has no ``tracks.geff`` and more than one ``tracks_*.geff``, or no
+        GEFF and more than one CSV.
     """
     tracks_dir = Path(tracks_root) / fov_path
     geff_path = tracks_dir / GEFF_TRACKS_NAME
     if geff_path.is_dir():
         return read_geff_tracks(geff_path)
+    named_geffs = sorted(p for p in tracks_dir.glob("tracks_*.geff") if p.is_dir())
+    if len(named_geffs) > 1:
+        raise ValueError(
+            f"{tracks_dir} has no {GEFF_TRACKS_NAME} and several named GEFFs: {named_geffs}. "
+            "Keep one, or rename the one to read to tracks.geff."
+        )
+    if named_geffs:
+        return read_geff_tracks(named_geffs[0])
     csv_files = list(tracks_dir.glob("*.csv"))
     if not csv_files:
         raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")

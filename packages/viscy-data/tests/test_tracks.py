@@ -122,6 +122,24 @@ class TestReadFovTracks:
 
         pd.testing.assert_frame_equal(read_fov_tracks(str(tmp_path), FOV), expected, check_dtype=False)
 
+    def test_named_geff_when_there_is_one(self, tmp_path):
+        """`biahub track` with output_label writes tracks_<name>.geff; one such GEFF is read."""
+        fov_dir = tmp_path / FOV
+        fov_dir.mkdir(parents=True)
+        expected = _expected_tracks(with_z=False)
+        _write_geff(fov_dir / "tracks_nuclei_run2.geff", expected)
+        expected.iloc[:2].to_csv(fov_dir / "tracks_nuclei_run2_A_1_0.csv", index=False)
+
+        pd.testing.assert_frame_equal(read_fov_tracks(tmp_path, FOV), expected, check_dtype=False)
+
+    def test_several_named_geffs_raise(self, tmp_path):
+        fov_dir = tmp_path / FOV
+        fov_dir.mkdir(parents=True)
+        for name in ("tracks_a.geff", "tracks_b.geff"):
+            _write_geff(fov_dir / name, _expected_tracks(with_z=False))
+        with pytest.raises(ValueError, match="several named GEFFs"):
+            read_fov_tracks(tmp_path, FOV)
+
     def test_no_tracks_raises(self, tmp_path):
         (tmp_path / FOV).mkdir(parents=True)
         with pytest.raises(FileNotFoundError, match="No tracking CSV"):

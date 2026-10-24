@@ -129,10 +129,13 @@ The `prepare` CLI automates the full pipeline to rechunk and preprocess a datase
 
 Tracks are copied according to where the NFS dataset keeps them:
 
-- **In-plate** (datasets tracked with current `biahub track`): each FOV's `tracks.geff`
-  and `tracks_<row>_<col>_<fov>.csv` are copied into the same FOV of the VAST zarr.
-  No `tracking.zarr` is created and `tracks_path` can stay empty in Airtable
-  (it defaults to `data_path`).
+- **In-plate** (datasets tracked with current `biahub track`): each FOV's GEFF
+  (`tracks.geff`, or `tracks_<name>.geff` for a run that named its tracked label),
+  `tracks_<row>_<col>_<fov>.csv` and `labels/` (the segmentation `labels/<model>` and
+  the tracked `labels/tracks_<model>` the GEFF links to) are copied into the same FOV
+  of the VAST zarr, since `biahub concatenate` copies image arrays only. No
+  `tracking.zarr` is created and `tracks_path` can stay empty in Airtable (it
+  defaults to `data_path`).
 - **Separate tracking zarr** (older datasets): `1-preprocess/label-free/3-track/<name>_cropped.zarr`
   is rsynced to `tracking.zarr`, as before.
 
@@ -161,7 +164,7 @@ uv run --package airtable-utils \
 ```
 /hpc/projects/organelle_phenotyping/datasets/{dataset_name}/
   {dataset_name}.zarr       # zarr v3 rechunked (OME-Zarr 0.5)
-  tracking.zarr              # copied from NFS (older datasets only; newer ones keep tracks.geff in the FOVs)
+  tracking.zarr              # copied from NFS (older datasets only; newer ones keep tracks.geff and labels/ in the FOVs)
   crop_concat.yml            # generated config for biahub
   qc_config.yml              # generated config for QC
   01_concatenate.sh          # bash: biahub concatenate (submits SLURM via submitit) + tracks copy

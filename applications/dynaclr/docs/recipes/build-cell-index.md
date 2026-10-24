@@ -21,9 +21,15 @@ Each experiment's `tracks_path` is a root holding one directory per FOV,
 
 1. `tracks.geff` if present — the GEFF track graph written by `biahub track`
    (needs the `geff` package, installed with DynaCLR via `viscy-data[tracks]`);
-2. otherwise exactly one `*.csv` (the ultrack tracks table).
+2. otherwise exactly one `tracks_<name>.geff` — what a track run that names its
+   tracked label image (`output_label`) writes;
+3. otherwise exactly one `*.csv` (the ultrack tracks table).
 
-Both give the same table: `track_id, t, [z], y, x, id, parent_track_id, parent_id`.
+All give the same table: `track_id, t, [z], y, x, id, parent_track_id, parent_id`.
+The GEFF's `seg_id` is the `track_id` painted into the tracked label image beside
+it in the same FOV, `labels/tracks_<name>` (`labels/tracks_nuclei` for the A549
+pipeline), a `(T, 1, Z, Y, X)` uint32 OME-NGFF label image; the segmentation it was
+tracked from is `labels/<name>`.
 
 `tracks_path` is optional and defaults to `data_path`. Datasets tracked with
 current `biahub track` store the tracks inside the image plate

@@ -11,8 +11,6 @@ import yaml
 from iohub import open_ome_zarr
 from pydantic import BaseModel, Field
 
-from viscy_data.tracks import GEFF_TRACKS_NAME
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -136,8 +134,9 @@ def has_in_plate_tracks(zarr_path: Path) -> bool:
     """Return whether any FOV of an HCS plate stores its tracks in-plate.
 
     ``biahub track`` writes ``<plate>/<row>/<col>/<fov>/tracks.geff`` (plus a
-    tracks CSV) into the plate itself; older datasets keep tracks in a separate
-    tracking zarr instead.
+    tracks CSV and the tracked label image under ``labels/``) into the plate
+    itself; a run that names its tracked label writes ``tracks_<name>.geff``.
+    Older datasets keep tracks in a separate tracking zarr instead.
 
     Parameters
     ----------
@@ -147,9 +146,9 @@ def has_in_plate_tracks(zarr_path: Path) -> bool:
     Returns
     -------
     bool
-        True if at least one FOV has a ``tracks.geff`` group.
+        True if at least one FOV has a ``tracks.geff`` or ``tracks_*.geff`` group.
     """
-    return next(Path(zarr_path).glob(f"*/*/*/{GEFF_TRACKS_NAME}"), None) is not None
+    return next(Path(zarr_path).glob("*/*/*/tracks*.geff"), None) is not None
 
 
 def resolve_vast_paths(dataset_name: str, vast_root: Path) -> dict[str, Path]:
@@ -472,9 +471,11 @@ def generate_concatenate_script(
     SLURM jobs internally via submitit. The ``-m`` flag makes it block
     until those jobs complete. After concatenation, tracks are copied:
 
-    * in-plate tracks (``nfs_zarr_path`` set): each FOV's ``tracks.geff`` and
-      ``tracks_*.csv`` are copied from the NFS plate into the same FOV of the
-      VAST plate, so ``tracks_path`` can stay unset (defaults to ``data_path``);
+    * in-plate tracks (``nfs_zarr_path`` set): each FOV's GEFF(s) (``tracks.geff``
+      or ``tracks_*.geff``), ``tracks_*.csv`` and ``labels/`` (the segmentation
+      ``labels/<model>`` and the tracked ``labels/tracks_<model>`` the GEFF links
+      to) are copied from the NFS plate into the same FOV of the VAST plate, so
+      ``tracks_path`` can stay unset (defaults to ``data_path``);
     * otherwise the separate tracking zarr is rsynced, if
       ``nfs_tracking_path`` is given.
 
@@ -524,22 +525,24 @@ def generate_concatenate_script(
     """)
 
     if nfs_zarr_path is not None:
-        # biahub concatenate copies image arrays only; carry each FOV's tracks over.
+        # biahub concatenate copies image arrays only; carry each FOV's tracks and
+        # label images (segment's labels/<model>, track's labels/tracks_<model>) over.
         script += dedent(f"""\
 
-            echo "=== Step 2: Copy in-plate tracks ({GEFF_TRACKS_NAME} + tracks CSV) ==="
+            echo "=== Step 2: Copy in-plate tracks (tracks*.geff + tracks CSV + labels/) ==="
             src_root="{nfs_zarr_path}"
             dst_root="{vast_zarr_path}"
             n_copied=0
             for src_fov in "$src_root"/*/*/*/; do
-                [ -d "${{src_fov}}{GEFF_TRACKS_NAME}" ] || continue
+                ls -d "${{src_fov}}"tracks*.geff > /dev/null 2>&1 || continue
                 fov_rel="${{src_fov#"$src_root"/}}"
                 dst_fov="$dst_root/$fov_rel"
                 if [ ! -d "$dst_fov" ]; then
                     echo "WARNING: $fov_rel not in $dst_root, skipping its tracks."
                     continue
                 fi
-                rsync -a --include='{GEFF_TRACKS_NAME}/***' --include='tracks_*.csv' --exclude='*' "$src_fov" "$dst_fov"
+                rsync -a --include='tracks*.geff/***' --include='tracks_*.csv' --include='labels/***' \\
+                    --exclude='*' "$src_fov" "$dst_fov"
                 n_copied=$((n_copied + 1))
             done
             echo "Copied tracks for $n_copied FOVs."
