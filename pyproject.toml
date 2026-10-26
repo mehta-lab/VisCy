@@ -118,7 +118,6 @@ markers = [
   # and errors when run as a single file.
   "slow: marks tests requiring GPU/HPC resources or live HPC data (deselect with -m 'not slow')",
   "hpc_integration: requires HPC data paths and a CUDA GPU",
-  "requires_data: reads the live dynacell training tree on disk (deselect with -m 'not requires_data')",
 ]
 
 [tool.uv-dynamic-versioning]
