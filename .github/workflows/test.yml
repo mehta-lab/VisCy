@@ -91,6 +91,33 @@ jobs:
         run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
         working-directory: packages/viscy-data
 
+  test-utils:
+    name: Test Utils (Python ${{ matrix.python-version }}, ubuntu-latest)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-suffix: ubuntu-latest-${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: packages/viscy-utils
+
+      - name: Run tests with coverage
+        run: uv run --frozen pytest --cov=viscy_utils --cov-report=term-missing
+        working-directory: packages/viscy-utils
+
   test-applications:
     name: Test (${{ matrix.application }}, Python 3.13, ubuntu-latest)
     runs-on: ubuntu-latest
@@ -166,7 +193,7 @@ jobs:
   check:
     name: All tests pass
     if: always()
-    needs: [test, test-data, test-data-extras, test-applications, test-dynacell-configs]
+    needs: [test, test-data, test-data-extras, test-utils, test-applications, test-dynacell-configs]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all test jobs succeeded
