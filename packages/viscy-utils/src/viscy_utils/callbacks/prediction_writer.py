@@ -338,7 +338,8 @@ class HCSPredictionWriter(BasePredictionWriter):
                     written[t, list(planes)] = False
             self._written_windows[f"/{array.path}"] = written
         run_positions = {array.path.rsplit("/", 1)[0] for array in window_arrays}
-        if os.path.exists(self.output_store):
+        existed = os.path.exists(self.output_store)
+        if existed:
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
             else:
@@ -447,12 +448,12 @@ class HCSPredictionWriter(BasePredictionWriter):
             self.target_index = self._get_channel_indices(target_channel)
         self.prediction_index = self._get_channel_indices(prediction_channel)
         # Read now: once volume writes run on the flush thread, this thread leaves the store alone.
-        self._store_dtypes = {}
-        for img_name in self._source_shapes:
+        self._store_dtypes: dict[str, torch.dtype] = {}
+        for img_name in self._source_shapes if existed else ():
             try:
-                self._store_dtypes[img_name] = self.plate[img_name].dtype
+                self._store_dtypes[img_name] = torch.from_numpy(np.empty(0, dtype=self.plate[img_name].dtype)).dtype
             except KeyError:
-                pass
+                pass  # created by this run, in the prediction's dtype
 
     def _get_channel_indices(self, channel_names: list[str]) -> list[int]:
         """Get channel indices from the plate for given channel names.
@@ -632,10 +633,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         if key not in self._volumes:
             depth = self._source_shapes[img_name][1]
             shape = (sample_prediction.shape[0], depth, *sample_prediction.shape[-2:])
-            if img_name in self._store_dtypes:
-                dtype = torch.from_numpy(np.empty(0, dtype=self._store_dtypes[img_name])).dtype
-            else:
-                dtype = sample_prediction.dtype
+            dtype = self._store_dtypes.get(img_name, sample_prediction.dtype)
             volume = torch.zeros(shape, dtype=dtype, device=sample_prediction.device)
             self._volumes[key] = (volume, z_slice.start, z_slice.stop)
         volume, start, stop = self._volumes[key]
@@ -663,16 +661,12 @@ class HCSPredictionWriter(BasePredictionWriter):
         if self._pending is not None:
             # One write in flight bounds the host copies held to two volumes.
             self._pending.result()
-        self._pending = self._flush_pool.submit(
-            self._write_volume, img_name, t_index, planes, volume[:, :stop].shape, start, complete
-        )
+        self._pending = self._flush_pool.submit(self._write_volume, img_name, t_index, planes, start, complete)
 
-    def _write_volume(
-        self, img_name: str, t_index: int, planes: NDArray, shape: tuple[int, ...], start: int, complete: bool
-    ) -> None:
+    def _write_volume(self, img_name: str, t_index: int, planes: NDArray, start: int, complete: bool) -> None:
         """Write planes ``start:`` of one volume to the store, then the FOV's marker if ``complete`` (flush thread)."""
         stop = start + planes.shape[1]
-        image = self._create_image(img_name, shape, planes.dtype)
+        image = self._create_image(img_name, (planes.shape[0], stop, *planes.shape[2:]), planes.dtype)
         _resize_image(image, t_index, slice(start, stop))
         image.oindex[t_index, self.prediction_index, slice(start, stop)] = planes
         if complete:
