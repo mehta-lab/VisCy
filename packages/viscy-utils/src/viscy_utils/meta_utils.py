@@ -418,7 +418,7 @@ def generate_fg_masks(
     channel_names,
     fg_mask_key="fg_mask",
 ):
-    """Precompute binary foreground masks from Otsu thresholds.
+    """Precompute binary foreground masks with the CLAHE, median and Otsu recipe.
 
     For each FOV and specified channel, loads the full-resolution image one
     timepoint at a time and binarizes it with
