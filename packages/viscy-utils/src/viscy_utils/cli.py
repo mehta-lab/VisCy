@@ -89,9 +89,10 @@ def _init_args_of(callback) -> Namespace | dict | None:
 def _fit_callbacks_without(config: Namespace, subcommand: str | None, class_path: str) -> list | None:
     """Return the ``fit`` trainer's mutable callback list, or None to skip injecting.
 
-    None when the subcommand is not ``fit``, when the resolved config has no
-    ``trainer.callbacks`` list, or when a ``class_path`` callback is already there,
-    which keeps each injection idempotent.
+    A fit whose ``trainer.callbacks`` is unset (``None``) gets an empty list to
+    append to. None when the subcommand is not ``fit``, when the config has no
+    ``trainer`` section, or when a ``class_path`` callback is already there, which
+    keeps each injection idempotent.
     """
     if subcommand != "fit":
         return None
@@ -102,6 +103,8 @@ def _fit_callbacks_without(config: Namespace, subcommand: str | None, class_path
     if not isinstance(trainer, Namespace):
         return None
     callbacks = trainer.get("callbacks")
+    if callbacks is None:
+        callbacks = trainer["callbacks"] = []
     if not isinstance(callbacks, list):
         return None
     if any(_callback_field(callback, "class_path") == class_path for callback in callbacks):
@@ -204,7 +207,7 @@ def _inject_optimizer_health_guard(config: Namespace, subcommand: str | None) ->
 
     Unlike :func:`_inject_checkpoint_guardrails` this does not depend on the leaf
     declaring a monitored ``ModelCheckpoint`` — a run with no checkpointing at all
-    can still stall — so it only requires a ``trainer.callbacks`` list to append to.
+    can still stall — so it also covers a fit that sets no callbacks.
     """
     callbacks = _fit_callbacks_without(config, subcommand, _OPTIMIZER_HEALTH_CLASS_PATH)
     if callbacks is None:
