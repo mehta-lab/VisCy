@@ -256,6 +256,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         self._checkpoint_signature = None if checkpoint_path is None else checkpoint_signature(checkpoint_path)
         self.settings_sha256_12 = settings_sha256_12
         self._dataset_scale = None
+        # Set by on_predict_start; None until then, so a failure during setup closes nothing.
+        self.plate: Plate | None = None
+        self._flush_pool: ThreadPoolExecutor | None = None
 
     def _get_scale_metadata(self, metadata_store: os.PathLike | None) -> None:
         """Read scale metadata from an existing zarr store.
@@ -524,11 +527,31 @@ class HCSPredictionWriter(BasePredictionWriter):
             for img_name, t_index in list(self._volumes):
                 self._flush_volume(img_name, t_index, complete=False)
         finally:
-            # Even when a write failed: let the last write finish, then close the store.
-            self._flush_pool.shutdown(wait=True)
-            self.plate.close()
+            # Even when a write failed.
+            self._close()
         if self._pending is not None:
             self._pending.result()
+
+    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        """Close the store when predict fails, e.g. on a volume write that failed mid-run.
+
+        Parameters
+        ----------
+        trainer : Trainer
+            The Lightning trainer instance.
+        pl_module : LightningModule
+            The Lightning module.
+        exception : BaseException
+            The exception that stopped predict.
+        """
+        self._close()
+
+    def _close(self) -> None:
+        """Let the last volume write finish, then close the store; safe after a partial setup or a second call."""
+        if self._flush_pool is not None:
+            self._flush_pool.shutdown(wait=True)
+        if self.plate is not None:
+            self.plate.close()
 
     def write_sample(
         self,

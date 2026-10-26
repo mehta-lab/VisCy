@@ -466,7 +466,7 @@ def test_a_failed_volume_write_fails_the_predict(tmp_path, fail_volume):
     """A write error on the flush thread stops the predict, and its FOV is never marked complete.
 
     Volume 2 is FOV 0's last: the error stops the run before FOV 1 is written. Volume 4 is FOV 1's last, so the
-    error surfaces at predict end, after FOV 0 completed.
+    error surfaces at predict end, after FOV 0 completed. Either way the store is closed.
     """
     source = tmp_path / "source.zarr"
     _write_random_source(source)
@@ -475,9 +475,9 @@ def test_a_failed_volume_write_fails_the_predict(tmp_path, fail_volume):
         Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
             _OnesModule(), datamodule=_ones_data_module(source), return_predictions=False
         )
-    if fail_volume == 4:  # raised at predict end: the store is closed and the pool shut down all the same
-        assert writer.closed
-        assert writer._flush_pool._shutdown
+    # Raised mid-run or at predict end, the last write finishes and the store is closed all the same.
+    assert writer.closed
+    assert writer._flush_pool._shutdown
     with open_ome_zarr(tmp_path / "pred.zarr", mode="r") as plate:
         markers = [pos.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"] for _, pos in plate.positions()]
     assert ["source_shape" in marker for marker in markers] == ([False] if fail_volume == 2 else [True, False])
