@@ -132,9 +132,9 @@ class SlidingWindowDataset(Dataset):
         self._transform_volume = (
             cache_volume
             and preloaded_fovs is None  # preloaded windows bypass the cache
-            and transform is not None
             and all(getattr(t, "pointwise", False) for t in transforms)
         )
+        self._transform_windows = bool(transform) and not self._transform_volume
         self._volume_key: tuple | None = None
         self._volume: np.ndarray | None = None
         if z_planes is not None and z_window_size != 1:
@@ -312,7 +312,7 @@ class SlidingWindowDataset(Dataset):
                 self._volume = volume
                 self._volume_key = key
             data = self._volume[:, :, z : z + self.z_window_size]
-            if self.transform and not self._transform_volume:
+            if self._transform_windows:
                 # Copy: transforms must not reach the cached volume the next window is cut from.
                 data = data.copy()
             return torch.from_numpy(data).unbind(dim=1), (f"/{img.path}", t, z)
@@ -395,7 +395,7 @@ class SlidingWindowDataset(Dataset):
         if norm_meta is not None:
             norm_meta = self._resolve_timepoint_norm_meta(norm_meta, sample_index[1])
             sample_images["norm_meta"] = norm_meta
-        if self.transform and not self._transform_volume:
+        if self._transform_windows:
             sample_images = self.transform(sample_images)
         if "weight" in sample_images:
             del sample_images["weight"]
