@@ -53,7 +53,7 @@ dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
 ```
 
 - **Location:** `configs/benchmarks/virtual_staining/_internal/leaf/grouped/<bucket>/eval_grouped.yaml`.
-- **Generated, mostly:** most buckets are written by `tools/generate_grouped_eval_configs.py` or `tools/generate_lite_benchmark_configs.py`; regenerate those rather than hand-editing them. The HEK and `celldiff_r2` buckets are hand-written.
+- **Generated, mostly:** most buckets are written by `tools/generate_grouped_eval_configs.py`, `tools/generate_spotlight_v2_eval_configs.py` or `tools/generate_lite_benchmark_configs.py`; regenerate those rather than hand-editing them. The HEK and `celldiff_r2` buckets are hand-written.
 - **Suffixes** mark variants of a bucket, e.g. `__2d`, `__lite`, `__temporal`.
 - **`conditions` entries** may override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, `benchmark.dataset_ref` and `name`. Changing any field that affects model loading or segmentation raises an error.
 - **Always re-scored:** grouped leaves set `force_recompute.final_metrics: true`. To add a condition to a finished bucket without re-scoring the others, pass `force_recompute.final_metrics=false`.
