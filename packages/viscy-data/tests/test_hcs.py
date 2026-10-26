@@ -1328,3 +1328,17 @@ def test_cached_volume_transformed_once_equals_per_window_transforms(tmp_path, l
         for key in ("source", "target"):
             assert reference[key].dtype == cached[key].dtype == torch.float32
             assert reference[key].numpy().tobytes() == cached[key].numpy().tobytes()
+
+
+def test_cached_volume_refuses_nonzero_retries(hcs_with_fg_mask):
+    """Retries jump to random windows and would judge transformed values, so the volume cache refuses them."""
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        with raises(ValueError, match="min_nonzero_fraction"):
+            SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase"], "target": ["Fluorescence"]},
+                z_window_size=4,
+                min_nonzero_fraction=0.1,
+                cache_volume=True,
+            )

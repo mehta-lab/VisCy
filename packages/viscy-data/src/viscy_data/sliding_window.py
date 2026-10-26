@@ -101,10 +101,10 @@ class SlidingWindowDataset(Dataset):
         loader); random access (training) would read a whole volume per window.
         Each DataLoader worker would keep its own copy and read the whole volume,
         so :class:`HCSDataModule` enables it only with ``num_workers == 0``. Not
-        combinable with ``fg_mask_key``. When every transform is ``pointwise``
-        (each voxel mapped through precomputed statistics alone, e.g.
-        ``NormalizeSampled``), the cached volume is transformed once instead of
-        every window. Default False.
+        combinable with ``fg_mask_key`` or ``min_nonzero_fraction``. When every
+        transform is ``pointwise`` (each voxel mapped through precomputed
+        statistics alone, e.g. ``NormalizeSampled``), the cached volume is
+        transformed once instead of every window. Default False.
     """
 
     def __init__(
@@ -127,6 +127,9 @@ class SlidingWindowDataset(Dataset):
         super().__init__()
         if cache_volume and fg_mask_key is not None:
             raise ValueError("cache_volume caches one array per (position, t); it cannot serve fg_mask reads too")
+        if cache_volume and min_nonzero_fraction > 0:
+            # The check would also see transformed values when the cached volume is transformed once.
+            raise ValueError("cache_volume serves windows in order; min_nonzero_fraction retries random windows")
         self.cache_volume = cache_volume
         transforms = getattr(transform, "transforms", [transform])
         self._transform_volume = (
