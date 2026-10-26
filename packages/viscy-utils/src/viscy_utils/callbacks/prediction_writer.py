@@ -6,6 +6,7 @@ with optional blending of overlapping depth slices.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -94,9 +95,8 @@ def _blend_in(
 ) -> torch.Tensor | NDArray:
     """Blend a new stack into an old stack over a Z range with linear feathering.
 
-    Supports torch tensors (5D: B,C,Z,Y,X for in-memory sliding window
-    prediction; 4D: C,Z,Y,X for HCSPredictionWriter's in-memory volume) and numpy
-    arrays (4D: C,Z,Y,X) for HCSPredictionWriter's per-window writes.
+    Supports torch tensors (B,C,Z,Y,X or C,Z,Y,X) for in-memory prediction and
+    numpy arrays (C,Z,Y,X) for HCSPredictionWriter's per-window writes.
 
     Parameters
     ----------
@@ -121,11 +121,16 @@ def _blend_in(
         factors.append(min(i + 1, samples))
     _logger.debug(f"Blending with factors {factors}.")
     if isinstance(old_stack, torch.Tensor):
-        factors = torch.tensor(factors, dtype=old_stack.dtype, device=old_stack.device)
-        factors = factors.view(-1, 1, 1)
+        factors = _torch_factors(tuple(factors), old_stack.dtype, old_stack.device)
     else:
         factors = np.array(factors)[np.newaxis, :, np.newaxis, np.newaxis]
     return old_stack * (factors - 1) / factors + new_stack / factors
+
+
+@functools.lru_cache(maxsize=64)
+def _torch_factors(factors: tuple[int, ...], dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    """Blend factors as a ``(Z, 1, 1)`` tensor, cached: a per-window host-to-device copy would sync every window."""
+    return torch.tensor(factors, dtype=dtype, device=device).view(-1, 1, 1)
 
 
 def _store_into(volume: torch.Tensor, z_slice: slice, planes: torch.Tensor) -> None:
