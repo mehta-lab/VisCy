@@ -38,15 +38,6 @@ TRAIN_LEAVES = [
     ("membrane", "celldiff"),
     ("membrane", "fnet3d_paper"),
     ("membrane", "unetvit3d"),
-    # Spotlight arms (iPSC-trained). All four families x nucleus + membrane.
-    ("nucleus", "fnet3d_spotlight"),
-    ("nucleus", "fnet2d_spotlight"),
-    ("nucleus", "pix2pix3d_unetvit_spotlight"),
-    ("nucleus", "pix2pix2d_unetvit_spotlight"),
-    ("membrane", "fnet3d_spotlight"),
-    ("membrane", "fnet2d_spotlight"),
-    ("membrane", "pix2pix3d_unetvit_spotlight"),
-    ("membrane", "pix2pix2d_unetvit_spotlight"),
 ]
 
 # A549-trained train leaves. Kept separate from TRAIN_LEAVES because that list's
@@ -84,22 +75,11 @@ PREDICT_LEAVES = [
 ]
 
 # celldiff predict leaves are split per inference method; unetvit3d has a single file.
-PREDICT_LEAF_FILES = (
-    [
-        (organelle, "celldiff", f"predict__ipsc_confocal__{method}.yml")
-        for organelle in ("er", "mito", "nucleus", "membrane")
-        for method in ("denoise", "iterative", "sliding_window")
-    ]
-    + [(organelle, "unetvit3d", "predict__ipsc_confocal.yml") for organelle in ("er", "mito", "nucleus", "membrane")]
-    + [
-        # Spotlight arms -- iPSC condition ONLY. Their a549_* and hek_* siblings read
-        # test stores outside test_cropped/ (.../a549/mantis/test/, .../hek/mantis/test/),
-        # which test_predict_leaf_composes asserts against.
-        (organelle, f"{model}_spotlight", "predict__ipsc_confocal.yml")
-        for organelle in ("nucleus", "membrane")
-        for model in ("fnet3d", "fnet2d", "pix2pix3d_unetvit", "pix2pix2d_unetvit")
-    ]
-)
+PREDICT_LEAF_FILES = [
+    (organelle, "celldiff", f"predict__ipsc_confocal__{method}.yml")
+    for organelle in ("er", "mito", "nucleus", "membrane")
+    for method in ("denoise", "iterative", "sliding_window")
+] + [(organelle, "unetvit3d", "predict__ipsc_confocal.yml") for organelle in ("er", "mito", "nucleus", "membrane")]
 
 
 @pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
@@ -239,26 +219,6 @@ _EXPECTED_DATA_HPARAMS = {
     "fnet3d_t01": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
     "fnet3d_tspread": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
     "unext2": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 8},
-    # Spotlight arms reuse their baseline's data overlay untouched -- the only
-    # intended delta is the loss (plus fg_mask_key and the target subtrahend).
-    # Values are therefore the BASELINE's, verified equal to it when these leaves
-    # were authored; a drift here means the spotlight leaf stopped being a
-    # matched comparison. Their baselines are absent from this table only because
-    # the 2D and pix2pix families are absent from TRAIN_LEAVES.
-    "fnet3d_spotlight": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
-    "fnet2d_spotlight": {"batch_size": 48, "z_window_size": 1, "yx_patch_size": [64, 64], "num_workers": 8},
-    "pix2pix3d_unetvit_spotlight": {
-        "batch_size": 4,
-        "z_window_size": 13,
-        "yx_patch_size": [512, 512],
-        "num_workers": 4,
-    },
-    "pix2pix2d_unetvit_spotlight": {
-        "batch_size": 4,
-        "z_window_size": 1,
-        "yx_patch_size": [512, 512],
-        "num_workers": 4,
-    },
 }
 
 
@@ -782,13 +742,7 @@ _MIGRATED_TARGET_INFO = {
     "membrane": ("train/cell.zarr", "test_cropped/cell.zarr", "Membrane"),
 }
 
-# Leaves that deliberately bypass the manifest resolver (``dataset_ref: null``)
-# and declare data_path inline. The in-focus 2D track reads the offline
-# `_focus.zarr` slab, which has no manifest entry, so resolving them against the
-# fixture manifest would assert the wrong store. Their 3D baselines are covered.
-_UNMIGRATED_MODELS = frozenset({"fnet2d_spotlight", "pix2pix2d_unetvit_spotlight"})
-
-_MIGRATED_TRAIN_LEAVES = [(o, m) for o, m in TRAIN_LEAVES if o in _MIGRATED_TARGET_INFO and m not in _UNMIGRATED_MODELS]
+_MIGRATED_TRAIN_LEAVES = [(o, m) for o, m in TRAIN_LEAVES if o in _MIGRATED_TARGET_INFO]
 _MIGRATED_PREDICT_LEAVES = [(o, m) for o, m in PREDICT_LEAVES if o in _MIGRATED_TARGET_INFO]
 
 
@@ -1113,25 +1067,10 @@ _WIDE_GPU_TRAIN_LEAVES = (
         for pool in ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
     )
     | frozenset(
-        # The pix2pix2d spotlight arms carry the same measured per-rank peak as the
-        # baseline they copy (13.3 GiB at bs=4), so they inherit the same opt-out.
-        f"{organelle}/pix2pix2d_unetvit_spotlight/ipsc_confocal/train.yml"
+        # The seed replicate only changes the seed, so it keeps the baseline's bs=4
+        # per-rank footprint and its measured opt-out.
+        f"{organelle}/pix2pix2d_unetvit_seed1/ipsc_confocal/train.yml"
         for organelle in ("nucleus", "membrane")
-    )
-    | frozenset(
-        # Spotlight-v2 pix2pix2d arms (generate_spotlight_v2_leaves.py): the segaux arm adds
-        # only a per-patch Dice term and the seed replicate only changes the seed, so both
-        # keep the baseline's bs=4 per-rank footprint and its measured opt-out.
-        f"{organelle}/pix2pix2d_unetvit_{suffix}/ipsc_confocal/train.yml"
-        for organelle in ("nucleus", "membrane")
-        for suffix in ("segaux", "segauxself", "seed1")
-    )
-    | frozenset(
-        # P1 fine-tunes of the same baseline (nucleus). The control changes only the budget, LR and
-        # starting weights. The segcons arm adds cpsam: ~1.2 GB of bf16 weights plus ~0.07 GB per
-        # sample with per-tile checkpointing (A40 bench, 2026-10-15), so ~15 GiB/rank at bs=4.
-        f"nucleus/pix2pix2d_unetvit_{suffix}/ipsc_confocal/train.yml"
-        for suffix in ("segcons", "segcons_ctrl")
     )
     | frozenset(
         # Warmup-matched refit of every baseline fit, plus its second draw: only
@@ -1312,35 +1251,10 @@ def test_celldiff_lite_leaf_takes_the_fast_overlay(leaf: Path) -> None:
 # all eight sit on hardware_4gpu_long.yml (7 days) instead. Every other 4-GPU
 # leaf finishes inside 4 days; a 7-day 4-GPU H100/H200 allocation backfills far
 # worse, so this list should grow only on evidence.
-_LONG_WALL_TRAIN_LEAVES = (
-    frozenset(
-        f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
-        for organelle in ("er", "mito", "nucleus", "membrane")
-        for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
-    )
-    | frozenset(
-        # Spotlight-v2 UNeXt2-3D iPSC fits from scratch (fresh v2 baseline + its segaux arm).
-        # Measured on the April iPSC runs of the same 4-GPU recipe, consecutive checkpoint
-        # mtimes within one allocation (2026-04-30): nucleus e96 00:39:27 -> e98 01:38:24
-        # = 2.04 ep/h, e98 -> e111 08:09:59 = 1.99 ep/h; membrane e134 09:21:15 -> e136
-        # 10:21:36 = 1.99 ep/h, e146 15:52:49 -> e147 16:22:49 = 2.00 ep/h. 200 epochs at
-        # ~2.0 ep/h is ~100 h, over the 96 h default. The `_seed1` second draws are the same
-        # recipe with seed_everything: 1, so the same rate applies.
-        f"{organelle}/fcmae_vscyto3d_scratch_{suffix}/ipsc_confocal/train.yml"
-        for organelle in ("nucleus", "membrane")
-        for suffix in ("v2", "segaux", "v2_seed1", "segaux_seed1")
-    )
-    | frozenset(
-        # The membrane SAUNA arm of the same recipe: its segaux source ran 2.44 ep/h (epoch=125
-        # 2026-09-27 13:44:58 -> epoch=154 2026-09-28 01:38:59), 82 h for 200 epochs, and SAUNA
-        # cost the FNet-3D nucleus fit +7.6%, ~88 h against the 96 h default.
-        {"membrane/fcmae_vscyto3d_scratch_segaux_sauna/ipsc_confocal/train.yml"}
-    )
-    | frozenset(
-        # The membrane cpout arm: the same segaux recipe on a thin-wall mask, so the same measured
-        # 2.44 ep/h of its segaux source (checkpoint mtimes above), 82 h for 200 epochs.
-        {"membrane/fcmae_vscyto3d_scratch_segaux_cpout/ipsc_confocal/train.yml"}
-    )
+_LONG_WALL_TRAIN_LEAVES = frozenset(
+    f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
+    for organelle in ("er", "mito", "nucleus", "membrane")
+    for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
 )
 _LONG_WALL_TIME = "7-00:00:00"
 _DEFAULT_4GPU_TIME = "4-00:00:00"
