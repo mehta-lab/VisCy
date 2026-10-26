@@ -32,8 +32,8 @@ Three architectures, each trained per organelle (12 checkpoints total):
 
 ## Targets
 
-All models take a single `Phase3D` input channel (`z_window_size=16`,
-`512×512` YX) and predict one fluorescence target:
+All models take a single `Phase3D` input channel (`512×512` YX; Z window 32 for
+FNet3D, 15 for VSCyto3D, 8 for CELL-Diff) and predict one fluorescence target:
 
 | Organelle marker | Predicted channel |
 | --- | --- |
@@ -43,6 +43,10 @@ All models take a single `Phase3D` input channel (`z_window_size=16`,
 | TOMM20 | Mitochondria (structure) |
 
 ## Files
+
+These are the A549-trained checkpoints of the DynaCell v1 release, byte-identical to
+`s3://dynacell/v1/models/a549/{organelle}/{model}/` (organelle `membrane`, `nucleus`,
+`er`, `mito`; see that prefix's `README.md` and `checkpoints.csv`).
 
 `{model}_{organelle}.ckpt`, e.g. `celldiff_caax.ckpt`, `fnet3d_h2b.ckpt`,
 `vscyto3d_sec61b.ckpt` — `model ∈ {celldiff, fnet3d, vscyto3d}`,
@@ -67,7 +71,9 @@ See the [demo Space](https://huggingface.co/spaces/biohub/dynacell) and
 ## Training data
 
 Live A549 cells imaged on the mantis microscope (phase contrast + paired
-fluorescence ground truth).
+fluorescence ground truth), training split of the DynaCell release
+(`s3://dynacell/v1/data/biohub-a549/train/`). ER and mitochondria targets are raw
+(not deconvolved) fluorescence.
 
 ## License
 
@@ -75,12 +81,14 @@ BSD 3-Clause — © CZ Biohub SF.
 
 ## Citation
 
-Please cite the DynaCell study and VisCy. <!-- TODO: add final paper reference / DOI -->
-
 ```bibtex
-@software{viscy,
-  title  = {VisCy: computer vision for virtual staining of cells},
-  author = {CZ Biohub SF and contributors},
-  url    = {https://github.com/mehta-lab/VisCy}
+@inproceedings{kalinin2026dynacell,
+  title     = {{DynaCell}: An Evaluation Framework for Dynamic {3D} Virtual Staining of Live Cells},
+  author    = {Kalinin, Alexandr A. and Zheng, Dihan and Theodoro, Taylla Milena and
+               Ivanov, Ivan and Hirata-Miyasaki, Eduardo and Lee, See-Chi and Liu, Aofei and
+               Varra, Sricharan Reddy and Chandler, Talon and Pradeep, Soorya and Liu, Chad and
+               Leonetti, Manuel D. and Arias, Carolina and Huang, Bo and Mehta, Shalin B.},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS 2026), Evaluations and Datasets Track},
+  year      = {2026}
 }
 ```

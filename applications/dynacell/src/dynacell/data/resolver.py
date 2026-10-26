@@ -48,7 +48,7 @@ class ResolvedDataset(BaseModel):
     """Flat view of the manifest fields a composed config needs."""
 
     manifest_path: Path
-    data_path_train: Path
+    data_path_train: Path | None = None
     data_path_test: Path
     source_channel: str
     target_channel: str
@@ -172,6 +172,8 @@ def resolve_dataset_ref(
         If the dataset slug is not found under any root.
     TargetNotFoundError
         If the target slug is not defined in the located manifest.
+    ValueError
+        If ``ref.source_channel`` names a channel the manifest does not declare.
     """
     all_roots = discover_manifest_roots(roots)
     manifest_path = _find_manifest(ref.dataset, all_roots)
@@ -188,7 +190,7 @@ def resolve_dataset_ref(
         manifest_path=manifest_path,
         data_path_train=target.stores.train,
         data_path_test=target.stores.test,
-        source_channel=manifest.source_channel,
+        source_channel=manifest.resolve_source_channel(ref.source_channel),
         target_channel=target.target_channel,
         spacing=manifest.spacing,
         cell_segmentation_path=target.stores.cell_segmentation,

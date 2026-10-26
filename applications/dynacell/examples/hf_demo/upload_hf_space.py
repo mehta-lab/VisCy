@@ -39,6 +39,8 @@ def main() -> None:
         folder_path=str(HF_SPACE_DIR),
         repo_id=SPACE_REPO,
         repo_type="space",
+        ignore_patterns=["__pycache__/*", "*.pyc"],
+        delete_patterns=["__pycache__/*", "*.pyc"],
     )
     print(f"\nDone.  Space URL: https://huggingface.co/spaces/{SPACE_REPO}")
 

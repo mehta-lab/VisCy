@@ -11,7 +11,21 @@ build:
   dinov3: true
   dynaclr: true
   celldino: true
+  morphem: true
   focus: false  # write focus_slice zattrs (in-focus plane per FOV) to the GT store
+  # Path of a predict plane file (JSON, viscy_data read_z_planes) holding the focus2d slab
+  # of every position and timepoint, for HCSDataModule.predict_z_planes of a 2D model on
+  # this store. Needs focus2d.halfwidth; resolved exactly as the 2D eval resolves it.
+  # Under focus2d the GT CP/deep caches are built on the plane/slab (build.masks=false).
+  focus_planes: null
+  # Prewarm the GT instance-label cache for the configured segmentation.backend
+  # (instance_masks/<target>__<backend>.zarr). Off by default; set true (with
+  # segmentation.backend=cpdino, build.masks=false, compute_instance_ap kept off) to
+  # warm GT instances once per (test-set, target) before a parallel instance-AP
+  # campaign, so the many model buckets sharing a GT set hit the cache instead of
+  # racing to recompute it. build.masks=false is REQUIRED: the mask path asks
+  # segment() for a binary mask, which the instance backends cannot produce.
+  instances: false
 
 # The focus-estimator params (channel_name / na_det / lambda_ill / pixel_size / device)
 # are inherited from eval.yaml's top-level `focus:` block; override there or on the CLI.
