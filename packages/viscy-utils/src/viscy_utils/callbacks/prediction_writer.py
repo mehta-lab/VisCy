@@ -130,7 +130,10 @@ def _blend_in(
 @functools.lru_cache(maxsize=64)
 def _torch_factors(factors: tuple[int, ...], dtype: torch.dtype, device: torch.device) -> torch.Tensor:
     """Blend factors as a ``(Z, 1, 1)`` tensor, cached: a per-window host-to-device copy would sync every window."""
-    return torch.tensor(factors, dtype=dtype, device=device).view(-1, 1, 1)
+    # A normal tensor even when first built under predict's inference mode, so a later
+    # grad-enabled caller can still save it for backward.
+    with torch.inference_mode(False):
+        return torch.tensor(factors, dtype=dtype, device=device).view(-1, 1, 1)
 
 
 def _store_into(volume: torch.Tensor, z_slice: slice, planes: torch.Tensor) -> None:

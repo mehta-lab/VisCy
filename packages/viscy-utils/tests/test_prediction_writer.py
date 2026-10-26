@@ -15,7 +15,7 @@ from lightning.pytorch import LightningModule, Trainer
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
 from viscy_utils.callbacks import prediction_writer
-from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in, _store_into
+from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in, _store_into, _torch_factors
 from viscy_utils.prediction_metadata import (
     PREDICTED_Z_PLANES_KEY,
     PREDICTION_COMPLETE_KEY,
@@ -927,6 +927,17 @@ def test_blend_in_consistency():
     result_torch = _blend_in(old_torch, new_torch, z_slice)
 
     np.testing.assert_allclose(result_np, result_torch.squeeze(0).numpy(), rtol=1e-5, atol=1e-5)
+
+
+def test_blend_factors_cached_under_inference_mode_serve_autograd():
+    """Factors first cached inside inference mode (predict) still work in a later blend that records gradients."""
+    _torch_factors.cache_clear()  # an earlier test may have cached these factors outside inference mode
+    old = torch.ones(1, 2, 5, 8, 8, dtype=torch.float64)
+    with torch.inference_mode():
+        _blend_in(old, old, slice(3, 8))
+    new = torch.zeros(1, 2, 5, 8, 8, dtype=torch.float64, requires_grad=True)
+    _blend_in(old, new, slice(3, 8)).sum().backward()
+    assert new.grad is not None
 
 
 def test_blend_in_zero_start():
