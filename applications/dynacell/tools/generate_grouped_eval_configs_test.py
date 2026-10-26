@@ -357,14 +357,20 @@ def test_walk_predictions_skips_out_of_scope_test_sets(tmp_path: Path) -> None:
     assert [p.test_set for p in pool] == ["a549"]
 
 
-def test_walk_predictions_skips_spotlight_arms(tmp_path: Path) -> None:
-    """Spotlight arm stores share the canonical tree but never enter the paper buckets."""
+def test_walk_predictions_skips_unregistered_model_dirs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Model dirs the generator does not register are skipped before parsing, and counted.
+
+    The canonical tree is shared with experiment arms that other generators score.
+    Parsing ``celldiff_newarm_iterative`` would raise on the unknown CellDiff variant
+    ``newarm_iterative``, and an unknown deterministic token would raise too.
+    """
     _touch_prediction(tmp_path, "nucleus", "fnet2d", "ipsc", "ipsc")
-    _touch_prediction(tmp_path, "nucleus", "fnet2d_segaux", "ipsc", "ipsc")
-    _touch_prediction(tmp_path, "nucleus", "celldiff_segaux_iterative", "ipsc", "ipsc")
-    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_last", "ipsc", "a549__mock")
+    _touch_prediction(tmp_path, "nucleus", "fnet2d_newarm", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "fnet2d_newarm", "ipsc", "a549__mock")
+    _touch_prediction(tmp_path, "nucleus", "celldiff_newarm_iterative", "ipsc", "ipsc")
 
     assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
+    assert "skipped 3 prediction zarrs under unregistered model dirs" in capsys.readouterr().out
 
 
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:
