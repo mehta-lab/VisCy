@@ -26,6 +26,9 @@ def _match_image(tensor: Tensor, target: Tensor) -> Tensor:
 
 class NormalizeSampled(MapTransform):
     is_spatial = False
+    # Each voxel maps through precomputed statistics alone, so a whole volume normalized
+    # once equals each window normalized on its own (``SlidingWindowDataset.cache_volume``).
+    pointwise = True
 
     """Normalize using precomputed statistics stored in ``sample["norm_meta"]``.
 
@@ -82,6 +85,8 @@ class NormalizeSampled(MapTransform):
 
 class MinMaxSampled(MapTransform):
     is_spatial = False
+    # See NormalizeSampled.pointwise.
+    pointwise = True
 
     """Normalize to [-1, 1] by clipping then rescaling with precomputed range statistics.
 

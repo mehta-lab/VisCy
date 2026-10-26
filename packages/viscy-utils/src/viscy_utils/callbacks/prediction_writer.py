@@ -6,8 +6,10 @@ with optional blending of overlapping depth slices.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Literal, Optional, Sequence
 
 import numpy as np
@@ -93,8 +95,8 @@ def _blend_in(
 ) -> torch.Tensor | NDArray:
     """Blend a new stack into an old stack over a Z range with linear feathering.
 
-    Supports both torch tensors (5D: B,C,Z,Y,X) for in-memory sliding window
-    prediction and numpy arrays (4D: C,Z,Y,X) for out-of-core HCSPredictionWriter.
+    Supports torch tensors (B,C,Z,Y,X or C,Z,Y,X) for in-memory prediction and
+    numpy arrays (C,Z,Y,X) for HCSPredictionWriter's per-window writes.
 
     Parameters
     ----------
@@ -119,11 +121,41 @@ def _blend_in(
         factors.append(min(i + 1, samples))
     _logger.debug(f"Blending with factors {factors}.")
     if isinstance(old_stack, torch.Tensor):
-        factors = torch.tensor(factors, dtype=old_stack.dtype, device=old_stack.device)
-        factors = factors.view(1, 1, -1, 1, 1)
+        factors = _torch_factors(tuple(factors), old_stack.dtype, old_stack.device)
     else:
         factors = np.array(factors)[np.newaxis, :, np.newaxis, np.newaxis]
     return old_stack * (factors - 1) / factors + new_stack / factors
+
+
+@functools.lru_cache(maxsize=64)
+def _torch_factors(factors: tuple[int, ...], dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    """Blend factors as a ``(Z, 1, 1)`` tensor, cached: a per-window host-to-device copy would sync every window."""
+    # A normal tensor even when first built under predict's inference mode, so a later
+    # grad-enabled caller can still save it for backward.
+    with torch.inference_mode(False):
+        return torch.tensor(factors, dtype=dtype, device=device).view(-1, 1, 1)
+
+
+def _store_into(volume: torch.Tensor, z_slice: slice, planes: torch.Tensor) -> None:
+    """Write ``planes`` into ``volume[:, z_slice]``, rounding to the volume dtype as numpy does.
+
+    Torch rounds to float32 and float64 exactly like numpy. It converts float64 to
+    float16 through float32, though, which can round twice, so other dtypes are cast
+    by numpy on the host.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        ``(C, Z, Y, X)`` volume buffer.
+    z_slice : slice
+        Planes of ``volume`` to write.
+    planes : torch.Tensor
+        ``(C, Z, Y, X)`` planes, on the volume's device.
+    """
+    if volume.dtype not in (torch.float32, torch.float64) and planes.dtype != volume.dtype:
+        cast = planes.cpu().numpy().astype(torch.empty(0, dtype=volume.dtype).numpy().dtype)
+        planes = torch.from_numpy(cast).to(volume.device)
+    volume[:, z_slice] = planes
 
 
 class HCSPredictionWriter(BasePredictionWriter):
@@ -136,7 +168,10 @@ class HCSPredictionWriter(BasePredictionWriter):
     Each (position, timepoint) volume is assembled in memory from its depth
     windows and written once, when its last window arrives (or at predict end),
     instead of a zarr read-modify-write per window; the stored bytes are the
-    same. ``write_input`` and plane-restricted predicts (``predict_z_planes``) keep
+    same. The write runs on a background thread while the next volume is
+    predicted, one at a time and in order; a FOV's completion marker is written
+    on that thread after its last volume, and a write error is raised at the
+    next batch or at predict end. ``write_input`` and plane-restricted predicts (``predict_z_planes``) keep
     the per-window writes: the first stores slices beside each window, and the
     second writes single planes, which a volume flush would fill in between.
 
@@ -221,6 +256,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         self._checkpoint_signature = None if checkpoint_path is None else checkpoint_signature(checkpoint_path)
         self.settings_sha256_12 = settings_sha256_12
         self._dataset_scale = None
+        # Set by on_predict_start; None until then, so a failure during setup closes nothing.
+        self.plate: Plate | None = None
+        self._flush_pool: ThreadPoolExecutor | None = None
 
     def _get_scale_metadata(self, metadata_store: os.PathLike | None) -> None:
         """Read scale metadata from an existing zarr store.
@@ -279,7 +317,10 @@ class HCSPredictionWriter(BasePredictionWriter):
         # writes single planes that a [first, last] flush would fill in between: both write
         # per window.
         self._write_once = not self.write_input and self._z_planes is None
-        self._volumes: dict[tuple[str, int], tuple[NDArray, int, int]] = {}
+        self._volumes: dict[tuple[str, int], tuple[torch.Tensor, int, int]] = {}
+        # Volume writes (and the markers after them) run here, in submission order.
+        self._flush_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prediction-flush")
+        self._pending: Future | None = None
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
             array_key=dm.array_key,
@@ -303,7 +344,8 @@ class HCSPredictionWriter(BasePredictionWriter):
                     written[t, list(planes)] = False
             self._written_windows[f"/{array.path}"] = written
         run_positions = {array.path.rsplit("/", 1)[0] for array in window_arrays}
-        if os.path.exists(self.output_store):
+        existed = os.path.exists(self.output_store)
+        if existed:
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
             else:
@@ -411,6 +453,15 @@ class HCSPredictionWriter(BasePredictionWriter):
             self.source_index = self._get_channel_indices(source_channel)
             self.target_index = self._get_channel_indices(target_channel)
         self.prediction_index = self._get_channel_indices(prediction_channel)
+        # Read now: once volume writes run on the flush thread, this thread leaves the store alone.
+        self._store_dtypes: dict[str, torch.dtype] = {}
+        if existed:
+            for img_name in self._source_shapes:
+                try:
+                    array = self.plate[img_name]
+                except KeyError:
+                    continue  # created by this run, in the prediction's dtype
+                self._store_dtypes[img_name] = torch.from_numpy(np.empty(0, dtype=array.dtype)).dtype
 
     def _get_channel_indices(self, channel_names: list[str]) -> list[int]:
         """Get channel indices from the plate for given channel names.
@@ -457,6 +508,8 @@ class HCSPredictionWriter(BasePredictionWriter):
             Index of the current dataloader.
         """
         _logger.debug(f"Writing batch {batch_idx}.")
+        if self._pending is not None and self._pending.done():
+            self._pending.result()  # raise a failed volume write here, not volumes later
         for sample_index, _ in enumerate(batch["index"][0]):
             self.write_sample(batch, prediction[sample_index], sample_index)
 
@@ -470,9 +523,35 @@ class HCSPredictionWriter(BasePredictionWriter):
         pl_module : LightningModule
             The Lightning module.
         """
-        for img_name, t_index in list(self._volumes):
-            self._flush_volume(img_name, t_index)
-        self.plate.close()
+        try:
+            for img_name, t_index in list(self._volumes):
+                self._flush_volume(img_name, t_index, complete=False)
+        finally:
+            # Even when a write failed.
+            self._close()
+        if self._pending is not None:
+            self._pending.result()
+
+    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        """Close the store when predict fails, e.g. on a volume write that failed mid-run.
+
+        Parameters
+        ----------
+        trainer : Trainer
+            The Lightning trainer instance.
+        pl_module : LightningModule
+            The Lightning module.
+        exception : BaseException
+            The exception that stopped predict.
+        """
+        self._close()
+
+    def _close(self) -> None:
+        """Let the last volume write finish, then close the store; safe after a partial setup or a second call."""
+        if self._flush_pool is not None:
+            self._flush_pool.shutdown(wait=True)
+        if self.plate is not None:
+            self.plate.close()
 
     def write_sample(
         self,
@@ -492,7 +571,6 @@ class HCSPredictionWriter(BasePredictionWriter):
             Index of this sample within the batch.
         """
         _logger.debug(f"Writing sample {sample_index}.")
-        sample_prediction = to_numpy(sample_prediction)
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
         z_index = int(z_index)
@@ -500,10 +578,19 @@ class HCSPredictionWriter(BasePredictionWriter):
         # account for lost slices in 2.5D
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
+        written = self._written_windows[img_name]
+        if written[t_index, window_z_index]:
+            # A repeat would blend into a volume already flushed (a zero buffer) or blend twice.
+            raise RuntimeError(f"Window z={window_z_index} of {img_name} t={t_index} arrived twice.")
         # Blend reads and the write go to the in-memory volume, or to the store per window.
         if self._write_once:
+            # The volume stays on the prediction's device and reaches the host once, at its flush.
+            sample_prediction = sample_prediction.detach()
+            if sample_prediction.dtype == torch.bfloat16:
+                sample_prediction = sample_prediction.float()  # to_numpy's cast
             dest, lead = self._buffer_volume(img_name, t_index, sample_prediction, z_slice), (slice(None),)
         else:
+            sample_prediction = to_numpy(sample_prediction)
             image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
             _resize_image(image, t_index, z_slice)
             dest, lead = image.oindex, (t_index, self.prediction_index)
@@ -516,7 +603,12 @@ class HCSPredictionWriter(BasePredictionWriter):
         # write CZYX
         if self.z_padding == 0 and sample_prediction.shape[-3] > 1:
             if self.z_reduction == "blend":
-                sample_prediction = _blend_in(dest[(*lead, z_slice)], sample_prediction, z_slice)
+                old_stack = dest[(*lead, z_slice)]
+                if self._write_once and z_slice.start != 0:
+                    # The numpy blend promotes to float64 (integer factors); so does this one.
+                    # The first window is stored as predicted, so it needs no float64 copies.
+                    old_stack, sample_prediction = old_stack.double(), sample_prediction.double()
+                sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
             else:
                 # Drop the planes before this window's center: the window centered on
                 # each of them writes it later and wins. The first window keeps all of
@@ -526,20 +618,29 @@ class HCSPredictionWriter(BasePredictionWriter):
                 z_slice = slice(z_slice.start + keep, z_slice.stop)
         # The buffer has the store's dtype, so this casts like the zarr write and blending
         # reads back what the store would hold.
-        dest[(*lead, z_slice)] = sample_prediction
-        written = self._written_windows[img_name]
+        if self._write_once:
+            _store_into(dest, z_slice, sample_prediction)
+        else:
+            dest[(*lead, z_slice)] = sample_prediction
         written[t_index, window_z_index] = True
-        if self._write_once and written[t_index].all():
-            self._flush_volume(img_name, t_index)
-        if written.all():
-            name = img_name.strip("/").rsplit("/", 1)[0]
-            position = self.plate[name]
-            planes = None if self._z_planes is None else self._z_planes[name]
-            record_z_planes(position, self._prediction_channels, planes)
-            marker = completion_marker(self._source_shapes[img_name], self._run)
-            mark_complete(position, self._prediction_channels, marker)
+        if self._write_once:
+            if written[t_index].all():
+                self._flush_volume(img_name, t_index, complete=written.all())
+        elif written.all():
+            self._mark_complete(img_name)
 
-    def _buffer_volume(self, img_name: str, t_index: int, sample_prediction: NDArray, z_slice: slice) -> NDArray:
+    def _mark_complete(self, img_name: str) -> None:
+        """Write the completion marker of the FOV holding ``img_name``; every window is in the store."""
+        name = img_name.strip("/").rsplit("/", 1)[0]
+        position = self.plate[name]
+        planes = None if self._z_planes is None else self._z_planes[name]
+        record_z_planes(position, self._prediction_channels, planes)
+        marker = completion_marker(self._source_shapes[img_name], self._run)
+        mark_complete(position, self._prediction_channels, marker)
+
+    def _buffer_volume(
+        self, img_name: str, t_index: int, sample_prediction: torch.Tensor, z_slice: slice
+    ) -> torch.Tensor:
         """Return the in-memory CZYX volume of ``(img_name, t_index)``, allocating it on first use.
 
         Parameters
@@ -548,8 +649,8 @@ class HCSPredictionWriter(BasePredictionWriter):
             Hierarchical path name of the source image.
         t_index : int
             Timepoint of the volume.
-        sample_prediction : NDArray
-            First window of the volume; sets channel count, YX shape, and the dtype
+        sample_prediction : torch.Tensor
+            First window of the volume; sets channel count, YX shape, device, and the dtype
             unless the store already holds this array (then its dtype, as the per-window
             writes would cast to it).
         z_slice : slice
@@ -560,28 +661,26 @@ class HCSPredictionWriter(BasePredictionWriter):
 
         Returns
         -------
-        NDArray
+        torch.Tensor
             Zero-filled ``(C, Z, Y, X)`` buffer spanning the source depth, like a new zarr array.
         """
         key = (img_name, t_index)
         if key not in self._volumes:
             depth = self._source_shapes[img_name][1]
             shape = (sample_prediction.shape[0], depth, *sample_prediction.shape[-2:])
-            try:
-                dtype = self.plate[img_name].dtype
-            except KeyError:
-                dtype = sample_prediction.dtype
-            self._volumes[key] = (np.zeros(shape, dtype=dtype), z_slice.start, z_slice.stop)
+            dtype = self._store_dtypes.get(img_name, sample_prediction.dtype)
+            volume = torch.zeros(shape, dtype=dtype, device=sample_prediction.device)
+            self._volumes[key] = (volume, z_slice.start, z_slice.stop)
         volume, start, stop = self._volumes[key]
         if z_slice.stop > volume.shape[1]:
             # A prediction deeper than its window: grow like the per-window resize does.
-            extra = np.zeros((volume.shape[0], z_slice.stop - volume.shape[1], *volume.shape[2:]), dtype=volume.dtype)
-            volume = np.concatenate([volume, extra], axis=1)
+            extra = volume.new_zeros((volume.shape[0], z_slice.stop - volume.shape[1], *volume.shape[2:]))
+            volume = torch.cat([volume, extra], dim=1)
         self._volumes[key] = (volume, min(start, z_slice.start), max(stop, z_slice.stop))
         return volume
 
-    def _flush_volume(self, img_name: str, t_index: int) -> None:
-        """Write one buffered volume to the store, over the planes its windows reached.
+    def _flush_volume(self, img_name: str, t_index: int, complete: bool) -> None:
+        """Copy one buffered volume to the host and queue its write, over the planes its windows reached.
 
         Parameters
         ----------
@@ -589,11 +688,24 @@ class HCSPredictionWriter(BasePredictionWriter):
             Hierarchical path name of the source image.
         t_index : int
             Timepoint of the volume.
+        complete : bool
+            The volume is the FOV's last: mark the FOV complete once it is written.
         """
         volume, start, stop = self._volumes.pop((img_name, t_index))
-        image = self._create_image(img_name, volume[:, :stop].shape, volume.dtype)
+        planes = volume[:, start:stop].cpu().numpy()
+        if self._pending is not None:
+            # One write in flight bounds the host copies held to two volumes.
+            self._pending.result()
+        self._pending = self._flush_pool.submit(self._write_volume, img_name, t_index, planes, start, complete)
+
+    def _write_volume(self, img_name: str, t_index: int, planes: NDArray, start: int, complete: bool) -> None:
+        """Write planes ``start:`` of one volume to the store, then the FOV's marker if ``complete`` (flush thread)."""
+        stop = start + planes.shape[1]
+        image = self._create_image(img_name, (planes.shape[0], stop, *planes.shape[2:]), planes.dtype)
         _resize_image(image, t_index, slice(start, stop))
-        image.oindex[t_index, self.prediction_index, slice(start, stop)] = volume[:, start:stop]
+        image.oindex[t_index, self.prediction_index, slice(start, stop)] = planes
+        if complete:
+            self._mark_complete(img_name)
 
     def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
         """Return whether the existing output array outruns this run's source in T or Z.

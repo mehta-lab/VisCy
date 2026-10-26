@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,7 +14,8 @@ from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
-from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in
+from viscy_utils.callbacks import prediction_writer
+from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in, _store_into, _torch_factors
 from viscy_utils.prediction_metadata import (
     PREDICTED_Z_PLANES_KEY,
     PREDICTION_COMPLETE_KEY,
@@ -31,6 +34,11 @@ from viscy_utils.prediction_metadata import (
 
 Z_SIZE = 16
 Z_WINDOW = 8
+#: The buffered writer blends on the prediction's device, so its bytes are checked on every device present.
+ACCELERATORS = [
+    "cpu",
+    pytest.param("gpu", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no CUDA device")),
+]
 
 
 class _ZStampModule(LightningModule):
@@ -207,14 +215,18 @@ def _assert_same_bytes(reference: dict, buffered: dict) -> None:
         assert new_attrs == attrs
 
 
+@pytest.mark.parametrize("accelerator", ACCELERATORS)
 @pytest.mark.parametrize("mode", ["blend", "center", "target_2d", "z_planes"])
 @pytest.mark.parametrize("batch_size", [1, 3])
 @pytest.mark.parametrize("limit_batches", [None, 5])
-def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mode, batch_size, limit_batches):
+def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(
+    tmp_path, accelerator, mode, batch_size, limit_batches
+):
     """Assembling each volume in memory and writing it once stores the bytes and markers per-window writes store.
 
     Covers 3D windows (blend, center) and a 2D model's padded center plane (``target_2d``); a plane selection
-    takes the per-window path on both sides.
+    takes the per-window path on both sides. The buffered volume lives on the prediction's device, so on a GPU
+    the float64 blend runs there against the reference's numpy blend.
     ``limit_batches=5`` stops inside a volume, so the partial volume flushed at predict end is compared too. The
     reference reads per window too (``num_workers=1`` disables the volume cache).
     """
@@ -242,7 +254,8 @@ def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mo
         output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
         writer = writer_cls(str(output), z_reduction="center" if mode == "center" else "blend")
         Trainer(
-            accelerator="cpu",
+            accelerator=accelerator,
+            devices=1,
             logger=False,
             enable_progress_bar=False,
             limit_predict_batches=limit_batches,
@@ -353,6 +366,150 @@ def test_buffered_volume_takes_the_dtype_of_an_existing_array(tmp_path):
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
 
 
+@pytest.mark.parametrize("accelerator", ACCELERATORS)
+def test_buffered_float16_volume_rounds_the_blend_like_numpy(tmp_path, accelerator):
+    """A float16 store from float16 predictions rounds each float64 blend to float16 as the numpy write does."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        Trainer(
+            accelerator=accelerator,
+            devices=1,
+            logger=False,
+            enable_progress_bar=False,
+            callbacks=[writer_cls(str(output))],
+        ).predict(
+            _WindowFunctionModule(dtype=torch.float16), datamodule=_ones_data_module(source), return_predictions=False
+        )
+        stores[writer_cls] = _read_store(output)
+    assert {voxels.dtype for voxels, _, _ in stores[HCSPredictionWriter].values()} == {np.dtype(np.float16)}
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+def test_store_into_rounds_float64_to_float16_once():
+    """Torch rounds float64 to float16 through float32; the volume must hold numpy's single rounding."""
+    # Just above the midpoint of 1 and the next float16: float32 rounds it onto the midpoint, then a tie to even.
+    value = 1 + 2.0**-11 + 2.0**-40
+    assert torch.tensor(value, dtype=torch.float64).to(torch.float16).item() == 1.0
+    volume = torch.zeros(1, 2, 1, 1, dtype=torch.float16)
+    _store_into(volume, slice(1, 2), torch.full((1, 1, 1, 1), value, dtype=torch.float64))
+    expected = np.float16(value)
+    assert expected == 1 + 2.0**-10
+    assert volume[0, 1, 0, 0].item() == expected
+    assert volume[0, 0, 0, 0].item() == 0
+
+
+class _SlowWriter(HCSPredictionWriter):
+    """Hold every volume write on the flush thread for a while, so a marker that does not wait for it shows."""
+
+    def _write_volume(self, *args, **kwargs) -> None:
+        time.sleep(0.2)
+        super()._write_volume(*args, **kwargs)
+
+
+def test_completion_marker_follows_the_flushed_voxels(tmp_path, monkeypatch):
+    """A FOV is marked complete only after every one of its volumes is in the store, and the writes run off-thread."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    output = tmp_path / "pred.zarr"
+    marked = []
+    real_mark_complete = prediction_writer.mark_complete
+
+    def checked_mark_complete(position, channels, marker):
+        # Every voxel of this run is nonzero, so a zero names a volume not yet written.
+        with open_ome_zarr(output, mode="r") as plate:
+            voxels = np.asarray(plate[position.zgroup.path]["0"])
+        marked.append((position.zgroup.path, voxels.shape, bool((voxels != 0).all()), threading.current_thread()))
+        real_mark_complete(position, channels, marker)
+
+    monkeypatch.setattr(prediction_writer, "mark_complete", checked_mark_complete)
+    data_module = _ones_data_module(source, batch_size=3)
+    Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[_SlowWriter(str(output))]).predict(
+        _OnesModule(), datamodule=data_module, return_predictions=False
+    )
+    assert [(name, shape, full) for name, shape, full, _ in marked] == [
+        (fov, (2, 1, 11, 8, 8), True) for fov in RANDOM_SOURCE_PLANES
+    ]
+    assert all(thread is not threading.main_thread() for *_, thread in marked)
+
+
+class _FailingWriter(HCSPredictionWriter):
+    """Fail the write of one volume on the flush thread."""
+
+    def __init__(self, *args, fail_volume: int, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fail_volume = fail_volume
+        self.n_volumes = 0
+        self.closed = False
+
+    def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        super().on_predict_start(trainer, pl_module)
+        close = self.plate.close
+
+        def recording_close() -> None:
+            self.closed = True
+            close()
+
+        self.plate.close = recording_close
+
+    def _write_volume(self, *args, **kwargs) -> None:
+        self.n_volumes += 1
+        if self.n_volumes == self.fail_volume:
+            raise OSError("disk full")
+        super()._write_volume(*args, **kwargs)
+
+
+@pytest.mark.parametrize("fail_volume", [2, 4])
+def test_a_failed_volume_write_fails_the_predict(tmp_path, fail_volume):
+    """A write error on the flush thread stops the predict, and its FOV is never marked complete.
+
+    Volume 2 is FOV 0's last: the error stops the run before FOV 1 is written. Volume 4 is FOV 1's last, so the
+    error surfaces at predict end, after FOV 0 completed. Either way the store is closed.
+    """
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    writer = _FailingWriter(str(tmp_path / "pred.zarr"), fail_volume=fail_volume)
+    with pytest.raises(OSError, match="disk full"):
+        Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
+            _OnesModule(), datamodule=_ones_data_module(source), return_predictions=False
+        )
+    # Raised mid-run or at predict end, the last write finishes and the store is closed all the same.
+    assert writer.closed
+    assert writer._flush_pool._shutdown
+    with open_ome_zarr(tmp_path / "pred.zarr", mode="r") as plate:
+        markers = [pos.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"] for _, pos in plate.positions()]
+    assert ["source_shape" in marker for marker in markers] == ([False] if fail_volume == 2 else [True, False])
+
+
+class _RepeatFirstWindowDataModule(HCSDataModule):
+    """Serve the first window again after the first volume is done, as a stray retry would."""
+
+    def predict_dataloader(self):
+        # FOV 0, t=0 has 8 windows; its first comes back after the volume was flushed.
+        return torch.utils.data.DataLoader(torch.utils.data.Subset(self.predict_dataset, [*range(8), 0]), batch_size=1)
+
+
+def test_a_window_arriving_twice_is_refused(tmp_path):
+    """A repeated window would blend into a flushed volume's zero buffer and re-mark the FOV; it must raise."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    data_module = _RepeatFirstWindowDataModule(
+        data_path=str(source),
+        source_channel=["Phase3D"],
+        target_channel=["Nuclei"],
+        z_window_size=4,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[8, 8],
+        normalizations=[],
+        augmentations=[],
+    )
+    with pytest.raises(RuntimeError, match="arrived twice"):
+        _predict_ones_with(HCSPredictionWriter(str(tmp_path / "pred.zarr")), data_module)
+
+
 def test_cached_volume_windows_equal_per_window_reads(tmp_path):
     """Windows cut from a cached (position, t) volume equal windows read from zarr one by one."""
     source = tmp_path / "source.zarr"
@@ -389,14 +546,14 @@ def _write_source(path, fovs: list[str], z_size: int = 4) -> None:
             plate.create_position(*fov.split("/")).create_zeros("0", (1, 2, z_size, 8, 8), dtype=np.float32)
 
 
-def _ones_data_module(source, *, exclude=None, target="Nuclei") -> HCSDataModule:
+def _ones_data_module(source, *, exclude=None, target="Nuclei", batch_size=1) -> HCSDataModule:
     """Depth-4 windows over every FOV of ``source``, predicting ``target``."""
     return HCSDataModule(
         data_path=str(source),
         source_channel=["Phase3D"],
         target_channel=[target],
         z_window_size=4,
-        batch_size=1,
+        batch_size=batch_size,
         num_workers=0,
         yx_patch_size=[8, 8],
         normalizations=[],
@@ -811,6 +968,17 @@ def test_blend_in_consistency():
     result_torch = _blend_in(old_torch, new_torch, z_slice)
 
     np.testing.assert_allclose(result_np, result_torch.squeeze(0).numpy(), rtol=1e-5, atol=1e-5)
+
+
+def test_blend_factors_cached_under_inference_mode_serve_autograd():
+    """Factors first cached inside inference mode (predict) still work in a later blend that records gradients."""
+    _torch_factors.cache_clear()  # an earlier test may have cached these factors outside inference mode
+    old = torch.ones(1, 2, 5, 8, 8, dtype=torch.float64)
+    with torch.inference_mode():
+        _blend_in(old, old, slice(3, 8))
+    new = torch.zeros(1, 2, 5, 8, 8, dtype=torch.float64, requires_grad=True)
+    _blend_in(old, new, slice(3, 8)).sum().backward()
+    assert new.grad is not None
 
 
 def test_blend_in_zero_start():
