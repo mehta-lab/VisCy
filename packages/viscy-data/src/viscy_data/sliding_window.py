@@ -135,6 +135,7 @@ class SlidingWindowDataset(Dataset):
         self._transform_volume = (
             cache_volume
             and preloaded_fovs is None  # preloaded windows bypass the cache
+            and bool(transform)  # an empty Compose has nothing to apply
             and all(getattr(t, "pointwise", False) for t in transforms)
         )
         self._transform_windows = bool(transform) and not self._transform_volume
