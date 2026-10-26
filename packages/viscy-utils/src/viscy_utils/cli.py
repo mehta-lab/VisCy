@@ -77,17 +77,36 @@ _LATEST_CKPT_FILENAME = "latest-epoch={epoch}-step={step}"
 
 def _callback_field(callback, key: str):
     """Return ``key`` from a callback config entry (Namespace or dict), else None."""
-    if isinstance(callback, Namespace):
-        return callback.get(key)
-    if isinstance(callback, dict):
-        return callback.get(key)
-    return None
+    return callback.get(key) if isinstance(callback, (Namespace, dict)) else None
 
 
 def _init_args_of(callback) -> Namespace | dict | None:
     """Return the mutable ``init_args`` mapping of a callback config entry."""
     init_args = _callback_field(callback, "init_args")
     return init_args if isinstance(init_args, (Namespace, dict)) else None
+
+
+def _fit_callbacks_without(config: Namespace, subcommand: str | None, class_path: str) -> list | None:
+    """Return the ``fit`` trainer's mutable callback list, or None to skip injecting.
+
+    None when the subcommand is not ``fit``, when the resolved config has no
+    ``trainer.callbacks`` list, or when a ``class_path`` callback is already there,
+    which keeps each injection idempotent.
+    """
+    if subcommand != "fit":
+        return None
+    root = config.get(subcommand)
+    if not isinstance(root, Namespace):
+        return None
+    trainer = root.get("trainer")
+    if not isinstance(trainer, Namespace):
+        return None
+    callbacks = trainer.get("callbacks")
+    if not isinstance(callbacks, list):
+        return None
+    if any(_callback_field(callback, "class_path") == class_path for callback in callbacks):
+        return None
+    return callbacks
 
 
 def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> None:
@@ -118,35 +137,22 @@ def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> 
     leaves override ``trainer.callbacks`` wholesale to set their own ``dirpath`` —
     a recipe-level default would be silently dropped by every real leaf.
     """
-    if subcommand != "fit":
-        return
-    root = config.get(subcommand) if subcommand is not None else config
-    if not isinstance(root, Namespace):
-        return
-    trainer = root.get("trainer")
-    if not isinstance(trainer, Namespace):
-        return
-    callbacks = trainer.get("callbacks")
-    if not isinstance(callbacks, list):
-        return
-
     # Idempotent: a config that already carries the guardrails is left alone.
-    for callback in callbacks:
-        if _callback_field(callback, "class_path") == _MONITOR_HEALTH_CLASS_PATH:
-            return
+    callbacks = _fit_callbacks_without(config, subcommand, _MONITOR_HEALTH_CLASS_PATH)
+    if callbacks is None:
+        return
 
-    monitored = None
+    monitored_args = None
     for callback in callbacks:
         if _callback_field(callback, "class_path") != _MODEL_CHECKPOINT_CLASS_PATH:
             continue
         init_args = _init_args_of(callback)
         if init_args is not None and init_args.get("monitor"):
-            monitored = callback
+            monitored_args = init_args
             break
-    if monitored is None:
+    if monitored_args is None:
         return
 
-    monitored_args = _init_args_of(monitored)
     monitor = monitored_args.get("monitor")
     dirpath = monitored_args.get("dirpath")
     # Hand `last.ckpt` to the unconditional callback so it tracks the newest epoch.
@@ -200,20 +206,9 @@ def _inject_optimizer_health_guard(config: Namespace, subcommand: str | None) ->
     declaring a monitored ``ModelCheckpoint`` — a run with no checkpointing at all
     can still stall — so it only requires a ``trainer.callbacks`` list to append to.
     """
-    if subcommand != "fit":
+    callbacks = _fit_callbacks_without(config, subcommand, _OPTIMIZER_HEALTH_CLASS_PATH)
+    if callbacks is None:
         return
-    root = config.get(subcommand) if subcommand is not None else config
-    if not isinstance(root, Namespace):
-        return
-    trainer = root.get("trainer")
-    if not isinstance(trainer, Namespace):
-        return
-    callbacks = trainer.get("callbacks")
-    if not isinstance(callbacks, list):
-        return
-    for callback in callbacks:
-        if _callback_field(callback, "class_path") == _OPTIMIZER_HEALTH_CLASS_PATH:
-            return
     callbacks.append(Namespace(class_path=_OPTIMIZER_HEALTH_CLASS_PATH))
 
 

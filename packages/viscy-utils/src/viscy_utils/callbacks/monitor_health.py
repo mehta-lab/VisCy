@@ -14,6 +14,7 @@ and never touches checkpoint selection, so adding it cannot change which
 checkpoint a run considers "best".
 """
 
+import math
 from collections import deque
 
 import torch
@@ -37,8 +38,6 @@ class MonitorHealthCheck(Callback):
     patience : int
         Number of consecutive validation epochs that must share one identical
         value before the run is declared frozen. Must be >= 2.
-    check_finite : bool
-        Raise as soon as the monitored value is NaN or infinite.
 
     Raises
     ------
@@ -56,12 +55,11 @@ class MonitorHealthCheck(Callback):
     legitimately absent on the first epochs of some schedules.
     """
 
-    def __init__(self, monitor: str = "loss/validate", patience: int = 10, check_finite: bool = True) -> None:
+    def __init__(self, monitor: str = "loss/validate", patience: int = 10) -> None:
         if patience < 2:
             raise ValueError(f"patience must be >= 2 to detect a frozen metric, got {patience}")
         self.monitor = monitor
         self.patience = patience
-        self.check_finite = check_finite
         self._recent: deque[float] = deque(maxlen=patience)
 
     def on_validation_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
@@ -73,7 +71,7 @@ class MonitorHealthCheck(Callback):
             return
         scalar = value.item() if isinstance(value, torch.Tensor) else float(value)
 
-        if self.check_finite and not torch.isfinite(torch.tensor(scalar)):
+        if not math.isfinite(scalar):
             raise MonitorHealthError(
                 f"checkpoint monitor {self.monitor!r} is non-finite ({scalar}) at epoch {trainer.current_epoch}. "
                 "ModelCheckpoint cannot rank a non-finite metric, so no further checkpoint will be written "

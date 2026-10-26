@@ -43,6 +43,7 @@ dependencies = [
   "tensorboard",
   "tensorstore",
   "torch>=2.10",
+  "torchvision",
   "viscy-data",
   "wandb>=0.12.10",
   "xarray",
