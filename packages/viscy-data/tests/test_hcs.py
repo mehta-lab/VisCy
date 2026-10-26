@@ -11,7 +11,7 @@ from pytest import TempPathFactory, fixture, importorskip, mark, raises, skip
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
-from viscy_transforms import BatchedRandFlipd, NormalizeSampled, RandSpatialCropd
+from viscy_transforms import BatchedRandFlipd, MinMaxSampled, NormalizeSampled, RandSpatialCropd
 
 
 @mark.parametrize("multi_sample_augmentation", [True, False])
@@ -1061,7 +1061,7 @@ def test_mmap_preload_preserves_native_dtype_and_casts_on_read(tmp_path):
 
 
 def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path):
-    """fg_mask.mmap preserves native uint8 dtype; sampled masks cast to float32."""
+    """fg_mask.mmap preserves native uint8 dtype, and so do the sampled masks."""
     importorskip("tensordict")
     from tensordict.memmap import MemoryMappedTensor
 
@@ -1093,7 +1093,50 @@ def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path)
 
     dm.setup(stage="fit")
     batch = next(iter(dm.train_dataloader()))
-    assert batch["fg_mask"].dtype == torch.float32
+    assert batch["fg_mask"].dtype == torch.uint8
+
+
+@mark.parametrize("mmap_preload", [False, True])
+def test_fg_mask_stays_uint8_on_host_and_is_float_after_transfer(hcs_with_fg_mask, tmp_path, mmap_preload):
+    """Host-side fg_mask batches keep the stored uint8; the GPU hook casts to float32.
+
+    Regression: masks were upcast to float32 in every sample, so full-FOV
+    validation batches carried a mask as large as the target through the
+    worker buffers and the power-of-two pinned-memory cache, and the 4-GPU
+    3D seg-aux fits were OOM-killed at their first validation.
+    """
+    if mmap_preload:
+        importorskip("tensordict")
+    from viscy_transforms import BatchedCenterSpatialCropd
+
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        fg_mask_key="fg_mask",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=0.5,
+        mmap_preload=mmap_preload,
+        scratch_dir=tmp_path,
+        val_gpu_augmentations=[BatchedCenterSpatialCropd(keys=["source", "target"], roi_size=[4, 16, 16])],
+    )
+    dm.prepare_data()
+    dm.setup(stage="fit")
+    for loader in (dm.train_dataloader(), dm.val_dataloader()):
+        host = next(iter(loader))
+        assert host["fg_mask"].dtype == torch.uint8
+        assert host["fg_mask"].nbytes * 4 == host["target"].nbytes
+        assert set(host["fg_mask"].unique().tolist()).issubset({0, 1})
+
+    host_mask = host["fg_mask"].clone()
+    dm.trainer = MagicMock(training=False, validating=True, sanity_checking=False)
+    result = dm.on_after_batch_transfer(host, 0)
+    assert result["fg_mask"].dtype == torch.float32
+    assert result["fg_mask"].shape == result["target"].shape == (2, 1, 4, 16, 16)
+    assert torch.equal(result["fg_mask"], host_mask[..., 8:24, 8:24].float())
 
 
 @fixture(scope="function")
@@ -1226,3 +1269,76 @@ def test_mmap_preload_matches_oindex(preprocessed_hcs_dataset, tmp_path):
             expected = np.asarray(pos["0"].oindex[:, ch_idx, :])
             assert staged.shape == expected.shape
             np.testing.assert_array_equal(staged, expected)
+
+
+class _WindowMeanCenter:
+    """Subtract each window's own mean: per-window statistics, so not pointwise."""
+
+    def __init__(self, key: str) -> None:
+        self.key = key
+
+    def __call__(self, sample: dict) -> dict:
+        sample[self.key] = sample[self.key] - sample[self.key].mean()
+        return sample
+
+
+@mark.parametrize("level", ["fov_statistics", "timepoint_statistics", "min_max", "per_window"])
+def test_cached_volume_transformed_once_equals_per_window_transforms(tmp_path, level):
+    """A pointwise normalization of the cached volume gives every window the bytes per-window normalization gives.
+
+    Statistics differ per FOV and timepoint, so a volume normalized with another FOV's or frame's statistics shows.
+    A transform with per-window statistics is not pointwise and must keep running per window.
+    """
+    path = tmp_path / "norm.zarr"
+    rng = np.random.default_rng(3)
+    with open_ome_zarr(path, layout="hcs", mode="w", channel_names=["Phase", "Fluorescence"]) as plate:
+        for i, fov in enumerate(("0", "1")):
+            pos = plate.create_position("A", "1", fov)
+            pos.create_image("0", (rng.normal(size=(2, 2, 7, 16, 16)) * 3 + 10).astype(np.float32))
+            stats = [
+                {"mean": 10.0 + i + 0.37 * t, "std": 2.9 + 0.11 * i - 0.05 * t, "p1": 5.0 + i, "p99": 15.0 - t}
+                for t in range(2)
+            ]
+            pos.zattrs["normalization"] = {
+                ch: {"fov_statistics": stats[0], "timepoint_statistics": {str(t): s for t, s in enumerate(stats)}}
+                for ch in ("Phase", "Fluorescence")
+            }
+    if level == "per_window":
+        transform = Compose([_WindowMeanCenter("Phase")])
+    elif level == "min_max":
+        transform = Compose([MinMaxSampled(keys=["Phase"], level="timepoint_statistics")])
+    else:
+        transform = Compose([NormalizeSampled(keys=["Phase", "Fluorescence"], level=level)])
+    samples = {}
+    with open_ome_zarr(path, mode="r") as plate:
+        positions = [pos for _, pos in plate.positions()]
+        for cache_volume in (False, True):
+            dataset = SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase"], "target": ["Fluorescence"]},
+                z_window_size=4,
+                transform=transform,
+                cache_volume=cache_volume,
+            )
+            assert dataset._transform_volume is (cache_volume and level != "per_window")
+            samples[cache_volume] = [dataset[i] for i in range(len(dataset))]
+    assert len(samples[True]) == 2 * 2 * 4
+    for reference, cached in zip(samples[False], samples[True]):
+        assert reference["index"] == cached["index"]
+        for key in ("source", "target"):
+            assert reference[key].dtype == cached[key].dtype == torch.float32
+            assert reference[key].numpy().tobytes() == cached[key].numpy().tobytes()
+
+
+def test_cached_volume_refuses_nonzero_retries(hcs_with_fg_mask):
+    """Retries jump to random windows and would judge transformed values, so the volume cache refuses them."""
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        with raises(ValueError, match="min_nonzero_fraction"):
+            SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase"], "target": ["Fluorescence"]},
+                z_window_size=4,
+                min_nonzero_fraction=0.1,
+                cache_volume=True,
+            )
