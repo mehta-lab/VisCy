@@ -101,7 +101,10 @@ class SlidingWindowDataset(Dataset):
         loader); random access (training) would read a whole volume per window.
         Each DataLoader worker would keep its own copy and read the whole volume,
         so :class:`HCSDataModule` enables it only with ``num_workers == 0``. Not
-        combinable with ``fg_mask_key``. Default False.
+        combinable with ``fg_mask_key``. When every transform is ``pointwise``
+        (each voxel mapped through precomputed statistics alone, e.g.
+        ``NormalizeSampled``), the cached volume is transformed once instead of
+        every window. Default False.
     """
 
     def __init__(
@@ -125,6 +128,13 @@ class SlidingWindowDataset(Dataset):
         if cache_volume and fg_mask_key is not None:
             raise ValueError("cache_volume caches one array per (position, t); it cannot serve fg_mask reads too")
         self.cache_volume = cache_volume
+        transforms = getattr(transform, "transforms", [transform])
+        self._transform_volume = (
+            cache_volume
+            and preloaded_fovs is None  # preloaded windows bypass the cache
+            and transform is not None
+            and all(getattr(t, "pointwise", False) for t in transforms)
+        )
         self._volume_key: tuple | None = None
         self._volume: np.ndarray | None = None
         if z_planes is not None and z_window_size != 1:
@@ -297,10 +307,14 @@ class SlidingWindowDataset(Dataset):
                 volume = np.empty((1, len(ch_idx), *img.shape[-3:]), dtype=np.float32 if as_float else img.dtype)
                 for j, c in enumerate(ch_idx):
                     volume[:, j] = img[t : t + 1, int(c)]
+                if self._transform_volume:
+                    self._transform_cached(volume, arr_idx, t)
                 self._volume = volume
                 self._volume_key = key
-            # Copy: transforms must not reach the cached volume the next window is cut from.
-            data = self._volume[:, :, z : z + self.z_window_size].copy()
+            data = self._volume[:, :, z : z + self.z_window_size]
+            if self.transform and not self._transform_volume:
+                # Copy: transforms must not reach the cached volume the next window is cut from.
+                data = data.copy()
             return torch.from_numpy(data).unbind(dim=1), (f"/{img.path}", t, z)
         data = img.oindex[
             slice(t, t + 1),
@@ -310,6 +324,16 @@ class SlidingWindowDataset(Dataset):
         if as_float:
             data = data.astype(np.float32)
         return torch.from_numpy(data).unbind(dim=1), (f"/{img.path}", t, z)
+
+    def _transform_cached(self, volume: np.ndarray, arr_idx: int, t: int) -> None:
+        """Apply the pointwise transforms to a cached ``(1, C, Z, Y, X)`` volume in place."""
+        images = {name: torch.from_numpy(volume[:, j]) for j, name in enumerate(self._all_ch_names)}
+        norm_meta = self._resolve_timepoint_norm_meta(self.window_norm_meta[arr_idx], t)
+        if norm_meta is not None:
+            images["norm_meta"] = norm_meta
+        images = self.transform(images)
+        for j, name in enumerate(self._all_ch_names):
+            volume[:, j] = np.asarray(images[name])
 
     def __len__(self) -> int:
         """Return total number of windows."""
@@ -371,7 +395,7 @@ class SlidingWindowDataset(Dataset):
         if norm_meta is not None:
             norm_meta = self._resolve_timepoint_norm_meta(norm_meta, sample_index[1])
             sample_images["norm_meta"] = norm_meta
-        if self.transform:
+        if self.transform and not self._transform_volume:
             sample_images = self.transform(sample_images)
         if "weight" in sample_images:
             del sample_images["weight"]

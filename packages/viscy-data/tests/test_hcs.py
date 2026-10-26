@@ -1269,3 +1269,57 @@ def test_mmap_preload_matches_oindex(preprocessed_hcs_dataset, tmp_path):
             expected = np.asarray(pos["0"].oindex[:, ch_idx, :])
             assert staged.shape == expected.shape
             np.testing.assert_array_equal(staged, expected)
+
+
+class _WindowMeanCenter:
+    """Subtract each window's own mean: per-window statistics, so not pointwise."""
+
+    def __init__(self, key: str) -> None:
+        self.key = key
+
+    def __call__(self, sample: dict) -> dict:
+        sample[self.key] = sample[self.key] - sample[self.key].mean()
+        return sample
+
+
+@mark.parametrize("level", ["fov_statistics", "timepoint_statistics", "per_window"])
+def test_cached_volume_transformed_once_equals_per_window_transforms(tmp_path, level):
+    """A pointwise normalization of the cached volume gives every window the bytes per-window normalization gives.
+
+    Statistics differ per FOV and timepoint, so a volume normalized with another FOV's or frame's statistics shows.
+    A transform with per-window statistics is not pointwise and must keep running per window.
+    """
+    path = tmp_path / "norm.zarr"
+    rng = np.random.default_rng(3)
+    with open_ome_zarr(path, layout="hcs", mode="w", channel_names=["Phase", "Fluorescence"]) as plate:
+        for i, fov in enumerate(("0", "1")):
+            pos = plate.create_position("A", "1", fov)
+            pos.create_image("0", (rng.normal(size=(2, 2, 7, 16, 16)) * 3 + 10).astype(np.float32))
+            stats = [{"mean": 10.0 + i + 0.37 * t, "std": 2.9 + 0.11 * i - 0.05 * t} for t in range(2)]
+            pos.zattrs["normalization"] = {
+                ch: {"fov_statistics": stats[0], "timepoint_statistics": {str(t): s for t, s in enumerate(stats)}}
+                for ch in ("Phase", "Fluorescence")
+            }
+    if level == "per_window":
+        transform = Compose([_WindowMeanCenter("Phase")])
+    else:
+        transform = Compose([NormalizeSampled(keys=["Phase", "Fluorescence"], level=level)])
+    samples = {}
+    with open_ome_zarr(path, mode="r") as plate:
+        positions = [pos for _, pos in plate.positions()]
+        for cache_volume in (False, True):
+            dataset = SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase"], "target": ["Fluorescence"]},
+                z_window_size=4,
+                transform=transform,
+                cache_volume=cache_volume,
+            )
+            assert dataset._transform_volume is (cache_volume and level != "per_window")
+            samples[cache_volume] = [dataset[i] for i in range(len(dataset))]
+    assert len(samples[True]) == 2 * 2 * 4
+    for reference, cached in zip(samples[False], samples[True]):
+        assert reference["index"] == cached["index"]
+        for key in ("source", "target"):
+            assert reference[key].dtype == cached[key].dtype == torch.float32
+            assert reference[key].numpy().tobytes() == cached[key].numpy().tobytes()
