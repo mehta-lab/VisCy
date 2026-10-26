@@ -452,11 +452,13 @@ class HCSPredictionWriter(BasePredictionWriter):
         self.prediction_index = self._get_channel_indices(prediction_channel)
         # Read now: once volume writes run on the flush thread, this thread leaves the store alone.
         self._store_dtypes: dict[str, torch.dtype] = {}
-        for img_name in self._source_shapes if existed else ():
-            try:
-                self._store_dtypes[img_name] = torch.from_numpy(np.empty(0, dtype=self.plate[img_name].dtype)).dtype
-            except KeyError:
-                pass  # created by this run, in the prediction's dtype
+        if existed:
+            for img_name in self._source_shapes:
+                try:
+                    array = self.plate[img_name]
+                except KeyError:
+                    continue  # created by this run, in the prediction's dtype
+                self._store_dtypes[img_name] = torch.from_numpy(np.empty(0, dtype=array.dtype)).dtype
 
     def _get_channel_indices(self, channel_names: list[str]) -> list[int]:
         """Get channel indices from the plate for given channel names.
