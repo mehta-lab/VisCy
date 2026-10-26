@@ -11,7 +11,7 @@ from pytest import TempPathFactory, fixture, importorskip, mark, raises, skip
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
-from viscy_transforms import BatchedRandFlipd, NormalizeSampled, RandSpatialCropd
+from viscy_transforms import BatchedRandFlipd, MinMaxSampled, NormalizeSampled, RandSpatialCropd
 
 
 @mark.parametrize("multi_sample_augmentation", [True, False])
@@ -1282,7 +1282,7 @@ class _WindowMeanCenter:
         return sample
 
 
-@mark.parametrize("level", ["fov_statistics", "timepoint_statistics", "per_window"])
+@mark.parametrize("level", ["fov_statistics", "timepoint_statistics", "min_max", "per_window"])
 def test_cached_volume_transformed_once_equals_per_window_transforms(tmp_path, level):
     """A pointwise normalization of the cached volume gives every window the bytes per-window normalization gives.
 
@@ -1295,13 +1295,18 @@ def test_cached_volume_transformed_once_equals_per_window_transforms(tmp_path, l
         for i, fov in enumerate(("0", "1")):
             pos = plate.create_position("A", "1", fov)
             pos.create_image("0", (rng.normal(size=(2, 2, 7, 16, 16)) * 3 + 10).astype(np.float32))
-            stats = [{"mean": 10.0 + i + 0.37 * t, "std": 2.9 + 0.11 * i - 0.05 * t} for t in range(2)]
+            stats = [
+                {"mean": 10.0 + i + 0.37 * t, "std": 2.9 + 0.11 * i - 0.05 * t, "p1": 5.0 + i, "p99": 15.0 - t}
+                for t in range(2)
+            ]
             pos.zattrs["normalization"] = {
                 ch: {"fov_statistics": stats[0], "timepoint_statistics": {str(t): s for t, s in enumerate(stats)}}
                 for ch in ("Phase", "Fluorescence")
             }
     if level == "per_window":
         transform = Compose([_WindowMeanCenter("Phase")])
+    elif level == "min_max":
+        transform = Compose([MinMaxSampled(keys=["Phase"], level="timepoint_statistics")])
     else:
         transform = Compose([NormalizeSampled(keys=["Phase", "Fluorescence"], level=level)])
     samples = {}

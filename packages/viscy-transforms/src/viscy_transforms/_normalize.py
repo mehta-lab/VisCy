@@ -85,6 +85,8 @@ class NormalizeSampled(MapTransform):
 
 class MinMaxSampled(MapTransform):
     is_spatial = False
+    # See NormalizeSampled.pointwise.
+    pointwise = True
 
     """Normalize to [-1, 1] by clipping then rescaling with precomputed range statistics.
 
