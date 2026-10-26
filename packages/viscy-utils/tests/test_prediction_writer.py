@@ -374,24 +374,15 @@ def test_buffered_float16_volume_rounds_the_blend_like_numpy(tmp_path, accelerat
     stores = {}
     for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
         output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
-        data_module = HCSDataModule(
-            data_path=str(source),
-            source_channel=["Phase3D"],
-            target_channel=["Nuclei"],
-            z_window_size=4,
-            batch_size=1,
-            num_workers=0,
-            yx_patch_size=[8, 8],
-            normalizations=[],
-            augmentations=[],
-        )
         Trainer(
             accelerator=accelerator,
             devices=1,
             logger=False,
             enable_progress_bar=False,
             callbacks=[writer_cls(str(output))],
-        ).predict(_WindowFunctionModule(dtype=torch.float16), datamodule=data_module, return_predictions=False)
+        ).predict(
+            _WindowFunctionModule(dtype=torch.float16), datamodule=_ones_data_module(source), return_predictions=False
+        )
         stores[writer_cls] = _read_store(output)
     assert {voxels.dtype for voxels, _, _ in stores[HCSPredictionWriter].values()} == {np.dtype(np.float16)}
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
@@ -434,17 +425,7 @@ def test_completion_marker_follows_the_flushed_voxels(tmp_path, monkeypatch):
         real_mark_complete(position, channels, marker)
 
     monkeypatch.setattr(prediction_writer, "mark_complete", checked_mark_complete)
-    data_module = HCSDataModule(
-        data_path=str(source),
-        source_channel=["Phase3D"],
-        target_channel=["Nuclei"],
-        z_window_size=4,
-        batch_size=3,
-        num_workers=0,
-        yx_patch_size=[8, 8],
-        normalizations=[],
-        augmentations=[],
-    )
+    data_module = _ones_data_module(source, batch_size=3)
     Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[_SlowWriter(str(output))]).predict(
         _OnesModule(), datamodule=data_module, return_predictions=False
     )
@@ -524,14 +505,14 @@ def _write_source(path, fovs: list[str], z_size: int = 4) -> None:
             plate.create_position(*fov.split("/")).create_zeros("0", (1, 2, z_size, 8, 8), dtype=np.float32)
 
 
-def _ones_data_module(source, *, exclude=None, target="Nuclei") -> HCSDataModule:
+def _ones_data_module(source, *, exclude=None, target="Nuclei", batch_size=1) -> HCSDataModule:
     """Depth-4 windows over every FOV of ``source``, predicting ``target``."""
     return HCSDataModule(
         data_path=str(source),
         source_channel=["Phase3D"],
         target_channel=[target],
         z_window_size=4,
-        batch_size=1,
+        batch_size=batch_size,
         num_workers=0,
         yx_patch_size=[8, 8],
         normalizations=[],
