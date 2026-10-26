@@ -19,7 +19,9 @@ def run_viscy():
             [sys.executable, "-m", "viscy_utils.cli", *args],
             capture_output=True,
             text=True,
-            timeout=30,
+            # Hang guard only. A cold `--help` imports torch/lightning from NFS:
+            # 12-22 s serially, and past 30 s under `pytest -n 11`.
+            timeout=120,
         )
 
     return _run
