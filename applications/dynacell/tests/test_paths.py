@@ -19,6 +19,8 @@ import itertools
 from pathlib import Path
 
 import pytest
+from generate_grouped_eval_configs import _split_model_variant
+from generate_spotlight_v2_leaves import ARMS
 
 from dynacell.evaluation.paths import (
     MODELS_ROOT,
@@ -496,6 +498,12 @@ def test_canonical_model_name(run_dir_name: str, expected: str) -> None:
     assert canonical_model_name(run_dir_name) == expected
 
 
+def test_spotlight_v2_models_match_the_leaf_generator() -> None:
+    """The pinned v2 token list is exactly what the leaf generator emits (plus the 3D store dir)."""
+    emitted = {arm.model for arm in ARMS} | {arm.store_dir for arm in ARMS}
+    assert emitted == set(_SPOTLIGHT_V2_MODELS)
+
+
 @pytest.mark.parametrize(
     ("model_name", "run_dir", "expected"),
     [
@@ -534,6 +542,22 @@ def test_predict_only_arm_resolves_from_model_name_not_the_baseline_ckpt() -> No
     bench = {"model_name": "pix2pix2d_unetvit_last", "train_set": "ipsc_confocal"}
     assert resolve_model(bench, ckpt) == "pix2pix2d_unetvit_last"
     assert resolve_model({"model_name": "pix2pix2d_unetvit", "train_set": "ipsc_confocal"}, ckpt) == "pix2pix2d_unetvit"
+
+
+def test_spotlight_v2_celldiff_store_dir_splits_into_model_and_variant() -> None:
+    """The grouped parser reads each v2 store dir as the arm, not as a baseline variant."""
+    assert _split_model_variant("celldiff_segaux_iterative", "x") == ("celldiff_segaux", "iterative")
+    assert _split_model_variant("celldiff_2d_segaux", "x") == ("celldiff_2d_segaux", None)
+    assert _split_model_variant("celldiff_2d_seed1", "x") == ("celldiff_2d_seed1", None)
+    assert _split_model_variant("celldiff_cjoint_iterative", "x") == ("celldiff_cjoint", "iterative")
+    assert _split_model_variant("celldiff_ccond_iterative", "x") == ("celldiff_ccond", "iterative")
+    assert _split_model_variant("celldiff_2d_cjoint", "x") == ("celldiff_2d_cjoint", None)
+    assert _split_model_variant("celldiff_2d_ccond", "x") == ("celldiff_2d_ccond", None)
+    assert _split_model_variant("celldiff_2d_bglp", "x") == ("celldiff_2d_bglp", None)
+    assert _split_model_variant("celldiff_2d_bgflat", "x") == ("celldiff_2d_bgflat", None)
+    for model in _SPOTLIGHT_V2_MODELS:
+        if not model.startswith("celldiff"):
+            assert _split_model_variant(model, "x") == (model, None)
 
 
 def test_canonical_model_name_unknown_raises() -> None:
