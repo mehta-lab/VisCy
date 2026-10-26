@@ -50,9 +50,12 @@ class OptimizerHealthCheck(Callback):
         scaler is shrinking gradients rather than protecting them, which no
         healthy run needs. Ignored when the run has no scaler.
     max_consecutive_skips : int
-        Raise after this many consecutive scale *reductions* with no growth in
-        between. Each reduction is one skipped optimizer step. A handful during
-        AMP warmup is normal and expected; a couple of dozen in a row is not.
+        Raise after this many scale *reductions* with no growth in between. Each
+        reduction is one skipped optimizer step; successful steps may separate
+        them, but the scale only grows after ``growth_interval`` of those in a
+        row, so a run of reductions means the backward keeps overflowing faster
+        than the scale can recover. A handful during AMP warmup is normal and
+        expected; a couple of dozen is not.
     max_consecutive_nonfinite : int
         Raise after this many consecutive training batches whose loss is NaN or
         infinite. Small but non-zero so a single transient overflow does not kill
@@ -139,9 +142,10 @@ class OptimizerHealthCheck(Callback):
             )
         if self._consecutive_skips >= self.max_consecutive_skips:
             raise OptimizerHealthError(
-                f"GradScaler halved its scale {self._consecutive_skips} times in a row without growing "
-                f"(now {scale}, step {trainer.global_step}). Every one of those optimizer steps was skipped "
-                "for a non-finite gradient, so the weights are not moving even though the loss is finite."
+                f"GradScaler halved its scale {self._consecutive_skips} times without growing in between "
+                f"(now {scale}, step {trainer.global_step}). Each halving skipped an optimizer step for a "
+                "non-finite gradient, and the scale never recovered, so the backward keeps overflowing even "
+                "though the loss is finite."
             )
 
     def state_dict(self) -> dict:
