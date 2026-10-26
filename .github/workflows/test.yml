@@ -180,10 +180,17 @@ jobs:
         # segmenter + feature-extractor model loads — but pipeline import still
         # needs the eval stack). test_evaluation_grouped drives the
         # multi-condition driver against the same cache-only fixture.
+        # test_evaluation_microssim_calibration pins that MicroMS3IM calibration
+        # propagates OOM, drops constant GT slices from the fit pool, and scores
+        # NaN only on a degenerate GT pool (real cubic, CPU).
         #
         # test_submit_benchmark_batch covers the OTHER two srun emitters (array
         # + chained-serial), which drifted out of sync with the single-job
-        # template because only the latter was under test.
+        # template because only the latter was under test. test_distribution,
+        # test_croissant and test_main_cli_routing cover the release path: the
+        # OZX packer / MANIFEST ledger, the per-dataset Croissant attribution,
+        # and the entry-point wiring that kept both of those CLIs reachable.
+        # All four are CPU-only and need no extra deps.
         run: |
           uv run --frozen --no-sync pytest \
             tests/test_benchmark_config_composition.py \
@@ -193,9 +200,17 @@ jobs:
             tests/test_evaluation_pipeline_parallel.py \
             tests/test_evaluation_pipeline_parallel_cpu.py \
             tests/test_evaluation_grouped.py \
+            tests/test_evaluation_microssim_calibration.py \
+            src/dynacell/evaluation/segmentation_test.py \
+            tests/test_distribution.py \
+            tests/test_croissant.py \
+            tests/test_main_cli_routing.py \
             tests/test_engine.py \
             tests/test_pipeline_cache.py \
+            tests/test_evaluation_fid_provenance.py \
             src/dynacell/evaluation/feature_metrics_test.py \
+            src/dynacell/evaluation/provenance_test.py \
+            tools/watch_stalled_jobs_test.py \
             ../../packages/viscy-utils/tests/test_prediction_writer.py \
             ../../packages/viscy-utils/tests/test_prediction_metadata.py \
             ../../packages/viscy-utils/src/viscy_utils/callbacks/monitor_health_test.py \
