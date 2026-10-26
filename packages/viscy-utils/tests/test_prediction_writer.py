@@ -483,6 +483,33 @@ def test_a_failed_volume_write_fails_the_predict(tmp_path, fail_volume):
     assert ["source_shape" in marker for marker in markers] == ([False] if fail_volume == 2 else [True, False])
 
 
+class _RepeatFirstWindowDataModule(HCSDataModule):
+    """Serve the first window again after the first volume is done, as a stray retry would."""
+
+    def predict_dataloader(self):
+        # FOV 0, t=0 has 8 windows; its first comes back after the volume was flushed.
+        return torch.utils.data.DataLoader(torch.utils.data.Subset(self.predict_dataset, [*range(8), 0]), batch_size=1)
+
+
+def test_a_window_arriving_twice_is_refused(tmp_path):
+    """A repeated window would blend into a flushed volume's zero buffer and re-mark the FOV; it must raise."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    data_module = _RepeatFirstWindowDataModule(
+        data_path=str(source),
+        source_channel=["Phase3D"],
+        target_channel=["Nuclei"],
+        z_window_size=4,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[8, 8],
+        normalizations=[],
+        augmentations=[],
+    )
+    with pytest.raises(RuntimeError, match="arrived twice"):
+        _predict_ones_with(HCSPredictionWriter(str(tmp_path / "pred.zarr")), data_module)
+
+
 def test_cached_volume_windows_equal_per_window_reads(tmp_path):
     """Windows cut from a cached (position, t) volume equal windows read from zarr one by one."""
     source = tmp_path / "source.zarr"

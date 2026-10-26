@@ -553,6 +553,10 @@ class HCSPredictionWriter(BasePredictionWriter):
         # account for lost slices in 2.5D
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
+        written = self._written_windows[img_name]
+        if written[t_index, window_z_index]:
+            # A repeat would blend into a volume already flushed (a zero buffer) or blend twice.
+            raise RuntimeError(f"Window z={window_z_index} of {img_name} t={t_index} arrived twice.")
         # Blend reads and the write go to the in-memory volume, or to the store per window.
         if self._write_once:
             # The volume stays on the prediction's device and reaches the host once, at its flush.
@@ -593,7 +597,6 @@ class HCSPredictionWriter(BasePredictionWriter):
             _store_into(dest, z_slice, sample_prediction)
         else:
             dest[(*lead, z_slice)] = sample_prediction
-        written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
         if self._write_once:
             if written[t_index].all():
