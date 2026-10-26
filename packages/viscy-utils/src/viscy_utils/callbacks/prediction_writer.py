@@ -569,8 +569,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         if self.z_padding == 0 and sample_prediction.shape[-3] > 1:
             if self.z_reduction == "blend":
                 old_stack = dest[(*lead, z_slice)]
-                if self._write_once:
+                if self._write_once and z_slice.start != 0:
                     # The numpy blend promotes to float64 (integer factors); so does this one.
+                    # The first window is stored as predicted, so it needs no float64 copies.
                     old_stack, sample_prediction = old_stack.double(), sample_prediction.double()
                 sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
             else:
