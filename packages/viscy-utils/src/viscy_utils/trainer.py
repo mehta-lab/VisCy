@@ -47,8 +47,9 @@ class VisCyTrainer(Trainer):
             Whether to compute Otsu thresholds for Spotlight loss,
             by default False.
         compute_fg_masks : bool, optional
-            Whether to precompute binary foreground masks from Otsu
-            thresholds, by default False. Requires ``compute_otsu=True``.
+            Whether to precompute binary foreground masks (see
+            :func:`~viscy_utils.meta_utils.generate_fg_masks`), by default
+            False. Requires ``compute_otsu=True``.
         fg_mask_channels : list[str] or None, optional
             Channel names to compute FG masks for. Defaults to all channels
             that had Otsu thresholds computed (``channel_names``).
