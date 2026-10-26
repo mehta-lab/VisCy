@@ -1,0 +1,102 @@
+# pix2pix2d_unetvit (UNetViT generator + multi-scale PatchGAN, run
+# Z-preserving at Z=1) fit on nucleus (Nuclei channel) — AICS iPSC confocal,
+# in-focus 2D track. Mirror of the 3D
+# nucleus/pix2pix3d_unetvit/ipsc_confocal/train_4gpu_modernized.yml leaf,
+# flattened onto the offline 5-plane in-focus slab store (z_window_size=1
+# emits one in-focus window per plane).
+#
+# ⚠ Mirrors train_4gpu_modernized.yml, NOT the stale sibling train.yml. The
+# published pix2pix3d rows came from the modernized "Run D" recipe — the
+# checkpoints carry loss_type='nonsat', lr 2e-4/2e-4, r1_gamma=10,
+# ema_kimg=10, lecam_gamma=0.3, lambda_l1=10 and 201 generator_ema.* tensors
+# — while train.yml still composes the LSGAN baseline overlay. All of Run D is
+# baked into model_overlays/pix2pix2d_unetvit_fit.yml, so unlike the 3D leaves
+# this file repeats none of it.
+#
+# The 3D leaf resolves data_path/source_channel/target_channel from the
+# manifest via benchmark.dataset_ref, which points at the NON-focus store.
+# The 2D track reads the `_focus.zarr` slab instead, so the resolver is
+# disabled here (dataset_ref: null) and the three data fields are declared
+# inline — the resolver hook raises on any data.init_args field co-declared
+# with a full dataset_ref.
+#
+# The train_set fragment supplies data.class_path (HCSDataModule) plus
+# split_ratio / mmap_preload / scratch_dir. targets/nucleus.yml supplies the
+# NormalizeSampled(fov_statistics) normalization the pix2pix leaves use
+# (mean/std on Phase3D, median/iqr on the target); only its RandWeightedCropd
+# is list-replaced below, flattened [13,624,624] -> [1,624,624].
+
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/pix2pix2d_unetvit_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  gene: Nuclei
+  target: nucleus
+  target_id: nucleus
+  train_set: ipsc_confocal
+  model_name: pix2pix2d_unetvit
+  experiment_id: nucleus__ipsc_confocal__pix2pix2d_unetvit
+  # Disable the manifest resolver: the 2D track reads the offline focus store,
+  # not the manifest-registered non-focus store.
+  dataset_ref: null
+
+data:
+  init_args:
+    # aics-hipsc in-focus slab store (Nuclei channel) — resolver disabled above.
+    source_channel: Phase3D
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell_focus.zarr
+    # Flatten the target fragment's [13, 624, 624] weighted crop to Z=1.
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [1, 624, 624]
+          num_samples: 2
+
+trainer:
+  logger:
+    init_args:
+      name: pix2pix2d_unetvit_iPSC_NUCL
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix2d_unetvit
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    # monitor loss/validate_ema, matching the 3D Run-D leaves: ema_kimg is set,
+    # so the EMA generator is the one the recipe selects on and the one predict
+    # reports. Monitoring the raw loss/validate would pin a different epoch.
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        filename: "epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix2d_unetvit/checkpoints
+
+launcher:
+  job_name: pix2pix2d_unetvit_iPSC_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix2d_unetvit
+  sbatch:
+    # Narrow OFF the hardware_4gpu h100|h200 default, the opposite of the 3D
+    # leaf. 3D needed h200 because the GAN OOMs 80 GB at Z=8; measured at Z=1
+    # on an A40 (44.7 GiB) peak is 13.3 GiB/rank at batch_size 4, so the 48 GB
+    # cards have 3x headroom and reserving Hopper for this would be queue
+    # squatting. The profile documents this opt-out explicitly.
+    constraint: "a40|a6000|l40s|h100|h200"
+    # 128G: the in-focus slab store is a 5-plane slice of the full-Z 3D store
+    # (~1/4 the Z), so the profile's 512G mmap_preload headroom is inherited 3D
+    # scale. Set in the LEAF BODY because launcher_profiles compose after model
+    # overlays and would otherwise win.
+    mem: "128G"

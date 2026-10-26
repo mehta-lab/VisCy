@@ -1,0 +1,42 @@
+# pix2pix2d `wmatch` arm (predict) of mito/pix2pix2d_unetvit/joint_ipsc_confocal_a549_mantis/predict__a549_mantis_mock.yml.
+# Checkpoint: the arm's best loss/validate_ema epoch, from a fit whose log reads
+# `Trainer.fit stopped: max_epochs=40 reached`. Output store, run root and job name
+# gain the arm name; the slab3 predict_z_planes and everything else are the baseline's.
+# Written by applications/dynacell/experiments/2026-10-22_2d-benchmark-paper-appendix/make_wmatch_predict_and_buckets.py.
+base:
+- ../../../_internal/shared/model/predict_sets/a549_mantis_tomm20_mock.yml
+- ../../../_internal/shared/model/targets/mito_tomm20.yml
+- ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_predict.yml
+- ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+- ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+- ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: a549_mantis_tomm20_mock
+  model_name: pix2pix2d_unetvit_wmatch
+  experiment_id: mito__joint_ipsc_confocal_a549_mantis__pix2pix2d_unetvit_wmatch__a549_mantis_tomm20_mock
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/pix2pix2d_unetvit_wmatch/checkpoints/epoch=23-step=17568-loss=1.048.ckpt
+data:
+  init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/mito/a549__mock__h1.json
+    normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys:
+        - Phase3D
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    augmentations: []
+trainer:
+  callbacks:
+  - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+    init_args:
+      output_store: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix2d_unetvit_wmatch/joint/a549__mock/prediction.zarr
+launcher:
+  job_name: pix2pix2d_unetvit_wmatch_PRED_JOINT_TOMM20_ON_A549_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix2d_unetvit_wmatch/joint/a549__mock

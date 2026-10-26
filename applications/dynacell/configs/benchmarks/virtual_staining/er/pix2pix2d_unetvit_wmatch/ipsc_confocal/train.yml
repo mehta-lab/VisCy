@@ -1,0 +1,69 @@
+# pix2pix2d `wmatch` arm (fit) of er/pix2pix2d_unetvit/ipsc_confocal/train.yml.
+# Recipe delta: warmup_steps 8500 -> 1327. Run-D's 8500-batch warmup is
+# 15.7 % of the matching 3D fit (54080 batches); this 2D fit runs 8440, so
+# round(8500 * 8440 / 54080) keeps the same schedule shape. The baseline's absolute 8500
+# left 5 of 12 2D fits still warming up at their last step (wandb lr-AdamW, 2026-10-22).
+# Everything else, and the rationale for it, is the baseline leaf's.
+# Written by applications/dynacell/experiments/2026-10-22_2d-benchmark-paper-appendix/make_wmatch_fit_leaves.py.
+base:
+- ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+- ../../../_internal/shared/model/targets/er_sec61b.yml
+- ../../../_internal/shared/model/data_overlays/pix2pix2d_unetvit_fit.yml
+- ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_fit.yml
+- ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+- ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+- ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+benchmark:
+  task: virtual_staining
+  organelle: er
+  gene: SEC61B
+  target: er
+  target_id: er
+  train_set: ipsc_confocal
+  model_name: pix2pix2d_unetvit_wmatch
+  experiment_id: er__ipsc_confocal__pix2pix2d_unetvit_wmatch
+  dataset_ref: null
+data:
+  init_args:
+    source_channel: Phase3D
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B_focus.zarr
+    augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys:
+        - Phase3D
+        - Structure
+        w_key: Structure
+        spatial_size:
+        - 1
+        - 624
+        - 624
+        num_samples: 2
+trainer:
+  logger:
+    init_args:
+      name: pix2pix2d_unetvit_wmatch_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/pix2pix2d_unetvit_wmatch
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: step
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: loss/validate_ema
+      filename: epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}
+      auto_insert_metric_name: false
+      every_n_epochs: 1
+      save_top_k: 4
+      save_last: true
+      dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/pix2pix2d_unetvit_wmatch/checkpoints
+launcher:
+  job_name: pix2pix2d_unetvit_wmatch_iPSC_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/pix2pix2d_unetvit_wmatch
+  sbatch:
+    constraint: a40|a6000|l40s|h100|h200
+    mem: 128G
+model:
+  init_args:
+    warmup_steps: 1327

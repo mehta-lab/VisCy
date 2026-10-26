@@ -1,0 +1,95 @@
+# FNet3D "larger-patch, simple-augs" ablation (Arm A) on nucleus (Nuclei
+# channel of cell.zarr) — AICS iPSC confocal, BRIGHTFIELD input.
+#
+# The middle rung of the brightfield-vs-phase recipe ladder. Its sibling
+# nucleus/fnet3d_vscyto3daug/ipsc_confocal_brightfield/train.yml explains why
+# the ladder is needed; this leaf is what makes the answer attributable. If
+# brightfield only helps once the patch grows, the useful information really
+# is the defocus context that a 64x64 crop cannot see. If it only helps once
+# the affine/intensity augmentations arrive, it is a regularization effect
+# that has nothing to do with brightfield being the raw measurement.
+#
+# Geometry, batch, precision, model and optimizer are identical to the
+# fnet3d_vscyto3daug brightfield arm, so those two differ ONLY in the
+# gpu_augmentations stack — the same pairing the phase arms already have.
+#
+# The data overlay keys norm/aug/val on Phase3D + Structure; this arm's
+# source is Brightfield and the nucleus target_channel is Nuclei, so all
+# three lists are re-keyed here (deep_merge replaces lists wholesale).
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal_brightfield.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_bigpatch_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal_brightfield
+  model_name: fnet3d_bigpatch
+  experiment_id: nucleus__ipsc_confocal_brightfield__fnet3d_bigpatch
+
+trainer:
+  # bf16-mixed halves the 384x384x32 activation footprint; MSE loss is
+  # immune to the bf16-SSIM cancellation issue. Must match the
+  # fnet3d_vscyto3daug brightfield arm for a clean augmentation-only
+  # comparison.
+  precision: bf16-mixed
+  logger:
+    init_args:
+      name: FNet3D_BigPatch_iPSCbf_NUCL
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_bigpatch
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_bigpatch/checkpoints
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Brightfield]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 384, 384]
+          num_samples: 4
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          roi_size: [32, 384, 384]
+
+launcher:
+  job_name: FNet3DBigPatchBF_iPSC_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_bigpatch
+  # Same envelope as the phase sibling: 384x384x32 needs a large-memory GPU,
+  # pin H200. cell.zarr-backed preload pushes MaxVMSize past the shared 256G
+  # cap; mem 512G matches the fnet3d iPSC headroom.
+  sbatch:
+    constraint: h200
+    mem: "512G"

@@ -1,0 +1,66 @@
+# pix2pix2d_unetvit predict overlay for the in-focus 2D benchmark track. Binds
+# the pix2pix2d_unetvit model recipe + predict trainer recipe, then layers
+# predict-time model hparams and data-loader settings. Predict-time
+# normalizations and data_path are leaf-owned (leaf overrides target-inherited
+# values to match each organelle's test store).
+#
+# CRITICAL: predict rebuilds the model from the pix2pix2d_unetvit recipe
+# (generator input_spatial_size [1,512,512], patch_size [1,4,4], discriminator
+# preserve_z: true) and then loads the trained weights; data.z_window_size MUST
+# be 1 so the datamodule emits one window per z-plane of the full-Z 3D test
+# store, matching the Z-preserving 2D checkpoint. A z_window_size mismatch
+# would feed a multi-plane window into a Z=1 network and error. Same contract
+# as fnet2d_predict.yml and celldiff_2d_predict.yml. The discriminator is not
+# exposed at inference — DynacellGAN.predict_step uses the generator only —
+# but it is still constructed, so preserve_z has to stay consistent with the
+# checkpoint or the state_dict load would mismatch on the D weights.
+#
+# predict_overlap Z is 0, NOT the 3D overlay's 4: `window_starts` requires
+# 0 <= overlap < patch on every axis, and the Z patch is 1 here, so any
+# non-zero Z overlap raises. Same correction celldiff_2d_predict.yml carries.
+#
+# sliding_window is still required at Z=1. The reason is lateral, not axial:
+# the ViT generator is fixed at 512x512 by its positional embeddings, and the
+# A549 test set is 640x960 (the iPSC test is a single 512x512 tile).
+base:
+  - ../../../../../../recipes/models/pix2pix2d_unetvit.yml
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    # The fit overlay mirrors Run D, which sets ema_kimg: 10.0, so every
+    # checkpoint carries 201 generator_ema.* tensors and picked its best epoch
+    # on loss/validate_ema. Those EMA weights are what the recipe selected on,
+    # so they are what the benchmark must report.
+    #
+    # ema_kimg is deliberately NOT restated here. DynacellGAN used to build the
+    # EMA shadow only when ema_kimg was set, so a predict overlay that omitted
+    # it made strict=False silently drop all 201 tensors and inference fell
+    # back to the raw generator — 149 pix2pix3d predict runs logged exactly
+    # that, and every Pix2Pix3D number published before 2026-07-30 was produced
+    # that way. engine.py now builds the shadow from the checkpoint's own
+    # generator_ema.* keys, so ema_kimg is a training constant and restating it
+    # in predict configs is what let the drop go unnoticed. Do not add it back.
+    #
+    # use_ema_at_predict stays explicit because engine.py deliberately does NOT
+    # adopt it from the checkpoint.
+    use_ema_at_predict: true
+    predict_method: sliding_window
+    predict_overlap: [0, 256, 256]
+    # Shift averaging suppresses the two lattices the cosine blend does not
+    # touch: the decoder's ConvTranspose checkerboard (2/4/8 px) and the ViT
+    # bottleneck's token grid (32 px). Both are in-plane, so they are present at
+    # Z=1 for exactly the same reasons as in 3D — the generator's decoder and
+    # bottleneck are unchanged apart from the Z patch extent. Carried over
+    # verbatim from pix2pix3d_unetvit_predict.yml, including the (dy, dx) PAIR
+    # form: a flat [0, 5, 11, 22] is expanded to its outer product and costs 16
+    # tiled passes instead of 4 for the same result. Do NOT swap in offsets that
+    # merely zero the period-32 phasor — those are congruent mod 8 and reinstate
+    # the short periods, measuring two to three times worse.
+    predict_phase_shifts: [[0, 0], [5, 11], [11, 22], [22, 5]]
+data:
+  init_args:
+    z_window_size: 1
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]

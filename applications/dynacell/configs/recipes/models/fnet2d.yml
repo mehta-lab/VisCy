@@ -1,0 +1,23 @@
+# Model recipe: FNet2D — FNet3D recursive encoder-decoder (Ounkomol et al.
+# 2018) run Z-preserving at Z=1 for the in-focus 2D benchmark track.
+#
+# Mirrors recipes/models/fnet3d.yml but:
+#   - in_stack_depth: 1  (single in-focus plane, not the 32-plane stack)
+#   - downsample_z: false  (Z-preserving encoder: stride (1,2,2) +
+#     ConvTranspose3d k=(1,3,3)). Required so the base UNet3DBase skips the
+#     `D % 2**depth` divisor check and can run at Z=1 (see
+#     viscy_models/unet/unet3d.py downsample_z, unet3d_base.py:162-168).
+# architecture stays "FNet3D" — the dynacell registry maps it to the
+# viscy_models.Unet3d subclass (engine.py:45); FNet2D is that same net
+# with the Z axis frozen, not a distinct architecture.
+model:
+  class_path: dynacell.engine.DynacellUNet
+  init_args:
+    architecture: FNet3D
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      depth: 4
+      mult_chan: 32
+      in_stack_depth: 1
+      downsample_z: false

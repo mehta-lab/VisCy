@@ -1,0 +1,25 @@
+# @package _global_
+# Phase baseline (no model): raw Phase3D input scored as the "prediction" against
+# the A549 mock membrane (CAAX) GT. cpdino segments the phase whole cell and
+# carves the GT nucleus; the carve seeds come from the separate H2B store. Phase3D
+# lives in the CAAX store, so io.pred_path defaults there (positions match GT).
+defaults:
+  - override /target: membrane
+  - override /predict_set: a549_mantis_caax_mock
+
+benchmark:
+  dataset_ref:
+    target: caax
+
+io:
+  pred_is_source: true
+  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+
+compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_phase_membrane_mock

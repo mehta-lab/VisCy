@@ -1,0 +1,41 @@
+# fnet3d_paper predict: er (SEC61B) trained on a549_mantis. Gap-fill predict leaf (2026-07-14).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_sec61b_mock.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: a549_mantis
+  predict_set: a549_mantis_sec61b_mock
+  model_name: fnet3d_paper
+  experiment_id: er__a549_mantis__fnet3d_paper__a549_mantis_sec61b_mock
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/er/fnet3d_paper/checkpoints/epoch=350-step=185679.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/a549/a549__mock/prediction.zarr
+
+launcher:
+  job_name: FNet3DPaper_PRED_SEC61B_A549TR_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/a549/a549__mock
