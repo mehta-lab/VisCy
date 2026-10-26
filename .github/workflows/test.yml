@@ -146,7 +146,7 @@ jobs:
         working-directory: applications/${{ matrix.application }}
 
   test-dynacell-configs:
-    name: Test dynacell benchmark configs (Python 3.13, ubuntu-latest)
+    name: Test dynacell configs and regressions (Python 3.13, ubuntu-latest)
     runs-on: ubuntu-latest
 
     steps:
@@ -166,10 +166,11 @@ jobs:
         # (falls back to numpy/scikit-image without CUDA), so the eval extra
         # installs and runs on a GPU-less runner. eval_gpu (cupy/cucim) is NOT
         # installed — those are the only CUDA-only deps.
-        run: uv sync --frozen --extra eval --group test
+        # Include viscy-utils' test group for the prediction-writer fixtures.
+        run: uv sync --frozen --package dynacell --package viscy-utils --extra eval --group test
         working-directory: applications/dynacell
 
-      - name: Run benchmark-schema + submit-tool + eval-runtime tests
+      - name: Run benchmark configs and pipeline regressions
         # test_benchmark_config_composition + test_submit_benchmark_job cover
         # config composition + the launcher. test_runtime + the two
         # test_evaluation_pipeline_parallel* suites cover the runtime module,
@@ -179,14 +180,26 @@ jobs:
         # segmenter + feature-extractor model loads — but pipeline import still
         # needs the eval stack). test_evaluation_grouped drives the
         # multi-condition driver against the same cache-only fixture.
+        #
+        # test_submit_benchmark_batch covers the OTHER two srun emitters (array
+        # + chained-serial), which drifted out of sync with the single-job
+        # template because only the latter was under test.
         run: |
-          uv run --frozen pytest \
+          uv run --frozen --no-sync pytest \
             tests/test_benchmark_config_composition.py \
             tests/test_submit_benchmark_job.py \
+            tests/test_submit_benchmark_batch.py \
             tests/test_runtime.py \
             tests/test_evaluation_pipeline_parallel.py \
             tests/test_evaluation_pipeline_parallel_cpu.py \
             tests/test_evaluation_grouped.py \
+            tests/test_engine.py \
+            tests/test_pipeline_cache.py \
+            src/dynacell/evaluation/feature_metrics_test.py \
+            ../../packages/viscy-utils/tests/test_prediction_writer.py \
+            ../../packages/viscy-utils/tests/test_prediction_metadata.py \
+            ../../packages/viscy-utils/src/viscy_utils/callbacks/monitor_health_test.py \
+            ../../packages/viscy-utils/src/viscy_utils/callbacks/linear_lr_cooldown_test.py \
             -v
         working-directory: applications/dynacell
 
