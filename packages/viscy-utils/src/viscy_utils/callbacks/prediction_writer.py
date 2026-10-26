@@ -93,8 +93,9 @@ def _blend_in(
 ) -> torch.Tensor | NDArray:
     """Blend a new stack into an old stack over a Z range with linear feathering.
 
-    Supports both torch tensors (5D: B,C,Z,Y,X) for in-memory sliding window
-    prediction and numpy arrays (4D: C,Z,Y,X) for out-of-core HCSPredictionWriter.
+    Supports torch tensors (5D: B,C,Z,Y,X for in-memory sliding window
+    prediction; 4D: C,Z,Y,X for HCSPredictionWriter's in-memory volume) and numpy
+    arrays (4D: C,Z,Y,X) for HCSPredictionWriter's per-window writes.
 
     Parameters
     ----------
@@ -120,10 +121,32 @@ def _blend_in(
     _logger.debug(f"Blending with factors {factors}.")
     if isinstance(old_stack, torch.Tensor):
         factors = torch.tensor(factors, dtype=old_stack.dtype, device=old_stack.device)
-        factors = factors.view(1, 1, -1, 1, 1)
+        factors = factors.view(-1, 1, 1)
     else:
         factors = np.array(factors)[np.newaxis, :, np.newaxis, np.newaxis]
     return old_stack * (factors - 1) / factors + new_stack / factors
+
+
+def _store_into(volume: torch.Tensor, z_slice: slice, planes: torch.Tensor) -> None:
+    """Write ``planes`` into ``volume[:, z_slice]``, rounding to the volume dtype as numpy does.
+
+    Torch rounds to float32 and float64 exactly like numpy. It converts float64 to
+    float16 through float32, though, which can round twice, so other dtypes are cast
+    by numpy on the host.
+
+    Parameters
+    ----------
+    volume : torch.Tensor
+        ``(C, Z, Y, X)`` volume buffer.
+    z_slice : slice
+        Planes of ``volume`` to write.
+    planes : torch.Tensor
+        ``(C, Z, Y, X)`` planes, on the volume's device.
+    """
+    if volume.dtype not in (torch.float32, torch.float64) and planes.dtype != volume.dtype:
+        cast = planes.cpu().numpy().astype(torch.empty(0, dtype=volume.dtype).numpy().dtype)
+        planes = torch.from_numpy(cast).to(volume.device)
+    volume[:, z_slice] = planes
 
 
 class HCSPredictionWriter(BasePredictionWriter):
@@ -279,7 +302,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         # writes single planes that a [first, last] flush would fill in between: both write
         # per window.
         self._write_once = not self.write_input and self._z_planes is None
-        self._volumes: dict[tuple[str, int], tuple[NDArray, int, int]] = {}
+        self._volumes: dict[tuple[str, int], tuple[torch.Tensor, int, int]] = {}
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
             array_key=dm.array_key,
@@ -492,7 +515,6 @@ class HCSPredictionWriter(BasePredictionWriter):
             Index of this sample within the batch.
         """
         _logger.debug(f"Writing sample {sample_index}.")
-        sample_prediction = to_numpy(sample_prediction)
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
         z_index = int(z_index)
@@ -502,8 +524,13 @@ class HCSPredictionWriter(BasePredictionWriter):
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
         # Blend reads and the write go to the in-memory volume, or to the store per window.
         if self._write_once:
+            # The volume stays on the prediction's device and reaches the host once, at its flush.
+            sample_prediction = sample_prediction.detach()
+            if sample_prediction.dtype == torch.bfloat16:
+                sample_prediction = sample_prediction.float()  # to_numpy's cast
             dest, lead = self._buffer_volume(img_name, t_index, sample_prediction, z_slice), (slice(None),)
         else:
+            sample_prediction = to_numpy(sample_prediction)
             image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
             _resize_image(image, t_index, z_slice)
             dest, lead = image.oindex, (t_index, self.prediction_index)
@@ -516,7 +543,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         # write CZYX
         if self.z_padding == 0 and sample_prediction.shape[-3] > 1:
             if self.z_reduction == "blend":
-                sample_prediction = _blend_in(dest[(*lead, z_slice)], sample_prediction, z_slice)
+                old_stack = dest[(*lead, z_slice)]
+                if self._write_once:
+                    # The numpy blend promotes to float64 (integer factors); so does this one.
+                    old_stack, sample_prediction = old_stack.double(), sample_prediction.double()
+                sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
             else:
                 # Drop the planes before this window's center: the window centered on
                 # each of them writes it later and wins. The first window keeps all of
@@ -526,7 +557,10 @@ class HCSPredictionWriter(BasePredictionWriter):
                 z_slice = slice(z_slice.start + keep, z_slice.stop)
         # The buffer has the store's dtype, so this casts like the zarr write and blending
         # reads back what the store would hold.
-        dest[(*lead, z_slice)] = sample_prediction
+        if self._write_once:
+            _store_into(dest, z_slice, sample_prediction)
+        else:
+            dest[(*lead, z_slice)] = sample_prediction
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
         if self._write_once and written[t_index].all():
@@ -539,7 +573,9 @@ class HCSPredictionWriter(BasePredictionWriter):
             marker = completion_marker(self._source_shapes[img_name], self._run)
             mark_complete(position, self._prediction_channels, marker)
 
-    def _buffer_volume(self, img_name: str, t_index: int, sample_prediction: NDArray, z_slice: slice) -> NDArray:
+    def _buffer_volume(
+        self, img_name: str, t_index: int, sample_prediction: torch.Tensor, z_slice: slice
+    ) -> torch.Tensor:
         """Return the in-memory CZYX volume of ``(img_name, t_index)``, allocating it on first use.
 
         Parameters
@@ -548,8 +584,8 @@ class HCSPredictionWriter(BasePredictionWriter):
             Hierarchical path name of the source image.
         t_index : int
             Timepoint of the volume.
-        sample_prediction : NDArray
-            First window of the volume; sets channel count, YX shape, and the dtype
+        sample_prediction : torch.Tensor
+            First window of the volume; sets channel count, YX shape, device, and the dtype
             unless the store already holds this array (then its dtype, as the per-window
             writes would cast to it).
         z_slice : slice
@@ -560,7 +596,7 @@ class HCSPredictionWriter(BasePredictionWriter):
 
         Returns
         -------
-        NDArray
+        torch.Tensor
             Zero-filled ``(C, Z, Y, X)`` buffer spanning the source depth, like a new zarr array.
         """
         key = (img_name, t_index)
@@ -568,15 +604,16 @@ class HCSPredictionWriter(BasePredictionWriter):
             depth = self._source_shapes[img_name][1]
             shape = (sample_prediction.shape[0], depth, *sample_prediction.shape[-2:])
             try:
-                dtype = self.plate[img_name].dtype
+                dtype = torch.from_numpy(np.empty(0, dtype=self.plate[img_name].dtype)).dtype
             except KeyError:
                 dtype = sample_prediction.dtype
-            self._volumes[key] = (np.zeros(shape, dtype=dtype), z_slice.start, z_slice.stop)
+            volume = torch.zeros(shape, dtype=dtype, device=sample_prediction.device)
+            self._volumes[key] = (volume, z_slice.start, z_slice.stop)
         volume, start, stop = self._volumes[key]
         if z_slice.stop > volume.shape[1]:
             # A prediction deeper than its window: grow like the per-window resize does.
-            extra = np.zeros((volume.shape[0], z_slice.stop - volume.shape[1], *volume.shape[2:]), dtype=volume.dtype)
-            volume = np.concatenate([volume, extra], axis=1)
+            extra = volume.new_zeros((volume.shape[0], z_slice.stop - volume.shape[1], *volume.shape[2:]))
+            volume = torch.cat([volume, extra], dim=1)
         self._volumes[key] = (volume, min(start, z_slice.start), max(stop, z_slice.stop))
         return volume
 
@@ -591,9 +628,10 @@ class HCSPredictionWriter(BasePredictionWriter):
             Timepoint of the volume.
         """
         volume, start, stop = self._volumes.pop((img_name, t_index))
-        image = self._create_image(img_name, volume[:, :stop].shape, volume.dtype)
+        planes = volume[:, start:stop].cpu().numpy()
+        image = self._create_image(img_name, volume[:, :stop].shape, planes.dtype)
         _resize_image(image, t_index, slice(start, stop))
-        image.oindex[t_index, self.prediction_index, slice(start, stop)] = volume[:, start:stop]
+        image.oindex[t_index, self.prediction_index, slice(start, stop)] = planes
 
     def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
         """Return whether the existing output array outruns this run's source in T or Z.

@@ -12,7 +12,7 @@ from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
-from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in
+from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in, _store_into
 from viscy_utils.prediction_metadata import (
     PREDICTED_Z_PLANES_KEY,
     PREDICTION_COMPLETE_KEY,
@@ -31,6 +31,11 @@ from viscy_utils.prediction_metadata import (
 
 Z_SIZE = 16
 Z_WINDOW = 8
+#: The buffered writer blends on the prediction's device, so its bytes are checked on every device present.
+ACCELERATORS = [
+    "cpu",
+    pytest.param("gpu", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no CUDA device")),
+]
 
 
 class _ZStampModule(LightningModule):
@@ -207,14 +212,18 @@ def _assert_same_bytes(reference: dict, buffered: dict) -> None:
         assert new_attrs == attrs
 
 
+@pytest.mark.parametrize("accelerator", ACCELERATORS)
 @pytest.mark.parametrize("mode", ["blend", "center", "target_2d", "z_planes"])
 @pytest.mark.parametrize("batch_size", [1, 3])
 @pytest.mark.parametrize("limit_batches", [None, 5])
-def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mode, batch_size, limit_batches):
+def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(
+    tmp_path, accelerator, mode, batch_size, limit_batches
+):
     """Assembling each volume in memory and writing it once stores the bytes and markers per-window writes store.
 
     Covers 3D windows (blend, center) and a 2D model's padded center plane (``target_2d``); a plane selection
-    takes the per-window path on both sides.
+    takes the per-window path on both sides. The buffered volume lives on the prediction's device, so on a GPU
+    the float64 blend runs there against the reference's numpy blend.
     ``limit_batches=5`` stops inside a volume, so the partial volume flushed at predict end is compared too. The
     reference reads per window too (``num_workers=1`` disables the volume cache).
     """
@@ -242,7 +251,8 @@ def test_buffered_volumes_store_the_same_bytes_as_per_window_writes(tmp_path, mo
         output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
         writer = writer_cls(str(output), z_reduction="center" if mode == "center" else "blend")
         Trainer(
-            accelerator="cpu",
+            accelerator=accelerator,
+            devices=1,
             logger=False,
             enable_progress_bar=False,
             limit_predict_batches=limit_batches,
@@ -351,6 +361,50 @@ def test_buffered_volume_takes_the_dtype_of_an_existing_array(tmp_path):
         stores[writer_cls] = _read_store(output)
     assert {voxels.dtype for voxels, _, _ in stores[HCSPredictionWriter].values()} == {np.dtype(np.float32)}
     _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+@pytest.mark.parametrize("accelerator", ACCELERATORS)
+def test_buffered_float16_volume_rounds_the_blend_like_numpy(tmp_path, accelerator):
+    """A float16 store from float16 predictions rounds each float64 blend to float16 as the numpy write does."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    stores = {}
+    for writer_cls in (_PerWindowWriter, HCSPredictionWriter):
+        output = tmp_path / f"pred_{writer_cls.__name__}.zarr"
+        data_module = HCSDataModule(
+            data_path=str(source),
+            source_channel=["Phase3D"],
+            target_channel=["Nuclei"],
+            z_window_size=4,
+            batch_size=1,
+            num_workers=0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+        )
+        Trainer(
+            accelerator=accelerator,
+            devices=1,
+            logger=False,
+            enable_progress_bar=False,
+            callbacks=[writer_cls(str(output))],
+        ).predict(_WindowFunctionModule(dtype=torch.float16), datamodule=data_module, return_predictions=False)
+        stores[writer_cls] = _read_store(output)
+    assert {voxels.dtype for voxels, _, _ in stores[HCSPredictionWriter].values()} == {np.dtype(np.float16)}
+    _assert_same_bytes(stores[_PerWindowWriter], stores[HCSPredictionWriter])
+
+
+def test_store_into_rounds_float64_to_float16_once():
+    """Torch rounds float64 to float16 through float32; the volume must hold numpy's single rounding."""
+    # Just above the midpoint of 1 and the next float16: float32 rounds it onto the midpoint, then a tie to even.
+    value = 1 + 2.0**-11 + 2.0**-40
+    assert torch.tensor(value, dtype=torch.float64).to(torch.float16).item() == 1.0
+    volume = torch.zeros(1, 2, 1, 1, dtype=torch.float16)
+    _store_into(volume, slice(1, 2), torch.full((1, 1, 1, 1), value, dtype=torch.float64))
+    expected = np.float16(value)
+    assert expected == 1 + 2.0**-10
+    assert volume[0, 1, 0, 0].item() == expected
+    assert volume[0, 0, 0, 0].item() == 0
 
 
 def test_cached_volume_windows_equal_per_window_reads(tmp_path):
