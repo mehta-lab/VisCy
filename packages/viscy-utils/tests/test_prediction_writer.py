@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,6 +14,7 @@ from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
+from viscy_utils.callbacks import prediction_writer
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in, _store_into
 from viscy_utils.prediction_metadata import (
     PREDICTED_Z_PLANES_KEY,
@@ -405,6 +408,84 @@ def test_store_into_rounds_float64_to_float16_once():
     assert expected == 1 + 2.0**-10
     assert volume[0, 1, 0, 0].item() == expected
     assert volume[0, 0, 0, 0].item() == 0
+
+
+class _SlowWriter(HCSPredictionWriter):
+    """Hold every volume write on the flush thread for a while, so a marker that does not wait for it shows."""
+
+    def _write_volume(self, *args, **kwargs) -> None:
+        time.sleep(0.2)
+        super()._write_volume(*args, **kwargs)
+
+
+def test_completion_marker_follows_the_flushed_voxels(tmp_path, monkeypatch):
+    """A FOV is marked complete only after every one of its volumes is in the store, and the writes run off-thread."""
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    output = tmp_path / "pred.zarr"
+    marked = []
+    real_mark_complete = prediction_writer.mark_complete
+
+    def checked_mark_complete(position, channels, marker):
+        # Every voxel of this run is nonzero, so a zero names a volume not yet written.
+        with open_ome_zarr(output, mode="r") as plate:
+            voxels = np.asarray(plate[position.zgroup.path]["0"])
+        marked.append((position.zgroup.path, voxels.shape, bool((voxels != 0).all()), threading.current_thread()))
+        real_mark_complete(position, channels, marker)
+
+    monkeypatch.setattr(prediction_writer, "mark_complete", checked_mark_complete)
+    data_module = HCSDataModule(
+        data_path=str(source),
+        source_channel=["Phase3D"],
+        target_channel=["Nuclei"],
+        z_window_size=4,
+        batch_size=3,
+        num_workers=0,
+        yx_patch_size=[8, 8],
+        normalizations=[],
+        augmentations=[],
+    )
+    Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[_SlowWriter(str(output))]).predict(
+        _OnesModule(), datamodule=data_module, return_predictions=False
+    )
+    assert [(name, shape, full) for name, shape, full, _ in marked] == [
+        (fov, (2, 1, 11, 8, 8), True) for fov in RANDOM_SOURCE_PLANES
+    ]
+    assert all(thread is not threading.main_thread() for *_, thread in marked)
+
+
+class _FailingWriter(HCSPredictionWriter):
+    """Fail the write of one volume on the flush thread."""
+
+    def __init__(self, *args, fail_volume: int, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fail_volume = fail_volume
+        self.n_volumes = 0
+
+    def _write_volume(self, *args, **kwargs) -> None:
+        self.n_volumes += 1
+        if self.n_volumes == self.fail_volume:
+            raise OSError("disk full")
+        super()._write_volume(*args, **kwargs)
+
+
+@pytest.mark.parametrize("fail_volume", [2, 4])
+def test_a_failed_volume_write_fails_the_predict(tmp_path, fail_volume):
+    """A write error on the flush thread stops the predict, and its FOV is never marked complete.
+
+    Volume 2 is FOV 0's last: the error stops the run before FOV 1 is written. Volume 4 is FOV 1's last, so the
+    error surfaces at predict end, after FOV 0 completed.
+    """
+    source = tmp_path / "source.zarr"
+    _write_random_source(source)
+    writer = _FailingWriter(str(tmp_path / "pred.zarr"), fail_volume=fail_volume)
+    with pytest.raises(OSError, match="disk full"):
+        Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
+            _OnesModule(), datamodule=_ones_data_module(source), return_predictions=False
+        )
+    with open_ome_zarr(tmp_path / "pred.zarr", mode="r") as plate:
+        markers = [pos.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"] for _, pos in plate.positions()]
+    assert ["source_shape" in marker for marker in markers] == ([False] if fail_volume == 2 else [True, False])
 
 
 def test_cached_volume_windows_equal_per_window_reads(tmp_path):

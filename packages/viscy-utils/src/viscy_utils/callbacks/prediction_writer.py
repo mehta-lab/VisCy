@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Literal, Optional, Sequence
 
 import numpy as np
@@ -159,7 +160,10 @@ class HCSPredictionWriter(BasePredictionWriter):
     Each (position, timepoint) volume is assembled in memory from its depth
     windows and written once, when its last window arrives (or at predict end),
     instead of a zarr read-modify-write per window; the stored bytes are the
-    same. ``write_input`` and plane-restricted predicts (``predict_z_planes``) keep
+    same. The write runs on a background thread while the next volume is
+    predicted, one at a time and in order; a FOV's completion marker is written
+    on that thread after its last volume, and a write error is raised at the
+    next batch or at predict end. ``write_input`` and plane-restricted predicts (``predict_z_planes``) keep
     the per-window writes: the first stores slices beside each window, and the
     second writes single planes, which a volume flush would fill in between.
 
@@ -303,6 +307,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         # per window.
         self._write_once = not self.write_input and self._z_planes is None
         self._volumes: dict[tuple[str, int], tuple[torch.Tensor, int, int]] = {}
+        # Volume writes (and the markers after them) run here, in submission order.
+        self._flush_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prediction-flush")
+        self._pending: Future | None = None
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
             array_key=dm.array_key,
@@ -434,6 +441,13 @@ class HCSPredictionWriter(BasePredictionWriter):
             self.source_index = self._get_channel_indices(source_channel)
             self.target_index = self._get_channel_indices(target_channel)
         self.prediction_index = self._get_channel_indices(prediction_channel)
+        # Read now: once volume writes run on the flush thread, this thread leaves the store alone.
+        self._store_dtypes = {}
+        for img_name in self._source_shapes:
+            try:
+                self._store_dtypes[img_name] = self.plate[img_name].dtype
+            except KeyError:
+                pass
 
     def _get_channel_indices(self, channel_names: list[str]) -> list[int]:
         """Get channel indices from the plate for given channel names.
@@ -480,6 +494,8 @@ class HCSPredictionWriter(BasePredictionWriter):
             Index of the current dataloader.
         """
         _logger.debug(f"Writing batch {batch_idx}.")
+        if self._pending is not None and self._pending.done():
+            self._pending.result()  # raise a failed volume write here, not volumes later
         for sample_index, _ in enumerate(batch["index"][0]):
             self.write_sample(batch, prediction[sample_index], sample_index)
 
@@ -494,7 +510,10 @@ class HCSPredictionWriter(BasePredictionWriter):
             The Lightning module.
         """
         for img_name, t_index in list(self._volumes):
-            self._flush_volume(img_name, t_index)
+            self._flush_volume(img_name, t_index, complete=False)
+        self._flush_pool.shutdown(wait=True)
+        if self._pending is not None:
+            self._pending.result()
         self.plate.close()
 
     def write_sample(
@@ -563,15 +582,20 @@ class HCSPredictionWriter(BasePredictionWriter):
             dest[(*lead, z_slice)] = sample_prediction
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
-        if self._write_once and written[t_index].all():
-            self._flush_volume(img_name, t_index)
-        if written.all():
-            name = img_name.strip("/").rsplit("/", 1)[0]
-            position = self.plate[name]
-            planes = None if self._z_planes is None else self._z_planes[name]
-            record_z_planes(position, self._prediction_channels, planes)
-            marker = completion_marker(self._source_shapes[img_name], self._run)
-            mark_complete(position, self._prediction_channels, marker)
+        if self._write_once:
+            if written[t_index].all():
+                self._flush_volume(img_name, t_index, complete=written.all())
+        elif written.all():
+            self._mark_complete(img_name)
+
+    def _mark_complete(self, img_name: str) -> None:
+        """Write the completion marker of the FOV holding ``img_name``; every window is in the store."""
+        name = img_name.strip("/").rsplit("/", 1)[0]
+        position = self.plate[name]
+        planes = None if self._z_planes is None else self._z_planes[name]
+        record_z_planes(position, self._prediction_channels, planes)
+        marker = completion_marker(self._source_shapes[img_name], self._run)
+        mark_complete(position, self._prediction_channels, marker)
 
     def _buffer_volume(
         self, img_name: str, t_index: int, sample_prediction: torch.Tensor, z_slice: slice
@@ -603,9 +627,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         if key not in self._volumes:
             depth = self._source_shapes[img_name][1]
             shape = (sample_prediction.shape[0], depth, *sample_prediction.shape[-2:])
-            try:
-                dtype = torch.from_numpy(np.empty(0, dtype=self.plate[img_name].dtype)).dtype
-            except KeyError:
+            if img_name in self._store_dtypes:
+                dtype = torch.from_numpy(np.empty(0, dtype=self._store_dtypes[img_name])).dtype
+            else:
                 dtype = sample_prediction.dtype
             volume = torch.zeros(shape, dtype=dtype, device=sample_prediction.device)
             self._volumes[key] = (volume, z_slice.start, z_slice.stop)
@@ -617,8 +641,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         self._volumes[key] = (volume, min(start, z_slice.start), max(stop, z_slice.stop))
         return volume
 
-    def _flush_volume(self, img_name: str, t_index: int) -> None:
-        """Write one buffered volume to the store, over the planes its windows reached.
+    def _flush_volume(self, img_name: str, t_index: int, complete: bool) -> None:
+        """Copy one buffered volume to the host and queue its write, over the planes its windows reached.
 
         Parameters
         ----------
@@ -626,12 +650,28 @@ class HCSPredictionWriter(BasePredictionWriter):
             Hierarchical path name of the source image.
         t_index : int
             Timepoint of the volume.
+        complete : bool
+            The volume is the FOV's last: mark the FOV complete once it is written.
         """
         volume, start, stop = self._volumes.pop((img_name, t_index))
         planes = volume[:, start:stop].cpu().numpy()
-        image = self._create_image(img_name, volume[:, :stop].shape, planes.dtype)
+        if self._pending is not None:
+            # One write in flight bounds the host copies held to two volumes.
+            self._pending.result()
+        self._pending = self._flush_pool.submit(
+            self._write_volume, img_name, t_index, planes, volume[:, :stop].shape, start, complete
+        )
+
+    def _write_volume(
+        self, img_name: str, t_index: int, planes: NDArray, shape: tuple[int, ...], start: int, complete: bool
+    ) -> None:
+        """Write planes ``start:`` of one volume to the store, then the FOV's marker if ``complete`` (flush thread)."""
+        stop = start + planes.shape[1]
+        image = self._create_image(img_name, shape, planes.dtype)
         _resize_image(image, t_index, slice(start, stop))
         image.oindex[t_index, self.prediction_index, slice(start, stop)] = planes
+        if complete:
+            self._mark_complete(img_name)
 
     def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
         """Return whether the existing output array outruns this run's source in T or Z.
