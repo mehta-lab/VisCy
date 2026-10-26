@@ -442,6 +442,17 @@ class _FailingWriter(HCSPredictionWriter):
         super().__init__(*args, **kwargs)
         self.fail_volume = fail_volume
         self.n_volumes = 0
+        self.closed = False
+
+    def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        super().on_predict_start(trainer, pl_module)
+        close = self.plate.close
+
+        def recording_close() -> None:
+            self.closed = True
+            close()
+
+        self.plate.close = recording_close
 
     def _write_volume(self, *args, **kwargs) -> None:
         self.n_volumes += 1
@@ -464,6 +475,9 @@ def test_a_failed_volume_write_fails_the_predict(tmp_path, fail_volume):
         Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
             _OnesModule(), datamodule=_ones_data_module(source), return_predictions=False
         )
+    if fail_volume == 4:  # raised at predict end: the store is closed and the pool shut down all the same
+        assert writer.closed
+        assert writer._flush_pool._shutdown
     with open_ome_zarr(tmp_path / "pred.zarr", mode="r") as plate:
         markers = [pos.zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"] for _, pos in plate.positions()]
     assert ["source_shape" in marker for marker in markers] == ([False] if fail_volume == 2 else [True, False])

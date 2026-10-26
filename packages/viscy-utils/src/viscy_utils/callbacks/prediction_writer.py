@@ -518,12 +518,15 @@ class HCSPredictionWriter(BasePredictionWriter):
         pl_module : LightningModule
             The Lightning module.
         """
-        for img_name, t_index in list(self._volumes):
-            self._flush_volume(img_name, t_index, complete=False)
-        self._flush_pool.shutdown(wait=True)
+        try:
+            for img_name, t_index in list(self._volumes):
+                self._flush_volume(img_name, t_index, complete=False)
+        finally:
+            # Even when a write failed: let the last write finish, then close the store.
+            self._flush_pool.shutdown(wait=True)
+            self.plate.close()
         if self._pending is not None:
             self._pending.result()
-        self.plate.close()
 
     def write_sample(
         self,
