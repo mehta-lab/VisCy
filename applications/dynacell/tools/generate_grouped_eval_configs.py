@@ -330,22 +330,33 @@ def _split_model_variant(body: str, full_name: str) -> tuple[str, str | None]:
     Variants only exist for CellDiff models. Deterministic models have
     ``variant=None`` and ``body`` is the full model code-name.
     """
-    # Try CellDiff first: prefix match then variant suffix.
+    matched = _match_model_variant(body)
+    if matched is not None:
+        return matched
+    for celldiff_model in _CELLDIFF_MODELS:
+        if body.startswith(f"{celldiff_model}_"):
+            variant = body[len(celldiff_model) + 1 :]
+            raise ValueError(f"unknown CellDiff variant {variant!r} after model {celldiff_model!r} in {full_name}")
+    raise ValueError(f"unknown model code-name {body!r} in {full_name}")
+
+
+def _match_model_variant(body: str) -> tuple[str, str | None] | None:
+    """Return ``(model, variant)`` for a registered model dir name, else None."""
+    # Try CellDiff first: prefix match then variant suffix. The first CellDiff
+    # model whose prefix matches decides, so an unknown suffix does not fall
+    # through to a shorter model or to the deterministic models.
     for celldiff_model in _CELLDIFF_MODELS:
         if body == celldiff_model:
             return celldiff_model, None
         token = f"{celldiff_model}_"
         if body.startswith(token):
             variant = body[len(token) :]
-            if variant not in _CELLDIFF_VARIANTS:
-                raise ValueError(f"unknown CellDiff variant {variant!r} after model {celldiff_model!r} in {full_name}")
-            return celldiff_model, variant
+            return (celldiff_model, variant) if variant in _CELLDIFF_VARIANTS else None
 
     # Fall through to deterministic models.
     if body in _DETERMINISTIC_MODELS:
         return body, None
-
-    raise ValueError(f"unknown model code-name {body!r} in {full_name}")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -359,14 +370,6 @@ _SKIP_MODELS: frozenset[str] = frozenset(
         # ``celldiff_r2`` family is in scope for the re-eval campaign.
         "celldiff",
     }
-)
-
-
-# Every model directory name parse_zarr_name accepts: the deterministic models,
-# and each CellDiff model bare or with one of its sampling variants.
-_REGISTERED_MODEL_DIRS: frozenset[str] = frozenset(
-    {*_DETERMINISTIC_MODELS, *_CELLDIFF_MODELS}
-    | {f"{model}_{variant}" for model in _CELLDIFF_MODELS for variant in _CELLDIFF_VARIANTS}
 )
 
 
@@ -415,7 +418,7 @@ def walk_predictions(
 
     The tree also holds experiment arms that other generators score. A model dir
     that ``paths.PAPER_KEY`` knows but this generator does not register
-    (:data:`_REGISTERED_MODEL_DIRS`) is skipped before parsing, and the count is
+    (:func:`_match_model_variant`) is skipped before parsing, and the count is
     printed. A dir unknown to both still raises in :func:`parse_zarr_name`, so a new
     model that nobody registered fails loudly.
     """
@@ -432,7 +435,7 @@ def walk_predictions(
             if leaf_test_set(zarr_path.parent.name) not in test_sets:
                 continue
             model_dir = zarr_path.parents[2].name
-            if model_dir not in _REGISTERED_MODEL_DIRS and _is_paper_key_model_dir(model_dir):
+            if _match_model_variant(model_dir) is None and _is_paper_key_model_dir(model_dir):
                 n_foreign += 1
                 continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
