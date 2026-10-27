@@ -245,6 +245,23 @@ def test_injection_defaults_cadence_to_every_epoch():
     assert config["fit"]["trainer"]["callbacks"][1]["init_args"]["every_n_epochs"] == 1
 
 
+def test_injection_takes_last_ckpt_from_every_monitored_checkpoint():
+    """With two monitored checkpoints, only the injected latest-weights callback writes ``last.ckpt``."""
+    monitored = [
+        Namespace(
+            class_path="lightning.pytorch.callbacks.ModelCheckpoint",
+            init_args=Namespace(monitor=monitor, save_last=True, dirpath="/d"),
+        )
+        for monitor in ("loss/validate", "metrics/dice")
+    ]
+    config = Namespace(fit=Namespace(trainer=Namespace(callbacks=list(monitored))))
+    _inject_checkpoint_guardrails(config, "fit")
+
+    callbacks = config["fit"]["trainer"]["callbacks"]
+    writers = [cb["init_args"].get("monitor") for cb in callbacks if cb["init_args"].get("save_last")]
+    assert writers == [None]
+
+
 def test_injection_inherits_a_step_cadence():
     """A leaf that saves every N steps keeps a step-fresh ``last.ckpt``, not an epoch one."""
     monitored = Namespace(
