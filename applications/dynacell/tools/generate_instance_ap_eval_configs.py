@@ -203,9 +203,11 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
     is not registered would otherwise crash :func:`walk_predictions` on the first
     bad name (and, before the opt-out gate, be silently dropped by ``in_scope``).
     This walks the prediction dirs with a tolerant per-zarr parse — applying the
-    same skip filters as :func:`walk_predictions` — and returns one message per
+    same test-set filter as :func:`walk_predictions` — and returns one message per
     unregistered/unparseable zarr, so :func:`main` can fail with the *complete*
-    list pointing at the registry instead of dying on the first one.
+    list pointing at the registry instead of dying on the first one. Unlike the
+    walk, it does not skip the ``paths.PAPER_KEY`` models the grouped generator
+    leaves unregistered: listing every unregistered model is its job.
 
     An empty list means every on-disk prediction is registered and will be
     bucketed by the relevant campaign. Returns messages (does not raise) so the
