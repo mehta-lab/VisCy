@@ -171,14 +171,20 @@ def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> 
     # The guarantee is unaffected: an *unmonitored* callback writes on its cadence
     # unconditionally, so the newest weights are always within `every_n_epochs`
     # epochs of where the run stopped, however dead the monitor is. Defaults to 1
-    # when the leaf is silent, preserving the original behaviour.
-    every_n_epochs = monitored_args.get("every_n_epochs") or 1
+    # when the leaf is silent, preserving the original behaviour. A leaf that saves
+    # on a step or time trigger keeps that trigger instead: once `save_last` moves
+    # here, an epoch cadence would leave a max_steps run with long epochs no recent
+    # `last.ckpt` to resume from.
+    cadence = {key: monitored_args.get(key) for key in ("every_n_train_steps", "train_time_interval")}
+    cadence = {key: value for key, value in cadence.items() if value} or {
+        "every_n_epochs": monitored_args.get("every_n_epochs") or 1
+    }
 
     latest_args = {
         "monitor": None,
         "filename": _LATEST_CKPT_FILENAME,
         "auto_insert_metric_name": False,
-        "every_n_epochs": every_n_epochs,
+        **cadence,
         "save_top_k": 1,
         "save_last": True,
     }
