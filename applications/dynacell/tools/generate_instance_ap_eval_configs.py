@@ -67,6 +67,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
     _MANIFEST_ROOT,
+    _SIBLING_ONLY_MODELS,
     _SKIP_MODELS,
     ParsedZarr,
     benchmark_dataset_ref,
@@ -110,6 +111,8 @@ def in_scope(p: ParsedZarr) -> bool:
     if p.organelle not in _INSTANCE_ORGANELLES:
         return False
     if not _instance_eligible(p.model):
+        return False
+    if p.model in _SIBLING_ONLY_MODELS:
         return False
     if p.variant in _IPSC_ONLY_VARIANTS and p.test_set != "ipsc":
         return False

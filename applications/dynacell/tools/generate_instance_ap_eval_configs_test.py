@@ -64,6 +64,9 @@ def _pz(organelle, model, train_set, test_set, condition=None, variant=None, tra
         (_pz("membrane", "celldiff_r2", "ipsc_trained", "ipsc", variant="sliding_window"), True),
         (_pz("membrane", "celldiff_r2", "a549_trained", "a549", "mock", variant="denoise"), False),
         (_pz("nucleus", "celldiff_r2", "a549_trained", "a549", "zikv", variant="iterative"), True),
+        # warmup-matched pix2pix2d: scored only in its focused sibling buckets
+        (_pz("nucleus", "pix2pix2d_unetvit_wmatch", "ipsc_trained", "ipsc"), False),
+        (_pz("membrane", "pix2pix2d_unetvit_wmatch_seed1", "ipsc_trained", "a549", "mock"), False),
     ],
 )
 def test_in_scope(p: ParsedZarr, expected: bool) -> None:
