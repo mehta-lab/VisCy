@@ -260,6 +260,37 @@ def test_deterministic_models_known_to_runtime_resolver() -> None:
     assert not missing, f"deterministic campaign models absent from paths.PAPER_KEY: {missing}"
 
 
+def test_every_campaign_model_parses() -> None:
+    """Every _CODE_TO_PAPER model is one the walk can parse.
+
+    _CODE_TO_PAPER and _DETERMINISTIC_MODELS are kept by hand; the wmatch refit sat in
+    the first but not the second, and its stores stopped walk_predictions on the live tree.
+    """
+    from generate_grouped_eval_configs import _match_model_variant
+
+    unparseable = [m for m in _CODE_TO_PAPER if _match_model_variant(m) is None]
+    assert not unparseable, f"_CODE_TO_PAPER models the walk cannot parse: {unparseable}"
+
+
+def test_skip_lists_stay_disjoint_from_the_registries() -> None:
+    """A model or train set the campaign registers is never also skipped by name.
+
+    is_foreign_model_dir checks _FOREIGN_MODEL_DIRS before parsing, so a replicate later
+    registered for this campaign would otherwise be dropped silently; likewise a
+    re-predict token that later becomes a canonical train set.
+    """
+    from generate_grouped_eval_configs import (
+        _CELLDIFF_MODELS,
+        _CHECKPOINT_REPREDICTS,
+        _DETERMINISTIC_MODELS,
+        _FOREIGN_MODEL_DIRS,
+    )
+
+    registered = set(_CODE_TO_PAPER) | set(_DETERMINISTIC_MODELS) | set(_CELLDIFF_MODELS)
+    assert not _FOREIGN_MODEL_DIRS & registered
+    assert not {train_set for _, _, train_set in _CHECKPOINT_REPREDICTS} & set(_CANONICAL_TRAIN_SET_TO_BUCKET)
+
+
 # ---------------------------------------------------------------------------
 # 2. Save_dir + dataset_ref derivation
 # ---------------------------------------------------------------------------
