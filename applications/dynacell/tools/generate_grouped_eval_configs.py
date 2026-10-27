@@ -415,11 +415,11 @@ def is_foreign_model_dir(model_dir: str) -> bool:
 
 
 # Checkpoint re-predicts of registered models: (organelle dir, model dir, train-set dir)
-# triples where a second checkpoint of a canonical model was predicted beside its canonical
-# store, under a
-# train-set token that paths.py does not know, so parsing them raises. Each is scored by a
-# hand-written experiment bucket, never by a generated one, and no committed config
-# references them. A train-set dir that is neither canonical nor listed here still raises.
+# triples where a second checkpoint of a canonical model was predicted beside its
+# canonical store, under a train-set token that paths.py does not know, so parsing them
+# raises. Each is scored by a hand-written experiment bucket, never by a generated one,
+# and no committed config references them. A train-set dir that is neither canonical nor
+# listed here still raises.
 _CHECKPOINT_REPREDICTS: frozenset[tuple[str, str, str]] = frozenset(
     {
         # experiments/2026-09-24_fnet2d-voxelmatched-smoke: the voxel-matched FNet-2D at its
