@@ -377,7 +377,7 @@ def test_walk_predictions_skips_paper_key_models_it_does_not_register(
     _touch_prediction(tmp_path, "nucleus", "celldiff_otherarm_iterative", "ipsc", "ipsc")
 
     assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
-    assert "skipped 3 prediction zarrs of other campaigns' PAPER_KEY models" in capsys.readouterr().out
+    assert "skipped 3 prediction zarrs of other campaigns' models" in capsys.readouterr().out
 
 
 def test_walk_predictions_raises_on_a_campaign_model_it_cannot_parse(
@@ -432,6 +432,16 @@ def test_walk_predictions_raises_on_an_unknown_train_set(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="unknown train_set token"):
         walk_predictions(tmp_path)
+
+
+def test_walk_predictions_skips_named_foreign_replicates(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The P1 segcons replicate dirs, unknown to PAPER_KEY, are named as foreign and skipped."""
+    _touch_prediction(tmp_path, "nucleus", "fnet2d", "ipsc", "ipsc")
+    for model in ("pix2pix2d_unetvit_segcons_s1", "pix2pix2d_unetvit_segcons_ctrl_s1", "pix2pix2d_unetvit_segcons_x10"):
+        _touch_prediction(tmp_path, "nucleus", model, "ipsc", "ipsc")
+
+    assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
+    assert "skipped 3 prediction zarrs of other campaigns' models" in capsys.readouterr().out
 
 
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:

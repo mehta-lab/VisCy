@@ -377,16 +377,34 @@ _SKIP_MODELS: frozenset[str] = frozenset(
 )
 
 
+# Other campaigns' model dirs in the canonical tree that paths.PAPER_KEY does not know,
+# so is_foreign_model_dir cannot recognise them from it. Named one by one; an unknown dir
+# still raises.
+_FOREIGN_MODEL_DIRS: frozenset[str] = frozenset(
+    {
+        # Spotlight P1 segmenter-consistency follow-ups (2026-10-19): the pix2pix2d segcons
+        # arm and its control at seed 1, and the 10x-weight arm. Scored only by the P1
+        # experiment buckets.
+        "pix2pix2d_unetvit_segcons_s1",
+        "pix2pix2d_unetvit_segcons_ctrl_s1",
+        "pix2pix2d_unetvit_segcons_x10",
+    }
+)
+
+
 def is_foreign_model_dir(model_dir: str) -> bool:
     """Whether ``model_dir`` holds another campaign's model, to be skipped rather than parsed.
 
-    Foreign means ``paths.PAPER_KEY`` knows the model (bare or with a CellDiff
-    variant suffix) while this generator neither parses it nor lists it in
-    :data:`_CODE_TO_PAPER`: on this branch, the Spotlight arms that share the
-    canonical tree. A dir unknown to ``PAPER_KEY`` is not foreign, so
-    :func:`parse_zarr_name` raises on it; neither is a ``_CODE_TO_PAPER`` model this
-    generator fails to parse, which is a registration bug to surface.
+    Foreign means a dir named in :data:`_FOREIGN_MODEL_DIRS`, or one whose model
+    ``paths.PAPER_KEY`` knows (bare or with a CellDiff variant suffix) while this
+    generator neither parses it nor lists it in :data:`_CODE_TO_PAPER`: on this
+    branch, the Spotlight arms that share the canonical tree. Any other dir unknown to
+    ``PAPER_KEY`` is not foreign, so :func:`parse_zarr_name` raises on it; neither is
+    a ``_CODE_TO_PAPER`` model this generator fails to parse, which is a registration
+    bug to surface.
     """
+    if model_dir in _FOREIGN_MODEL_DIRS:
+        return True
     if _match_model_variant(model_dir) is not None:
         return False
     model = next(
@@ -495,7 +513,7 @@ def walk_predictions(
                 )
             by_identity[parsed.canonical_identity] = parsed
     if n_foreign:
-        print(f"[gen] skipped {n_foreign} prediction zarrs of other campaigns' PAPER_KEY models")
+        print(f"[gen] skipped {n_foreign} prediction zarrs of other campaigns' models")
     if n_repredicts:
         print(f"[gen] skipped {n_repredicts} checkpoint re-predicts of registered models")
     return list(by_identity.values())
