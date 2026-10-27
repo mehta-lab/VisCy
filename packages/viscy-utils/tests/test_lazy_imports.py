@@ -4,6 +4,7 @@ import sys
 import pytest
 
 import viscy_utils
+import viscy_utils.callbacks
 
 # Submodules that evaluation code imports without training anything.
 LIGHT_SUBMODULES = [
@@ -24,9 +25,27 @@ def test_light_submodules_skip_torch_and_lightning():
     assert result.stdout.strip() == "[]"
 
 
+def test_health_callbacks_import_without_the_eval_extra():
+    """The callbacks VisCyCLI injects into every fit must import without scikit-learn.
+
+    ``sys.modules["sklearn"] = None`` makes every sklearn import fail, as on a base
+    install; OnlineEvalCallback imports it at module level.
+    """
+    code = (
+        "import sys; sys.modules['sklearn'] = None; "
+        "from viscy_utils.callbacks import MonitorHealthCheck, OptimizerHealthCheck"
+    )
+    subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+
+
 @pytest.mark.parametrize("name", viscy_utils.__all__)
 def test_public_names_importable(name):
     exec(f"from viscy_utils import {name}", {})
+
+
+@pytest.mark.parametrize("name", viscy_utils.callbacks.__all__)
+def test_public_callbacks_importable(name):
+    exec(f"from viscy_utils.callbacks import {name}", {})
 
 
 def test_unknown_attribute_raises():
