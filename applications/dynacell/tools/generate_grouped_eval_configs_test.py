@@ -260,6 +260,37 @@ def test_deterministic_models_known_to_runtime_resolver() -> None:
     assert not missing, f"deterministic campaign models absent from paths.PAPER_KEY: {missing}"
 
 
+def test_every_campaign_model_parses() -> None:
+    """Every _CODE_TO_PAPER model is one the walk can parse.
+
+    _CODE_TO_PAPER and _DETERMINISTIC_MODELS are kept by hand; the wmatch refit sat in
+    the first but not the second, and its stores stopped walk_predictions on the live tree.
+    """
+    from generate_grouped_eval_configs import _match_model_variant
+
+    unparseable = [m for m in _CODE_TO_PAPER if _match_model_variant(m) is None]
+    assert not unparseable, f"_CODE_TO_PAPER models the walk cannot parse: {unparseable}"
+
+
+def test_skip_lists_stay_disjoint_from_the_registries() -> None:
+    """A model or train set the campaign registers is never also skipped by name.
+
+    is_foreign_model_dir checks _FOREIGN_MODEL_DIRS before parsing, so a replicate later
+    registered for this campaign would otherwise be dropped silently; likewise a
+    re-predict token that later becomes a canonical train set.
+    """
+    from generate_grouped_eval_configs import (
+        _CELLDIFF_MODELS,
+        _CHECKPOINT_REPREDICTS,
+        _DETERMINISTIC_MODELS,
+        _FOREIGN_MODEL_DIRS,
+    )
+
+    registered = set(_CODE_TO_PAPER) | set(_DETERMINISTIC_MODELS) | set(_CELLDIFF_MODELS)
+    assert not _FOREIGN_MODEL_DIRS & registered
+    assert not {train_set for _, _, train_set in _CHECKPOINT_REPREDICTS} & set(_CANONICAL_TRAIN_SET_TO_BUCKET)
+
+
 # ---------------------------------------------------------------------------
 # 2. Save_dir + dataset_ref derivation
 # ---------------------------------------------------------------------------
@@ -387,7 +418,7 @@ def test_walk_predictions_skips_paper_key_models_it_does_not_register(
     _touch_prediction(tmp_path, "nucleus", "celldiff_otherarm_iterative", "ipsc", "ipsc")
 
     assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
-    assert "skipped 3 prediction zarrs of other campaigns' PAPER_KEY models" in capsys.readouterr().out
+    assert "skipped 3 prediction zarrs of other campaigns' models" in capsys.readouterr().out
 
 
 def test_walk_predictions_raises_on_a_campaign_model_it_cannot_parse(
@@ -411,6 +442,55 @@ def test_walk_predictions_raises_on_a_model_nobody_registered(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="unknown model code-name"):
         walk_predictions(tmp_path)
+
+
+def test_walk_predictions_parses_the_warmup_matched_pix2pix2d(tmp_path: Path) -> None:
+    """The wmatch refit and its second draw are parse-only registrations, like fnet2d_voxelmatched."""
+    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_wmatch", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_wmatch_seed1", "ipsc", "ipsc")
+
+    pool = walk_predictions(tmp_path)
+    assert sorted(p.model for p in pool) == ["pix2pix2d_unetvit_wmatch", "pix2pix2d_unetvit_wmatch_seed1"]
+
+
+def test_walk_predictions_skips_known_checkpoint_repredicts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Checkpoint re-predicts of registered models are skipped and counted, not parsed.
+
+    Their train-set dirs (``ipsc_step8400``, ``ipsc_final``, ...) are not canonical tokens,
+    so key_from_prediction_store would raise on them.
+    """
+    _touch_prediction(tmp_path, "er", "fnet3d_paper", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "er", "fnet3d_paper", "ipsc_step8400", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "fcmae_vscyto3d_scratch", "ipsc_final", "a549__mock")
+
+    assert [(p.organelle, p.train_set_canonical) for p in walk_predictions(tmp_path)] == [("er", "ipsc")]
+    assert "skipped 2 checkpoint re-predicts of registered models" in capsys.readouterr().out
+
+
+def test_walk_predictions_raises_on_an_unknown_train_set(tmp_path: Path) -> None:
+    """A train-set dir nobody registered as a checkpoint re-predict still raises."""
+    _touch_prediction(tmp_path, "er", "fnet3d_paper", "ipsc_step9999", "ipsc")
+
+    with pytest.raises(ValueError, match="unknown train_set token"):
+        walk_predictions(tmp_path)
+
+
+def test_walk_predictions_raises_on_a_listed_repredict_token_in_another_organelle(tmp_path: Path) -> None:
+    """A re-predict is listed per organelle: ER's ipsc_step8400 does not cover a mito store."""
+    _touch_prediction(tmp_path, "mito", "fnet3d_paper", "ipsc_step8400", "ipsc")
+
+    with pytest.raises(ValueError, match="unknown train_set token"):
+        walk_predictions(tmp_path)
+
+
+def test_walk_predictions_skips_named_foreign_replicates(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The P1 segcons replicate dirs, unknown to PAPER_KEY, are named as foreign and skipped."""
+    _touch_prediction(tmp_path, "nucleus", "fnet2d", "ipsc", "ipsc")
+    for model in ("pix2pix2d_unetvit_segcons_s1", "pix2pix2d_unetvit_segcons_ctrl_s1", "pix2pix2d_unetvit_segcons_x10"):
+        _touch_prediction(tmp_path, "nucleus", model, "ipsc", "ipsc")
+
+    assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
+    assert "skipped 3 prediction zarrs of other campaigns' models" in capsys.readouterr().out
 
 
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:

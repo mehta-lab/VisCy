@@ -199,6 +199,10 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fnet2d_voxelmatched",
     "fcmae_vscyto2d_scratch_samplematched",
     "pix2pix2d_unetvit",
+    # The parse-only registration _CODE_TO_PAPER already declares for the warmup-matched
+    # refit; without these entries its stores raised "unknown model code-name".
+    "pix2pix2d_unetvit_wmatch",
+    "pix2pix2d_unetvit_wmatch_seed1",
     # Spotlight-loss arms. Deterministic for the same reason their baselines are;
     # spotlight changes the training objective only, never inference. Matching here
     # is exact, so every on-disk run-dir token must appear verbatim or
@@ -525,16 +529,34 @@ _SPOTLIGHT_ARM_MODELS: frozenset[str] = frozenset(
 )
 
 
+# Other campaigns' model dirs in the canonical tree that paths.PAPER_KEY does not know,
+# so is_foreign_model_dir cannot recognise them from it. Named one by one; an unknown dir
+# still raises.
+_FOREIGN_MODEL_DIRS: frozenset[str] = frozenset(
+    {
+        # Spotlight P1 segmenter-consistency follow-ups (2026-10-19): the pix2pix2d segcons
+        # arm and its control at seed 1, and the 10x-weight arm. Scored only by the P1
+        # experiment buckets.
+        "pix2pix2d_unetvit_segcons_s1",
+        "pix2pix2d_unetvit_segcons_ctrl_s1",
+        "pix2pix2d_unetvit_segcons_x10",
+    }
+)
+
+
 def is_foreign_model_dir(model_dir: str) -> bool:
     """Whether ``model_dir`` holds another campaign's model, to be skipped rather than parsed.
 
-    Foreign means ``paths.PAPER_KEY`` knows the model (bare or with a CellDiff
-    variant suffix) while this generator neither parses it nor lists it in
-    :data:`_CODE_TO_PAPER`: on this branch, the Spotlight arms that share the
-    canonical tree. A dir unknown to ``PAPER_KEY`` is not foreign, so
-    :func:`parse_zarr_name` raises on it; neither is a ``_CODE_TO_PAPER`` model this
-    generator fails to parse, which is a registration bug to surface.
+    Foreign means a dir named in :data:`_FOREIGN_MODEL_DIRS`, or one whose model
+    ``paths.PAPER_KEY`` knows (bare or with a CellDiff variant suffix) while this
+    generator neither parses it nor lists it in :data:`_CODE_TO_PAPER`: on this
+    branch, the Spotlight arms that share the canonical tree. Any other dir unknown to
+    ``PAPER_KEY`` is not foreign, so :func:`parse_zarr_name` raises on it; neither is
+    a ``_CODE_TO_PAPER`` model this generator fails to parse, which is a registration
+    bug to surface.
     """
+    if model_dir in _FOREIGN_MODEL_DIRS:
+        return True
     if _match_model_variant(model_dir) is not None:
         return False
     model = next(
@@ -542,6 +564,49 @@ def is_foreign_model_dir(model_dir: str) -> bool:
         model_dir,
     )
     return model in PAPER_KEY and model not in _CODE_TO_PAPER
+
+
+# Checkpoint re-predicts of registered models: (organelle dir, model dir, train-set dir)
+# triples where a second checkpoint of a canonical model was predicted beside its
+# canonical store, under a train-set token that paths.py does not know, so parsing them
+# raises. Each is scored by a hand-written experiment bucket, never by a generated one,
+# and no committed config references them. A train-set dir that is neither canonical nor
+# listed here still raises.
+_CHECKPOINT_REPREDICTS: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        # experiments/2026-09-24_fnet2d-voxelmatched-smoke: the voxel-matched FNet-2D at its
+        # last step, FNet3D nucleus at step 11k (step-matched to it) and the ER FNet3D re-run
+        # to the voxel-matched best-val step.
+        *((organelle, "fnet2d_voxelmatched", "ipsc_step200k") for organelle in ("er", "nucleus")),
+        ("nucleus", "fnet3d_paper", "ipsc_step11k"),
+        ("er", "fnet3d_paper", "ipsc_step8400"),
+        # experiments/2026-09-29_unext2-2d-samplematched: the final-checkpoint arms of the
+        # sample-matched UNeXt2-2D and of UNeXt2-3D, and the paper UNeXt2-3D checkpoint
+        # re-predicted to check the paper stores voxel for voxel.
+        *((organelle, "fcmae_vscyto2d_scratch_samplematched", "ipsc_final") for organelle in ("er", "nucleus")),
+        *((organelle, "fcmae_vscyto3d_scratch", "ipsc_final") for organelle in ("er", "nucleus")),
+        *((organelle, "fcmae_vscyto3d_scratch", "ipsc_repredict") for organelle in ("er", "nucleus")),
+    }
+)
+
+
+def is_checkpoint_repredict(zarr_path: Path) -> bool:
+    """Whether ``zarr_path`` is a listed checkpoint re-predict (:data:`_CHECKPOINT_REPREDICTS`)."""
+    return (zarr_path.parents[3].name, zarr_path.parents[2].name, zarr_path.parents[1].name) in _CHECKPOINT_REPREDICTS
+
+
+def skip_reason(zarr_path: Path) -> str | None:
+    """Why the grouped campaign skips a store before parsing it, or None to parse it.
+
+    The one skip rule :func:`walk_predictions` and the instance-AP coverage audit
+    share: another campaign's model (:func:`is_foreign_model_dir`) or a listed
+    checkpoint re-predict (:func:`is_checkpoint_repredict`).
+    """
+    if is_foreign_model_dir(zarr_path.parents[2].name):
+        return "foreign"
+    if is_checkpoint_repredict(zarr_path):
+        return "repredict"
+    return None
 
 
 def leaf_test_set(leaf: str) -> str:
@@ -580,13 +645,14 @@ def walk_predictions(
     condition vocabulary and would fail the whole generation run. Opt such a probe
     in explicitly instead.
 
-    The tree also holds experiment arms that other generators score. Their model
-    dirs (:func:`is_foreign_model_dir`) are skipped before parsing, and the count is
-    printed. Any other unparseable dir still raises in :func:`parse_zarr_name`, so a
-    model nobody registered fails loudly.
+    The tree also holds experiment arms that other generators score, and checkpoint
+    re-predicts of registered models. Both are skipped before parsing
+    (:func:`skip_reason`), and their counts are printed. Any other unparseable dir
+    still raises in :func:`parse_zarr_name`, so a model or train set nobody
+    registered fails loudly.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
-    n_foreign = 0
+    n_skipped = {"foreign": 0, "repredict": 0}
     for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
         root = dynacell_root / organelle_root
         if not root.is_dir():
@@ -597,8 +663,9 @@ def walk_predictions(
         for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
             if leaf_test_set(zarr_path.parent.name) not in test_sets:
                 continue
-            if is_foreign_model_dir(zarr_path.parents[2].name):
-                n_foreign += 1
+            reason = skip_reason(zarr_path)
+            if reason is not None:
+                n_skipped[reason] += 1
                 continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
             if parsed.model in _SKIP_MODELS or parsed.model in _SPOTLIGHT_ARM_MODELS:
@@ -610,8 +677,10 @@ def walk_predictions(
                     f"{existing.pred_path} and {parsed.pred_path}"
                 )
             by_identity[parsed.canonical_identity] = parsed
-    if n_foreign:
-        print(f"[gen] skipped {n_foreign} prediction zarrs of other campaigns' PAPER_KEY models")
+    if n_skipped["foreign"]:
+        print(f"[gen] skipped {n_skipped['foreign']} prediction zarrs of other campaigns' models")
+    if n_skipped["repredict"]:
+        print(f"[gen] skipped {n_skipped['repredict']} checkpoint re-predicts of registered models")
     return list(by_identity.values())
 
 

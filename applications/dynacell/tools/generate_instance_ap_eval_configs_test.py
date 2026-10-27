@@ -115,6 +115,22 @@ def test_audit_skips_foreign_models_like_the_walk(tmp_path, monkeypatch) -> None
     assert "brandnewmodel" in errors[0]
 
 
+def test_audit_handles_the_live_tree_s_non_canonical_dirs(tmp_path) -> None:
+    """Checkpoint re-predicts and named foreign replicates are skipped, wmatch parses, unknowns are flagged."""
+    for model, train_set in (
+        ("fnet3d_paper", "ipsc"),
+        ("fnet3d_paper", "ipsc_step11k"),
+        ("fcmae_vscyto3d_scratch", "ipsc_repredict"),
+        ("pix2pix2d_unetvit_segcons_x10", "ipsc"),
+        ("pix2pix2d_unetvit_wmatch", "ipsc"),
+        ("fnet3d_paper", "ipsc_step9999"),
+    ):
+        (tmp_path / "nucleus" / model / train_set / "ipsc" / "prediction.zarr").mkdir(parents=True)
+    errors = audit_prediction_coverage(tmp_path)
+    assert len(errors) == 1
+    assert "ipsc_step9999" in errors[0]
+
+
 def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:
     """The A549 nuclei store is the H2B manifest's test store (now the merged dual store)."""
     for cond in ("mock", "denv", "zikv"):
