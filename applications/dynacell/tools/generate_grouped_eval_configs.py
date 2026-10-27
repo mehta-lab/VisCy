@@ -133,6 +133,10 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fnet2d_voxelmatched",
     "fcmae_vscyto2d_scratch_samplematched",
     "pix2pix2d_unetvit",
+    # The parse-only registration _CODE_TO_PAPER already declares for the warmup-matched
+    # refit; without these entries its stores raised "unknown model code-name".
+    "pix2pix2d_unetvit_wmatch",
+    "pix2pix2d_unetvit_wmatch_seed1",
     # 2D baseline seed replicates, deterministic like their baselines.
     "fnet2d_seed1",
     "fcmae_vscyto2d_scratch_seed1",

@@ -403,6 +403,15 @@ def test_walk_predictions_raises_on_a_model_nobody_registered(tmp_path: Path) ->
         walk_predictions(tmp_path)
 
 
+def test_walk_predictions_parses_the_warmup_matched_pix2pix2d(tmp_path: Path) -> None:
+    """The wmatch refit and its second draw are parse-only registrations, like fnet2d_voxelmatched."""
+    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_wmatch", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_wmatch_seed1", "ipsc", "ipsc")
+
+    pool = walk_predictions(tmp_path)
+    assert sorted(p.model for p in pool) == ["pix2pix2d_unetvit_wmatch", "pix2pix2d_unetvit_wmatch_seed1"]
+
+
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:
     """Explicitly requesting a test set includes it (and excludes the others)."""
     _touch_prediction(tmp_path, "membrane", "fnet3d_paper", "a549", "a549__mock")
