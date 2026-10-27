@@ -145,21 +145,24 @@ def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> 
     if callbacks is None:
         return
 
-    monitored_args = None
-    for callback in callbacks:
-        if _callback_field(callback, "class_path") != _MODEL_CHECKPOINT_CLASS_PATH:
-            continue
-        init_args = _init_args_of(callback)
-        if init_args is not None and init_args.get("monitor"):
-            monitored_args = init_args
-            break
-    if monitored_args is None:
+    monitored = [
+        init_args
+        for callback in callbacks
+        if _callback_field(callback, "class_path") == _MODEL_CHECKPOINT_CLASS_PATH
+        and (init_args := _init_args_of(callback)) is not None
+        and init_args.get("monitor")
+    ]
+    if not monitored:
         return
 
+    # The first monitored callback names the monitor, directory and cadence.
+    monitored_args = monitored[0]
     monitor = monitored_args.get("monitor")
     dirpath = monitored_args.get("dirpath")
     # Hand `last.ckpt` to the unconditional callback so it tracks the newest epoch.
-    monitored_args["save_last"] = False
+    # Every monitored callback gives it up, or a second one would keep writing it.
+    for init_args in monitored:
+        init_args["save_last"] = False
 
     # Inherit the leaf's write cadence instead of forcing every epoch. A leaf that
     # sets `every_n_epochs` is making a deliberate write-amplification decision:
