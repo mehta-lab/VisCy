@@ -37,6 +37,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     ParsedZarr,
     benchmark_dataset_ref,
     build_leaf_yaml,
+    canonical_predictions,
     leaf_test_set,
     parse_zarr_name,
     pred_cache_dir_for,
@@ -451,6 +452,20 @@ def test_walk_predictions_parses_the_warmup_matched_pix2pix2d(tmp_path: Path) ->
 
     pool = walk_predictions(tmp_path)
     assert sorted(p.model for p in pool) == ["pix2pix2d_unetvit_wmatch", "pix2pix2d_unetvit_wmatch_seed1"]
+
+
+def test_canonical_predictions_leave_out_sibling_only_models(tmp_path: Path) -> None:
+    """The wmatch refit parses, but never enters the canonical grouped buckets.
+
+    walk_predictions still returns it (the focused sibling buckets are built from the
+    walk); canonical_predictions, which main() buckets, drops it.
+    """
+    _touch_prediction(tmp_path, "nucleus", "fnet2d", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_wmatch", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_wmatch_seed1", "ipsc", "ipsc")
+
+    assert len(walk_predictions(tmp_path)) == 3
+    assert [p.model for p in canonical_predictions(tmp_path)] == ["fnet2d"]
 
 
 def test_walk_predictions_skips_known_checkpoint_repredicts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

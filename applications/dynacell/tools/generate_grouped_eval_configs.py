@@ -609,6 +609,14 @@ def skip_reason(zarr_path: Path) -> str | None:
     return None
 
 
+# Models the walk parses so their focused sibling buckets can be built from it, but that
+# never enter the canonical {organelle}_{train_set} buckets or the instance-AP leaves
+# (DON'T-FOLD). The warmup-matched pix2pix2d refit is scored by the committed
+# *__2d_focus2d_pix2pix2d_wmatch buckets. It became parseable only with this list, so a
+# default regeneration of the canonical and instance-AP leaves stays unchanged.
+_SIBLING_ONLY_MODELS: frozenset[str] = frozenset({"pix2pix2d_unetvit_wmatch", "pix2pix2d_unetvit_wmatch_seed1"})
+
+
 def leaf_test_set(leaf: str) -> str:
     """Return the test-set token of a ``<test>[__<cond>]`` leaf segment.
 
@@ -682,6 +690,14 @@ def walk_predictions(
     if n_skipped["repredict"]:
         print(f"[gen] skipped {n_skipped['repredict']} checkpoint re-predicts of registered models")
     return list(by_identity.values())
+
+
+def canonical_predictions(
+    dynacell_root: Path = _DYNACELL_ROOT,
+    test_sets: frozenset[str] = _DEFAULT_TEST_SETS,
+) -> list[ParsedZarr]:
+    """:func:`walk_predictions` minus :data:`_SIBLING_ONLY_MODELS`: the canonical bucket pool."""
+    return [p for p in walk_predictions(dynacell_root, test_sets) if p.model not in _SIBLING_ONLY_MODELS]
 
 
 # ---------------------------------------------------------------------------
@@ -993,7 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     test_sets = frozenset(t.strip() for t in args.test_sets.split(",") if t.strip())
-    parsed_pool = walk_predictions(args.dynacell_root, test_sets=test_sets)
+    parsed_pool = canonical_predictions(args.dynacell_root, test_sets=test_sets)
     print(f"[gen] parsed {len(parsed_pool)} prediction zarrs after dedupe")
 
     # Group by (organelle, train_set).
