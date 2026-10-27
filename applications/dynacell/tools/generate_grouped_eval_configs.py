@@ -521,6 +521,14 @@ _REGISTERED_MODEL_DIRS: frozenset[str] = frozenset(
 )
 
 
+def _is_paper_key_model_dir(model_dir: str) -> bool:
+    """Whether ``model_dir`` names a ``paths.PAPER_KEY`` model, bare or with a CellDiff variant."""
+    return model_dir in PAPER_KEY or any(
+        model_dir.endswith(f"_{variant}") and model_dir.removesuffix(f"_{variant}") in PAPER_KEY
+        for variant in _CELLDIFF_VARIANTS
+    )
+
+
 def leaf_test_set(leaf: str) -> str:
     """Return the test-set token of a ``<test>[__<cond>]`` leaf segment.
 
@@ -557,13 +565,14 @@ def walk_predictions(
     condition vocabulary and would fail the whole generation run. Opt such a probe
     in explicitly instead.
 
-    Model directories this generator does not register (:data:`_REGISTERED_MODEL_DIRS`)
-    are skipped before parsing, and their count is printed. The tree is shared, so
-    it also holds experiment arms that other generators score; parsing one here
-    would raise on its unknown model token.
+    The tree also holds experiment arms that other generators score. A model dir
+    that ``paths.PAPER_KEY`` knows but this generator does not register
+    (:data:`_REGISTERED_MODEL_DIRS`) is skipped before parsing, and the count is
+    printed. A dir unknown to both still raises in :func:`parse_zarr_name`, so a new
+    model that nobody registered fails loudly.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
-    n_unregistered = 0
+    n_foreign = 0
     for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
         root = dynacell_root / organelle_root
         if not root.is_dir():
@@ -575,8 +584,8 @@ def walk_predictions(
             if leaf_test_set(zarr_path.parent.name) not in test_sets:
                 continue
             model_dir = zarr_path.parents[2].name
-            if model_dir not in _REGISTERED_MODEL_DIRS:
-                n_unregistered += 1
+            if model_dir not in _REGISTERED_MODEL_DIRS and _is_paper_key_model_dir(model_dir):
+                n_foreign += 1
                 continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
             if parsed.model in _SKIP_MODELS or parsed.model in _SPOTLIGHT_ARM_MODELS:
@@ -588,8 +597,8 @@ def walk_predictions(
                     f"{existing.pred_path} and {parsed.pred_path}"
                 )
             by_identity[parsed.canonical_identity] = parsed
-    if n_unregistered:
-        print(f"[gen] skipped {n_unregistered} prediction zarrs under unregistered model dirs")
+    if n_foreign:
+        print(f"[gen] skipped {n_foreign} prediction zarrs of PAPER_KEY models this generator does not register")
     return list(by_identity.values())
 
 

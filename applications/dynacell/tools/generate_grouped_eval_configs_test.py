@@ -43,6 +43,8 @@ from generate_grouped_eval_configs import (  # noqa: E402
     walk_predictions,
 )
 
+from dynacell.evaluation.paths import PAPER_KEY  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # 1. Grammar dispatch
 # ---------------------------------------------------------------------------
@@ -367,20 +369,32 @@ def test_walk_predictions_skips_spotlight_arms(tmp_path: Path) -> None:
     assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
 
 
-def test_walk_predictions_skips_unregistered_model_dirs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Model dirs the generator does not register are skipped before parsing, and counted.
+def test_walk_predictions_skips_paper_key_models_it_does_not_register(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Arms that paths.PAPER_KEY knows but this generator does not register are skipped and counted.
 
     The canonical tree is shared with experiment arms that other generators score.
-    Parsing ``celldiff_newarm_iterative`` would raise on the unknown CellDiff variant
-    ``newarm_iterative``, and an unknown deterministic token would raise too.
+    Parsing ``celldiff_otherarm_iterative`` would raise on the unknown CellDiff variant
+    ``otherarm_iterative``.
     """
+    monkeypatch.setitem(PAPER_KEY, "fnet2d_otherarm", "fnet2d_otherarm")
+    monkeypatch.setitem(PAPER_KEY, "celldiff_otherarm", "celldiff_otherarm")
     _touch_prediction(tmp_path, "nucleus", "fnet2d", "ipsc", "ipsc")
-    _touch_prediction(tmp_path, "nucleus", "fnet2d_newarm", "ipsc", "ipsc")
-    _touch_prediction(tmp_path, "nucleus", "fnet2d_newarm", "ipsc", "a549__mock")
-    _touch_prediction(tmp_path, "nucleus", "celldiff_newarm_iterative", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "fnet2d_otherarm", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "fnet2d_otherarm", "ipsc", "a549__mock")
+    _touch_prediction(tmp_path, "nucleus", "celldiff_otherarm_iterative", "ipsc", "ipsc")
 
     assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
-    assert "skipped 3 prediction zarrs under unregistered model dirs" in capsys.readouterr().out
+    assert "skipped 3 prediction zarrs of PAPER_KEY models" in capsys.readouterr().out
+
+
+def test_walk_predictions_raises_on_a_model_nobody_registered(tmp_path: Path) -> None:
+    """A model dir unknown to PAPER_KEY too is a missing registration, not an arm to skip."""
+    _touch_prediction(tmp_path, "nucleus", "fnet2d_newarm", "ipsc", "ipsc")
+
+    with pytest.raises(ValueError, match="unknown model code-name"):
+        walk_predictions(tmp_path)
 
 
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:

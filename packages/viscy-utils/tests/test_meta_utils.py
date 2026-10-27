@@ -219,3 +219,13 @@ def test_constant_volume_gives_an_empty_mask_without_warnings():
         warnings.simplefilter("error")
         mask = foreground_mask_from_volume(np.full((4, 64, 64), 3.0, dtype=np.float32))
     assert mask.dtype == bool and mask.shape == (4, 64, 64) and not mask.any()
+
+
+def test_near_constant_volume_gives_an_empty_mask_without_warnings():
+    """A few hot pixels in a blank volume leave the clip percentiles equal: still empty, no NaN."""
+    volume = np.zeros((20, 64, 64), dtype=np.float32)
+    volume.flat[::5000] = 100.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        mask = foreground_mask_from_volume(volume)
+    assert not mask.any()
