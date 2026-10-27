@@ -412,6 +412,28 @@ def test_walk_predictions_parses_the_warmup_matched_pix2pix2d(tmp_path: Path) ->
     assert sorted(p.model for p in pool) == ["pix2pix2d_unetvit_wmatch", "pix2pix2d_unetvit_wmatch_seed1"]
 
 
+def test_walk_predictions_skips_known_checkpoint_repredicts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Checkpoint re-predicts of registered models are skipped and counted, not parsed.
+
+    Their train-set dirs (``ipsc_step8400``, ``ipsc_final``, ...) are not canonical tokens,
+    so key_from_prediction_store would raise on them.
+    """
+    _touch_prediction(tmp_path, "er", "fnet3d_paper", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "er", "fnet3d_paper", "ipsc_step8400", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "fcmae_vscyto3d_scratch", "ipsc_final", "a549__mock")
+
+    assert [(p.organelle, p.train_set_canonical) for p in walk_predictions(tmp_path)] == [("er", "ipsc")]
+    assert "skipped 2 checkpoint re-predicts of registered models" in capsys.readouterr().out
+
+
+def test_walk_predictions_raises_on_an_unknown_train_set(tmp_path: Path) -> None:
+    """A train-set dir nobody registered as a checkpoint re-predict still raises."""
+    _touch_prediction(tmp_path, "er", "fnet3d_paper", "ipsc_step9999", "ipsc")
+
+    with pytest.raises(ValueError, match="unknown train_set token"):
+        walk_predictions(tmp_path)
+
+
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:
     """Explicitly requesting a test set includes it (and excludes the others)."""
     _touch_prediction(tmp_path, "membrane", "fnet3d_paper", "a549", "a549__mock")

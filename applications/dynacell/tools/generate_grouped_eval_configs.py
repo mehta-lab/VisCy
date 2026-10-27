@@ -396,6 +396,34 @@ def is_foreign_model_dir(model_dir: str) -> bool:
     return model in PAPER_KEY and model not in _CODE_TO_PAPER
 
 
+# Checkpoint re-predicts of registered models: (model dir, train-set dir) pairs where a
+# second checkpoint of a canonical model was predicted beside its canonical store, under a
+# train-set token that paths.py does not know, so parsing them raises. Each is scored by a
+# hand-written experiment bucket, never by a generated one, and no committed config
+# references them. A train-set dir that is neither canonical nor listed here still raises.
+_CHECKPOINT_REPREDICTS: frozenset[tuple[str, str]] = frozenset(
+    {
+        # experiments/2026-09-24_fnet2d-voxelmatched-smoke: the voxel-matched FNet-2D at its
+        # last step, FNet3D nucleus at step 11k (step-matched to it) and the ER FNet3D re-run
+        # to the voxel-matched best-val step.
+        ("fnet2d_voxelmatched", "ipsc_step200k"),
+        ("fnet3d_paper", "ipsc_step11k"),
+        ("fnet3d_paper", "ipsc_step8400"),
+        # experiments/2026-09-29_unext2-2d-samplematched: the final-checkpoint arms of the
+        # sample-matched UNeXt2-2D and of UNeXt2-3D, and the paper UNeXt2-3D checkpoint
+        # re-predicted to check the paper stores voxel for voxel.
+        ("fcmae_vscyto2d_scratch_samplematched", "ipsc_final"),
+        ("fcmae_vscyto3d_scratch", "ipsc_final"),
+        ("fcmae_vscyto3d_scratch", "ipsc_repredict"),
+    }
+)
+
+
+def is_checkpoint_repredict(zarr_path: Path) -> bool:
+    """Whether ``zarr_path`` is a listed checkpoint re-predict (:data:`_CHECKPOINT_REPREDICTS`)."""
+    return (zarr_path.parents[2].name, zarr_path.parents[1].name) in _CHECKPOINT_REPREDICTS
+
+
 def leaf_test_set(leaf: str) -> str:
     """Return the test-set token of a ``<test>[__<cond>]`` leaf segment.
 
@@ -431,13 +459,15 @@ def walk_predictions(
     condition vocabulary and would fail the whole generation run. Opt such a probe
     in explicitly instead.
 
-    The tree also holds experiment arms that other generators score. Their model
-    dirs (:func:`is_foreign_model_dir`) are skipped before parsing, and the count is
-    printed. Any other unparseable dir still raises in :func:`parse_zarr_name`, so a
-    model nobody registered fails loudly.
+    The tree also holds experiment arms that other generators score, and checkpoint
+    re-predicts of registered models. Both are skipped before parsing
+    (:func:`is_foreign_model_dir`, :func:`is_checkpoint_repredict`), and their counts
+    are printed. Any other unparseable dir still raises in :func:`parse_zarr_name`, so
+    a model or train set nobody registered fails loudly.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
     n_foreign = 0
+    n_repredicts = 0
     for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
         root = dynacell_root / organelle_root
         if not root.is_dir():
@@ -451,6 +481,9 @@ def walk_predictions(
             if is_foreign_model_dir(zarr_path.parents[2].name):
                 n_foreign += 1
                 continue
+            if is_checkpoint_repredict(zarr_path):
+                n_repredicts += 1
+                continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
             if parsed.model in _SKIP_MODELS:
                 continue
@@ -463,6 +496,8 @@ def walk_predictions(
             by_identity[parsed.canonical_identity] = parsed
     if n_foreign:
         print(f"[gen] skipped {n_foreign} prediction zarrs of other campaigns' PAPER_KEY models")
+    if n_repredicts:
+        print(f"[gen] skipped {n_repredicts} checkpoint re-predicts of registered models")
     return list(by_identity.values())
 
 

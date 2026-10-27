@@ -71,6 +71,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     ParsedZarr,
     benchmark_dataset_ref,
     condition_name,
+    is_checkpoint_repredict,
     is_foreign_model_dir,
     leaf_test_set,
     parse_zarr_name,
@@ -204,8 +205,9 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
     is not registered would otherwise crash :func:`walk_predictions` on the first
     bad name (and, before the opt-out gate, be silently dropped by ``in_scope``).
     This walks the prediction dirs with a tolerant per-zarr parse — applying the
-    same test-set filter and foreign-model skip (:func:`is_foreign_model_dir`) as
-    :func:`walk_predictions` — and returns one message per unregistered/unparseable
+    same test-set filter and skips (:func:`is_foreign_model_dir`,
+    :func:`is_checkpoint_repredict`) as :func:`walk_predictions` — and returns one
+    message per unregistered/unparseable
     zarr, so :func:`main` can fail with the *complete* list pointing at the registry
     instead of dying on the first one.
 
@@ -227,7 +229,7 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
                 # it as "unregistered" here would fail main() on a prediction the
                 # campaign never intended to fold in.
                 continue
-            if is_foreign_model_dir(zarr_path.parents[2].name):
+            if is_foreign_model_dir(zarr_path.parents[2].name) or is_checkpoint_repredict(zarr_path):
                 continue
             try:
                 parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
