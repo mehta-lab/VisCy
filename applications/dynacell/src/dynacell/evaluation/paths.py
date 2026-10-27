@@ -243,7 +243,7 @@ PAPER_KEY: dict[str, str] = {
     "fnet2d_spotlight": "fnet2d_spotlight",
     "pix2pix3d_unetvit_spotlight": "pix2pix3d_spotlight",
     "pix2pix2d_unetvit_spotlight": "pix2pix2d_spotlight",
-    # Spotlight v2 first wave (tools/generate_spotlight_v2_leaves.py), iPSC-trained
+    # Spotlight v2 first wave (their leaf generator ships with the Spotlight v2 configs), iPSC-trained
     # nucleus + membrane. Same longest-prefix hazard as the v1 arms above: each token
     # extends its baseline's, so without an entry it collapses onto the baseline it is
     # compared against. `_segaux` = baseline + SegAuxDice term; `_seed1` = baseline at

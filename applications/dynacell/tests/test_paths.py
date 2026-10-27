@@ -39,9 +39,10 @@ from dynacell.evaluation.paths import (
 
 _DATA_ROOT = "/hpc/projects/virtual_staining/training/dynacell"
 
-# Spotlight-v2 first-wave model tokens (tools/generate_spotlight_v2_leaves.py), written
-# out so a generator change that renames an arm fails here instead of silently
-# re-keying its eval dirs. `celldiff_segaux_iterative` is the CellDiff-3D store dir.
+# Spotlight-v2 first-wave model tokens, written out so each must resolve to itself
+# below rather than silently re-keying onto its baseline. Their leaf generator, and the
+# test that pins this list to it, ship with the Spotlight v2 configs.
+# `celldiff_segaux_iterative` is the CellDiff-3D store dir.
 _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "fnet2d_segaux",
     "fnet3d_paper_segaux",
