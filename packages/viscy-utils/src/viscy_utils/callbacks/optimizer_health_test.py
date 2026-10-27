@@ -215,6 +215,14 @@ def test_guard_is_injected_into_a_fit_config():
     assert paths == ["viscy_utils.callbacks.OptimizerHealthCheck"]
 
 
+def test_guard_is_injected_into_a_fit_without_callbacks():
+    """A fit that leaves ``trainer.callbacks`` unset still gets the guard."""
+    config = Namespace(fit=Namespace(trainer=Namespace(callbacks=None)))
+    _inject_optimizer_health_guard(config, "fit")
+    paths = [callback.class_path for callback in config.fit.trainer.callbacks]
+    assert paths == ["viscy_utils.callbacks.OptimizerHealthCheck"]
+
+
 def test_guard_injection_is_idempotent():
     """Re-running the injector (e.g. a resumed resolved config) must not duplicate it."""
     config = Namespace(fit=Namespace(trainer=Namespace(callbacks=[])))
