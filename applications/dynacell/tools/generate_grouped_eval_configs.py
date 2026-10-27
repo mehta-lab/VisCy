@@ -443,6 +443,20 @@ def is_checkpoint_repredict(zarr_path: Path) -> bool:
     return (zarr_path.parents[3].name, zarr_path.parents[2].name, zarr_path.parents[1].name) in _CHECKPOINT_REPREDICTS
 
 
+def skip_reason(zarr_path: Path) -> str | None:
+    """Why the grouped campaign skips a store before parsing it, or None to parse it.
+
+    The one skip rule :func:`walk_predictions` and the instance-AP coverage audit
+    share: another campaign's model (:func:`is_foreign_model_dir`) or a listed
+    checkpoint re-predict (:func:`is_checkpoint_repredict`).
+    """
+    if is_foreign_model_dir(zarr_path.parents[2].name):
+        return "foreign"
+    if is_checkpoint_repredict(zarr_path):
+        return "repredict"
+    return None
+
+
 def leaf_test_set(leaf: str) -> str:
     """Return the test-set token of a ``<test>[__<cond>]`` leaf segment.
 
@@ -480,13 +494,12 @@ def walk_predictions(
 
     The tree also holds experiment arms that other generators score, and checkpoint
     re-predicts of registered models. Both are skipped before parsing
-    (:func:`is_foreign_model_dir`, :func:`is_checkpoint_repredict`), and their counts
-    are printed. Any other unparseable dir still raises in :func:`parse_zarr_name`, so
-    a model or train set nobody registered fails loudly.
+    (:func:`skip_reason`), and their counts are printed. Any other unparseable dir
+    still raises in :func:`parse_zarr_name`, so a model or train set nobody
+    registered fails loudly.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
-    n_foreign = 0
-    n_repredicts = 0
+    n_skipped = {"foreign": 0, "repredict": 0}
     for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
         root = dynacell_root / organelle_root
         if not root.is_dir():
@@ -497,11 +510,9 @@ def walk_predictions(
         for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
             if leaf_test_set(zarr_path.parent.name) not in test_sets:
                 continue
-            if is_foreign_model_dir(zarr_path.parents[2].name):
-                n_foreign += 1
-                continue
-            if is_checkpoint_repredict(zarr_path):
-                n_repredicts += 1
+            reason = skip_reason(zarr_path)
+            if reason is not None:
+                n_skipped[reason] += 1
                 continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
             if parsed.model in _SKIP_MODELS:
@@ -513,10 +524,10 @@ def walk_predictions(
                     f"{existing.pred_path} and {parsed.pred_path}"
                 )
             by_identity[parsed.canonical_identity] = parsed
-    if n_foreign:
-        print(f"[gen] skipped {n_foreign} prediction zarrs of other campaigns' models")
-    if n_repredicts:
-        print(f"[gen] skipped {n_repredicts} checkpoint re-predicts of registered models")
+    if n_skipped["foreign"]:
+        print(f"[gen] skipped {n_skipped['foreign']} prediction zarrs of other campaigns' models")
+    if n_skipped["repredict"]:
+        print(f"[gen] skipped {n_skipped['repredict']} checkpoint re-predicts of registered models")
     return list(by_identity.values())
 
 
