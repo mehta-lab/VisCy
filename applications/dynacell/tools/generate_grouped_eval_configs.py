@@ -460,22 +460,33 @@ def _split_model_variant(body: str, full_name: str) -> tuple[str, str | None]:
     Variants only exist for CellDiff models. Deterministic models have
     ``variant=None`` and ``body`` is the full model code-name.
     """
-    # Try CellDiff first: prefix match then variant suffix.
+    matched = _match_model_variant(body)
+    if matched is not None:
+        return matched
+    for celldiff_model in _CELLDIFF_MODELS:
+        if body.startswith(f"{celldiff_model}_"):
+            variant = body[len(celldiff_model) + 1 :]
+            raise ValueError(f"unknown CellDiff variant {variant!r} after model {celldiff_model!r} in {full_name}")
+    raise ValueError(f"unknown model code-name {body!r} in {full_name}")
+
+
+def _match_model_variant(body: str) -> tuple[str, str | None] | None:
+    """Return ``(model, variant)`` for a registered model dir name, else None."""
+    # Try CellDiff first: prefix match then variant suffix. The first CellDiff
+    # model whose prefix matches decides, so an unknown suffix does not fall
+    # through to a shorter model or to the deterministic models.
     for celldiff_model in _CELLDIFF_MODELS:
         if body == celldiff_model:
             return celldiff_model, None
         token = f"{celldiff_model}_"
         if body.startswith(token):
             variant = body[len(token) :]
-            if variant not in _CELLDIFF_VARIANTS:
-                raise ValueError(f"unknown CellDiff variant {variant!r} after model {celldiff_model!r} in {full_name}")
-            return celldiff_model, variant
+            return (celldiff_model, variant) if variant in _CELLDIFF_VARIANTS else None
 
     # Fall through to deterministic models.
     if body in _DETERMINISTIC_MODELS:
         return body, None
-
-    raise ValueError(f"unknown model code-name {body!r} in {full_name}")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -513,20 +524,24 @@ _SPOTLIGHT_ARM_MODELS: frozenset[str] = frozenset(
     | {arm.model for arm in ARMS}
 )
 
-# Every model directory name parse_zarr_name accepts: the deterministic models,
-# and each CellDiff model bare or with one of its sampling variants.
-_REGISTERED_MODEL_DIRS: frozenset[str] = frozenset(
-    {*_DETERMINISTIC_MODELS, *_CELLDIFF_MODELS}
-    | {f"{model}_{variant}" for model in _CELLDIFF_MODELS for variant in _CELLDIFF_VARIANTS}
-)
 
+def is_foreign_model_dir(model_dir: str) -> bool:
+    """Whether ``model_dir`` holds another campaign's model, to be skipped rather than parsed.
 
-def _is_paper_key_model_dir(model_dir: str) -> bool:
-    """Whether ``model_dir`` names a ``paths.PAPER_KEY`` model, bare or with a CellDiff variant."""
-    return model_dir in PAPER_KEY or any(
-        model_dir.endswith(f"_{variant}") and model_dir.removesuffix(f"_{variant}") in PAPER_KEY
-        for variant in _CELLDIFF_VARIANTS
+    Foreign means ``paths.PAPER_KEY`` knows the model (bare or with a CellDiff
+    variant suffix) while this generator neither parses it nor lists it in
+    :data:`_CODE_TO_PAPER`: on this branch, the Spotlight arms that share the
+    canonical tree. A dir unknown to ``PAPER_KEY`` is not foreign, so
+    :func:`parse_zarr_name` raises on it; neither is a ``_CODE_TO_PAPER`` model this
+    generator fails to parse, which is a registration bug to surface.
+    """
+    if _match_model_variant(model_dir) is not None:
+        return False
+    model = next(
+        (model_dir.removesuffix(f"_{variant}") for variant in _CELLDIFF_VARIANTS if model_dir.endswith(f"_{variant}")),
+        model_dir,
     )
+    return model in PAPER_KEY and model not in _CODE_TO_PAPER
 
 
 def leaf_test_set(leaf: str) -> str:
@@ -565,11 +580,10 @@ def walk_predictions(
     condition vocabulary and would fail the whole generation run. Opt such a probe
     in explicitly instead.
 
-    The tree also holds experiment arms that other generators score. A model dir
-    that ``paths.PAPER_KEY`` knows but this generator does not register
-    (:data:`_REGISTERED_MODEL_DIRS`) is skipped before parsing, and the count is
-    printed. A dir unknown to both still raises in :func:`parse_zarr_name`, so a new
-    model that nobody registered fails loudly.
+    The tree also holds experiment arms that other generators score. Their model
+    dirs (:func:`is_foreign_model_dir`) are skipped before parsing, and the count is
+    printed. Any other unparseable dir still raises in :func:`parse_zarr_name`, so a
+    model nobody registered fails loudly.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
     n_foreign = 0
@@ -583,8 +597,7 @@ def walk_predictions(
         for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
             if leaf_test_set(zarr_path.parent.name) not in test_sets:
                 continue
-            model_dir = zarr_path.parents[2].name
-            if model_dir not in _REGISTERED_MODEL_DIRS and _is_paper_key_model_dir(model_dir):
+            if is_foreign_model_dir(zarr_path.parents[2].name):
                 n_foreign += 1
                 continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
@@ -598,7 +611,7 @@ def walk_predictions(
                 )
             by_identity[parsed.canonical_identity] = parsed
     if n_foreign:
-        print(f"[gen] skipped {n_foreign} prediction zarrs of PAPER_KEY models this generator does not register")
+        print(f"[gen] skipped {n_foreign} prediction zarrs of other campaigns' PAPER_KEY models")
     return list(by_identity.values())
 
 

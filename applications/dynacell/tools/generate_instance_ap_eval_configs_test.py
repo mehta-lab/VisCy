@@ -26,6 +26,8 @@ from generate_instance_ap_eval_configs import (  # noqa: E402
     save_dir_for,
 )
 
+from dynacell.evaluation.paths import PAPER_KEY  # noqa: E402
+
 _BUCKET_TO_CANONICAL = {"ipsc_trained": "ipsc", "a549_trained": "a549", "joint": "joint"}
 
 
@@ -97,6 +99,20 @@ def test_audit_flags_unregistered_prediction(tmp_path) -> None:
     assert len(errors) == 1
     assert "brandnewmodel" in errors[0]
     assert "register" in errors[0].lower()
+
+
+def test_audit_skips_foreign_models_like_the_walk(tmp_path, monkeypatch) -> None:
+    """The audit skips the PAPER_KEY models the grouped walk skips, and still flags unknown ones.
+
+    One registered, one foreign (known to PAPER_KEY, not to the grouped generator) and one
+    unknown store: only the unknown one is a coverage error.
+    """
+    monkeypatch.setitem(PAPER_KEY, "fnet2d_otherarm", "fnet2d_otherarm")
+    for model in ("fnet3d_paper", "fnet2d_otherarm", "brandnewmodel"):
+        (tmp_path / "nucleus" / model / "ipsc" / "ipsc" / "prediction.zarr").mkdir(parents=True)
+    errors = audit_prediction_coverage(tmp_path)
+    assert len(errors) == 1
+    assert "brandnewmodel" in errors[0]
 
 
 def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:

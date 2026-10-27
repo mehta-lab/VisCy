@@ -30,6 +30,7 @@ if str(_TOOLS_DIR) not in sys.path:
 
 from generate_grouped_eval_configs import (  # noqa: E402
     _CANONICAL_TRAIN_SET_TO_BUCKET,
+    _CODE_TO_PAPER,
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
     _TRAIN_SETS,
@@ -386,7 +387,22 @@ def test_walk_predictions_skips_paper_key_models_it_does_not_register(
     _touch_prediction(tmp_path, "nucleus", "celldiff_otherarm_iterative", "ipsc", "ipsc")
 
     assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
-    assert "skipped 3 prediction zarrs of PAPER_KEY models" in capsys.readouterr().out
+    assert "skipped 3 prediction zarrs of other campaigns' PAPER_KEY models" in capsys.readouterr().out
+
+
+def test_walk_predictions_raises_on_a_campaign_model_it_cannot_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model in this generator's own _CODE_TO_PAPER that does not parse is a registration bug, not an arm.
+
+    As on dynacell-models, the walk raises on it rather than skipping it as foreign.
+    """
+    monkeypatch.setitem(PAPER_KEY, "fnet2d_halfreg", "fnet2d_halfreg")
+    monkeypatch.setitem(_CODE_TO_PAPER, "fnet2d_halfreg", "fnet2d_halfreg")
+    _touch_prediction(tmp_path, "nucleus", "fnet2d_halfreg", "ipsc", "ipsc")
+
+    with pytest.raises(ValueError, match="unknown model code-name"):
+        walk_predictions(tmp_path)
 
 
 def test_walk_predictions_raises_on_a_model_nobody_registered(tmp_path: Path) -> None:
