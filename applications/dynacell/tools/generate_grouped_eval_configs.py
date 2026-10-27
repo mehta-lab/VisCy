@@ -373,12 +373,21 @@ _SKIP_MODELS: frozenset[str] = frozenset(
 )
 
 
-def _is_paper_key_model_dir(model_dir: str) -> bool:
-    """Whether ``model_dir`` names a ``paths.PAPER_KEY`` model, bare or with a CellDiff variant."""
-    return model_dir in PAPER_KEY or any(
-        model_dir.endswith(f"_{variant}") and model_dir.removesuffix(f"_{variant}") in PAPER_KEY
-        for variant in _CELLDIFF_VARIANTS
+def is_foreign_model_dir(model_dir: str) -> bool:
+    """Whether ``model_dir`` holds another campaign's model, to be skipped rather than parsed.
+
+    Foreign means ``paths.PAPER_KEY`` knows the model (bare or with a CellDiff
+    variant suffix) while this generator does not parse it: on this branch, the
+    Spotlight arms that share the canonical tree. A dir unknown to ``PAPER_KEY`` is
+    not foreign, so :func:`parse_zarr_name` raises on it.
+    """
+    if _match_model_variant(model_dir) is not None:
+        return False
+    model = next(
+        (model_dir.removesuffix(f"_{variant}") for variant in _CELLDIFF_VARIANTS if model_dir.endswith(f"_{variant}")),
+        model_dir,
     )
+    return model in PAPER_KEY
 
 
 def leaf_test_set(leaf: str) -> str:
@@ -416,11 +425,10 @@ def walk_predictions(
     condition vocabulary and would fail the whole generation run. Opt such a probe
     in explicitly instead.
 
-    The tree also holds experiment arms that other generators score. A model dir
-    that ``paths.PAPER_KEY`` knows but this generator does not register
-    (:func:`_match_model_variant`) is skipped before parsing, and the count is
-    printed. A dir unknown to both still raises in :func:`parse_zarr_name`, so a new
-    model that nobody registered fails loudly.
+    The tree also holds experiment arms that other generators score. Their model
+    dirs (:func:`is_foreign_model_dir`) are skipped before parsing, and the count is
+    printed. Any other unparseable dir still raises in :func:`parse_zarr_name`, so a
+    model nobody registered fails loudly.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
     n_foreign = 0
@@ -434,8 +442,7 @@ def walk_predictions(
         for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
             if leaf_test_set(zarr_path.parent.name) not in test_sets:
                 continue
-            model_dir = zarr_path.parents[2].name
-            if _match_model_variant(model_dir) is None and _is_paper_key_model_dir(model_dir):
+            if is_foreign_model_dir(zarr_path.parents[2].name):
                 n_foreign += 1
                 continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
@@ -449,7 +456,7 @@ def walk_predictions(
                 )
             by_identity[parsed.canonical_identity] = parsed
     if n_foreign:
-        print(f"[gen] skipped {n_foreign} prediction zarrs of PAPER_KEY models this generator does not register")
+        print(f"[gen] skipped {n_foreign} prediction zarrs of other campaigns' PAPER_KEY models")
     return list(by_identity.values())
 
 

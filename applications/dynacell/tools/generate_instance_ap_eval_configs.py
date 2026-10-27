@@ -71,6 +71,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     ParsedZarr,
     benchmark_dataset_ref,
     condition_name,
+    is_foreign_model_dir,
     leaf_test_set,
     parse_zarr_name,
     walk_predictions,
@@ -203,11 +204,10 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
     is not registered would otherwise crash :func:`walk_predictions` on the first
     bad name (and, before the opt-out gate, be silently dropped by ``in_scope``).
     This walks the prediction dirs with a tolerant per-zarr parse — applying the
-    same test-set filter as :func:`walk_predictions` — and returns one message per
-    unregistered/unparseable zarr, so :func:`main` can fail with the *complete*
-    list pointing at the registry instead of dying on the first one. Unlike the
-    walk, it does not skip the ``paths.PAPER_KEY`` models the grouped generator
-    leaves unregistered: listing every unregistered model is its job.
+    same test-set filter and foreign-model skip (:func:`is_foreign_model_dir`) as
+    :func:`walk_predictions` — and returns one message per unregistered/unparseable
+    zarr, so :func:`main` can fail with the *complete* list pointing at the registry
+    instead of dying on the first one.
 
     An empty list means every on-disk prediction is registered and will be
     bucketed by the relevant campaign. Returns messages (does not raise) so the
@@ -226,6 +226,8 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
                 # sharing this tree): skipped by walk_predictions too, so reporting
                 # it as "unregistered" here would fail main() on a prediction the
                 # campaign never intended to fold in.
+                continue
+            if is_foreign_model_dir(zarr_path.parents[2].name):
                 continue
             try:
                 parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
