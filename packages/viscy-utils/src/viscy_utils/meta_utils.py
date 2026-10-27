@@ -211,6 +211,10 @@ def equalize_clahe(array, tile_shape=_CLAHE_TILE, clip_limit=_CLAHE_CLIP_LIMIT, 
         input, so a threshold taken here is not comparable to a raw one.
     """
     lo, hi = np.percentile(array, (_CLAHE_PERCENTILE, 100 - _CLAHE_PERCENTILE))
+    if hi <= lo:
+        # No contrast between the clip percentiles (e.g. a blank timepoint with a
+        # few hot pixels): nothing to equalize, and the rescale would divide by 0.
+        return np.zeros(array.shape, dtype=np.float32)
     scaled = np.clip((array - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
     n_tiles = tuple(max(int(dim // tile), 1) for dim, tile in zip(array.shape, tile_shape))
     kernel = tuple(int(dim // n) for dim, n in zip(array.shape, n_tiles))
