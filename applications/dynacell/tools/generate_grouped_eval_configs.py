@@ -377,9 +377,11 @@ def is_foreign_model_dir(model_dir: str) -> bool:
     """Whether ``model_dir`` holds another campaign's model, to be skipped rather than parsed.
 
     Foreign means ``paths.PAPER_KEY`` knows the model (bare or with a CellDiff
-    variant suffix) while this generator does not parse it: on this branch, the
-    Spotlight arms that share the canonical tree. A dir unknown to ``PAPER_KEY`` is
-    not foreign, so :func:`parse_zarr_name` raises on it.
+    variant suffix) while this generator neither parses it nor lists it in
+    :data:`_CODE_TO_PAPER`: on this branch, the Spotlight arms that share the
+    canonical tree. A dir unknown to ``PAPER_KEY`` is not foreign, so
+    :func:`parse_zarr_name` raises on it; neither is a ``_CODE_TO_PAPER`` model this
+    generator fails to parse, which is a registration bug to surface.
     """
     if _match_model_variant(model_dir) is not None:
         return False
@@ -387,7 +389,7 @@ def is_foreign_model_dir(model_dir: str) -> bool:
         (model_dir.removesuffix(f"_{variant}") for variant in _CELLDIFF_VARIANTS if model_dir.endswith(f"_{variant}")),
         model_dir,
     )
-    return model in PAPER_KEY
+    return model in PAPER_KEY and model not in _CODE_TO_PAPER
 
 
 def leaf_test_set(leaf: str) -> str:
