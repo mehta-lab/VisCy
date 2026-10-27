@@ -434,6 +434,14 @@ def test_walk_predictions_raises_on_an_unknown_train_set(tmp_path: Path) -> None
         walk_predictions(tmp_path)
 
 
+def test_walk_predictions_raises_on_a_listed_repredict_token_in_another_organelle(tmp_path: Path) -> None:
+    """A re-predict is listed per organelle: ER's ipsc_step8400 does not cover a mito store."""
+    _touch_prediction(tmp_path, "mito", "fnet3d_paper", "ipsc_step8400", "ipsc")
+
+    with pytest.raises(ValueError, match="unknown train_set token"):
+        walk_predictions(tmp_path)
+
+
 def test_walk_predictions_skips_named_foreign_replicates(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The P1 segcons replicate dirs, unknown to PAPER_KEY, are named as foreign and skipped."""
     _touch_prediction(tmp_path, "nucleus", "fnet2d", "ipsc", "ipsc")

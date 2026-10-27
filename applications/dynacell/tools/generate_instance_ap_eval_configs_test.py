@@ -119,7 +119,7 @@ def test_audit_handles_the_live_tree_s_non_canonical_dirs(tmp_path) -> None:
     """Checkpoint re-predicts and named foreign replicates are skipped, wmatch parses, unknowns are flagged."""
     for model, train_set in (
         ("fnet3d_paper", "ipsc"),
-        ("fnet3d_paper", "ipsc_step8400"),
+        ("fnet3d_paper", "ipsc_step11k"),
         ("fcmae_vscyto3d_scratch", "ipsc_repredict"),
         ("pix2pix2d_unetvit_segcons_x10", "ipsc"),
         ("pix2pix2d_unetvit_wmatch", "ipsc"),

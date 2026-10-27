@@ -414,32 +414,33 @@ def is_foreign_model_dir(model_dir: str) -> bool:
     return model in PAPER_KEY and model not in _CODE_TO_PAPER
 
 
-# Checkpoint re-predicts of registered models: (model dir, train-set dir) pairs where a
-# second checkpoint of a canonical model was predicted beside its canonical store, under a
+# Checkpoint re-predicts of registered models: (organelle dir, model dir, train-set dir)
+# triples where a second checkpoint of a canonical model was predicted beside its canonical
+# store, under a
 # train-set token that paths.py does not know, so parsing them raises. Each is scored by a
 # hand-written experiment bucket, never by a generated one, and no committed config
 # references them. A train-set dir that is neither canonical nor listed here still raises.
-_CHECKPOINT_REPREDICTS: frozenset[tuple[str, str]] = frozenset(
+_CHECKPOINT_REPREDICTS: frozenset[tuple[str, str, str]] = frozenset(
     {
         # experiments/2026-09-24_fnet2d-voxelmatched-smoke: the voxel-matched FNet-2D at its
         # last step, FNet3D nucleus at step 11k (step-matched to it) and the ER FNet3D re-run
         # to the voxel-matched best-val step.
-        ("fnet2d_voxelmatched", "ipsc_step200k"),
-        ("fnet3d_paper", "ipsc_step11k"),
-        ("fnet3d_paper", "ipsc_step8400"),
+        *((organelle, "fnet2d_voxelmatched", "ipsc_step200k") for organelle in ("er", "nucleus")),
+        ("nucleus", "fnet3d_paper", "ipsc_step11k"),
+        ("er", "fnet3d_paper", "ipsc_step8400"),
         # experiments/2026-09-29_unext2-2d-samplematched: the final-checkpoint arms of the
         # sample-matched UNeXt2-2D and of UNeXt2-3D, and the paper UNeXt2-3D checkpoint
         # re-predicted to check the paper stores voxel for voxel.
-        ("fcmae_vscyto2d_scratch_samplematched", "ipsc_final"),
-        ("fcmae_vscyto3d_scratch", "ipsc_final"),
-        ("fcmae_vscyto3d_scratch", "ipsc_repredict"),
+        *((organelle, "fcmae_vscyto2d_scratch_samplematched", "ipsc_final") for organelle in ("er", "nucleus")),
+        *((organelle, "fcmae_vscyto3d_scratch", "ipsc_final") for organelle in ("er", "nucleus")),
+        *((organelle, "fcmae_vscyto3d_scratch", "ipsc_repredict") for organelle in ("er", "nucleus")),
     }
 )
 
 
 def is_checkpoint_repredict(zarr_path: Path) -> bool:
     """Whether ``zarr_path`` is a listed checkpoint re-predict (:data:`_CHECKPOINT_REPREDICTS`)."""
-    return (zarr_path.parents[2].name, zarr_path.parents[1].name) in _CHECKPOINT_REPREDICTS
+    return (zarr_path.parents[3].name, zarr_path.parents[2].name, zarr_path.parents[1].name) in _CHECKPOINT_REPREDICTS
 
 
 def leaf_test_set(leaf: str) -> str:
