@@ -83,7 +83,7 @@ BSD 3-Clause — © CZ Biohub SF.
 
 ```bibtex
 @inproceedings{kalinin2026dynacell,
-  title     = {{DynaCell}: An Evaluation Framework for Dynamic {3D} Virtual Staining of Live Cells},
+  title     = {Evaluating Dynamic {3D} Virtual Staining of Live Cells with {DynaCell}},
   author    = {Kalinin, Alexandr A. and Zheng, Dihan and Theodoro, Taylla Milena and
                Ivanov, Ivan and Hirata-Miyasaki, Eduardo and Lee, See-Chi and Liu, Aofei and
                Varra, Sricharan Reddy and Chandler, Talon and Pradeep, Soorya and Liu, Chad and
