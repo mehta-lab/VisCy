@@ -1,6 +1,9 @@
 # DynaCell
 
-**An evaluation framework for dynamic 3D virtual staining of live cells.**
+**The DynaCell evaluation framework assesses dynamic 3D virtual staining of live cells** with paired
+label-free and fluorescence time-lapse data, baseline models, and pixel, segmentation, and phenotype
+metrics. This evaluation framework is part of DynaCell, a broader framework for image-based
+profiling of cell-state dynamics.
 
 - 📦 **Dataset:** [DynaCell on the AWS Open Data Registry](https://registry.opendata.aws/dynacell/)
 - 🤗 **Demo:** [Interactive virtual-staining Space on Hugging Face](https://huggingface.co/spaces/biohub/dynacell)
@@ -233,7 +236,7 @@ If you use DynaCell (code, data, or trained checkpoints), please cite
 
 ```bibtex
 @inproceedings{kalinin2026dynacell,
-  title     = {{DynaCell}: An Evaluation Framework for Dynamic {3D} Virtual Staining of Live Cells},
+  title     = {Evaluating Dynamic {3D} Virtual Staining of Live Cells with {DynaCell}},
   author    = {Kalinin, Alexandr A. and Zheng, Dihan and Theodoro, Taylla Milena and
                Ivanov, Ivan and Hirata-Miyasaki, Eduardo and Lee, See-Chi and Liu, Aofei and
                Varra, Sricharan Reddy and Chandler, Talon and Pradeep, Soorya and Liu, Chad and
