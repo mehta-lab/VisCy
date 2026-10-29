@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from generate_spotlight_v2_leaves import ARMS
 
 from dynacell.evaluation import paths
 from dynacell.evaluation.paths import PAPER_KEY, eval_leaf, pred_cache_dir
@@ -77,12 +78,77 @@ _CODE_TO_PAPER: dict[str, str] = {
     # same rule as fnet2d_voxelmatched: evaluate in focused sibling buckets.
     "pix2pix2d_unetvit_wmatch": "pix2pix2d_wmatch",
     "pix2pix2d_unetvit_wmatch_seed1": "pix2pix2d_wmatch_seed1",
-    # Second draws of four 2D baselines (seed 1), scored by the 2D appendix's
-    # seed-vs-seed check in the `__2d_focus2d_seed1` buckets.
+    # Spotlight-loss arms (iPSC-trained nucleus + membrane). Must agree with
+    # PAPER_KEY in dynacell.evaluation.paths -- test_paper_key_maps_agree_on_overlap
+    # pins the two maps against each other.
+    "fnet3d_spotlight": "fnet3d_spotlight",
+    "fnet2d_spotlight": "fnet2d_spotlight",
+    "pix2pix3d_unetvit_spotlight": "pix2pix3d_spotlight",
+    "pix2pix2d_unetvit_spotlight": "pix2pix2d_spotlight",
+    # Spotlight v2 first wave (tools/generate_spotlight_v2_leaves.py). Same agreement
+    # rule with PAPER_KEY. `celldiff_segaux` is the model; its store dir
+    # `celldiff_segaux_iterative` splits into (celldiff_segaux, iterative).
+    "fnet2d_segaux": "fnet2d_segaux",
+    "fnet3d_paper_segaux": "fnet3d_segaux",
+    "fcmae_vscyto2d_scratch_segaux": "unext2_2d_segaux",
+    "fcmae_vscyto3d_scratch_segaux": "unext2_segaux",
+    "pix2pix2d_unetvit_segaux": "pix2pix2d_segaux",
+    "pix2pix3d_unetvit_segaux": "pix2pix3d_segaux",
+    "celldiff_2d_segaux": "celldiff_2d_segaux",
+    "celldiff_segaux": "celldiff_segaux",
     "fnet2d_seed1": "fnet2d_seed1",
+    "fnet3d_paper_seed1": "fnet3d_seed1",
     "fcmae_vscyto2d_scratch_seed1": "unext2_2d_seed1",
     "pix2pix2d_unetvit_seed1": "pix2pix2d_seed1",
     "celldiff_2d_seed1": "celldiff_2d_seed1",
+    "fcmae_vscyto3d_scratch_v2": "unext2_v2",
+    "pix2pix3d_unetvit_v2": "pix2pix3d_v2",
+    "fcmae_vscyto2d_scratch_jointsteps": "unext2_2d_jointsteps",
+    "fcmae_vscyto2d_scratch_l1": "unext2_2d_l1",
+    "fcmae_vscyto2d_scratch_safecrop": "unext2_2d_safecrop",
+    "celldiff_2d_cjoint": "celldiff_2d_cjoint",
+    "celldiff_2d_ccond": "celldiff_2d_ccond",
+    "celldiff_cjoint": "celldiff_cjoint",
+    "celldiff_ccond": "celldiff_ccond",
+    # Stage 2 #1 self-consistent seg-aux arms; same agreement rule with PAPER_KEY.
+    "fnet2d_segauxself": "fnet2d_segauxself",
+    "fcmae_vscyto2d_scratch_segauxself": "unext2_2d_segauxself",
+    "pix2pix2d_unetvit_segauxself": "pix2pix2d_segauxself",
+    "celldiff_2d_segauxself": "celldiff_2d_segauxself",
+    "pix2pix2d_unetvit_last": "pix2pix2d_last",
+    "fcmae_vscyto2d_scratch_l1segaux": "unext2_2d_l1segaux",
+    "fcmae_vscyto2d_scratch_l1seed1": "unext2_2d_l1seed1",
+    "fnet2d_segaux_seed1": "fnet2d_segaux_seed1",
+    "fnet3d_paper_segaux_seed1": "fnet3d_segaux_seed1",
+    "pix2pix3d_unetvit_v2_seed1": "pix2pix3d_v2_seed1",
+    "pix2pix3d_unetvit_segaux_seed1": "pix2pix3d_segaux_seed1",
+    "fcmae_vscyto3d_scratch_v2_seed1": "unext2_v2_seed1",
+    "fcmae_vscyto3d_scratch_segaux_seed1": "unext2_segaux_seed1",
+    "fnet3d_paper_segaux_halfw": "fnet3d_segaux_halfw",
+    "fnet3d_paper_segaux_doublew": "fnet3d_segaux_doublew",
+    "fnet3d_vscyto3daug_v2": "fnet3d_vscyto3daug_v2",
+    "fnet3d_vscyto3daug_v2_seed1": "fnet3d_vscyto3daug_v2_seed1",
+    "fnet3d_vscyto3daug_segaux": "fnet3d_vscyto3daug_segaux",
+    "fnet3d_vscyto3daug_segaux_seed1": "fnet3d_vscyto3daug_segaux_seed1",
+    "fnet3d_vscyto3daug_segaux_sauna": "fnet3d_vscyto3daug_segaux_sauna",
+    "fnet3d_vscyto3daug_segaux_cldice": "fnet3d_vscyto3daug_segaux_cldice",
+    "fnet3d_vscyto3daug_segaux_halfw": "fnet3d_vscyto3daug_segaux_halfw",
+    "fnet3d_vscyto3daug_segaux_doublew": "fnet3d_vscyto3daug_segaux_doublew",
+    "fcmae_vscyto3d_scratch_segaux_sauna": "unext2_segaux_sauna",
+    "pix2pix3d_unetvit_segaux_sauna": "pix2pix3d_segaux_sauna",
+    "pix2pix3d_unetvit_segaux_sauna_seed1": "pix2pix3d_segaux_sauna_seed1",
+    "fcmae_vscyto3d_scratch_segaux_cpout": "unext2_segaux_cpout",
+    "celldiff_2d_bglp": "celldiff_2d_bglp",
+    "celldiff_2d_bgflat": "celldiff_2d_bgflat",
+    "fnet3d_paper_histmatch": "fnet3d_histmatch",
+    "pix2pix3d_unetvit_v2_histmatch": "pix2pix3d_v2_histmatch",
+    "fcmae_vscyto3d_scratch_v2_histmatch": "unext2_v2_histmatch",
+    "fnet3d_vscyto3daug_segcons": "fnet3d_vscyto3daug_segcons",
+    "fnet3d_vscyto3daug_segcons_ctrl": "fnet3d_vscyto3daug_segcons_ctrl",
+    "fcmae_vscyto3d_scratch_segcons": "unext2_segcons",
+    "fcmae_vscyto3d_scratch_segcons_ctrl": "unext2_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons": "pix2pix2d_segcons",
+    "pix2pix2d_unetvit_segcons_ctrl": "pix2pix2d_segcons_ctrl",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -137,21 +203,85 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     # refit; without these entries its stores raised "unknown model code-name".
     "pix2pix2d_unetvit_wmatch",
     "pix2pix2d_unetvit_wmatch_seed1",
-    # 2D baseline seed replicates, deterministic like their baselines.
+    # Spotlight-loss arms. Deterministic for the same reason their baselines are;
+    # spotlight changes the training objective only, never inference. Matching here
+    # is exact, so every on-disk run-dir token must appear verbatim or
+    # _split_model_variant raises "unknown model code-name" when predictions land.
+    "fnet3d_spotlight",
+    "fnet2d_spotlight",
+    "pix2pix3d_unetvit_spotlight",
+    "pix2pix2d_unetvit_spotlight",
+    # Spotlight v2 first wave: deterministic for the same reason as their baselines.
+    "fnet2d_segaux",
+    "fnet3d_paper_segaux",
+    "fcmae_vscyto2d_scratch_segaux",
+    "fcmae_vscyto3d_scratch_segaux",
+    "pix2pix2d_unetvit_segaux",
+    "pix2pix3d_unetvit_segaux",
     "fnet2d_seed1",
+    "fnet3d_paper_seed1",
     "fcmae_vscyto2d_scratch_seed1",
     "pix2pix2d_unetvit_seed1",
+    "fcmae_vscyto3d_scratch_v2",
+    "pix2pix3d_unetvit_v2",
+    "fcmae_vscyto2d_scratch_jointsteps",
+    "fcmae_vscyto2d_scratch_l1",
+    "fcmae_vscyto2d_scratch_safecrop",
+    "fnet2d_segauxself",
+    "fcmae_vscyto2d_scratch_segauxself",
+    "pix2pix2d_unetvit_segauxself",
+    "pix2pix2d_unetvit_last",
+    "fcmae_vscyto2d_scratch_l1segaux",
+    "fcmae_vscyto2d_scratch_l1seed1",
+    "fnet2d_segaux_seed1",
+    "fnet3d_paper_segaux_seed1",
+    "pix2pix3d_unetvit_v2_seed1",
+    "pix2pix3d_unetvit_segaux_seed1",
+    "fcmae_vscyto3d_scratch_v2_seed1",
+    "fcmae_vscyto3d_scratch_segaux_seed1",
+    "fnet3d_paper_segaux_halfw",
+    "fnet3d_paper_segaux_doublew",
+    "fnet3d_vscyto3daug_v2",
+    "fnet3d_vscyto3daug_v2_seed1",
+    "fnet3d_vscyto3daug_segaux",
+    "fnet3d_vscyto3daug_segaux_seed1",
+    "fnet3d_vscyto3daug_segaux_sauna",
+    "fnet3d_vscyto3daug_segaux_cldice",
+    "fnet3d_vscyto3daug_segaux_halfw",
+    "fnet3d_vscyto3daug_segaux_doublew",
+    "fcmae_vscyto3d_scratch_segaux_sauna",
+    "pix2pix3d_unetvit_segaux_sauna",
+    "pix2pix3d_unetvit_segaux_sauna_seed1",
+    "fcmae_vscyto3d_scratch_segaux_cpout",
+    "fnet3d_paper_histmatch",
+    "pix2pix3d_unetvit_v2_histmatch",
+    "fcmae_vscyto3d_scratch_v2_histmatch",
+    "fnet3d_vscyto3daug_segcons",
+    "fnet3d_vscyto3daug_segcons_ctrl",
+    "fcmae_vscyto3d_scratch_segcons",
+    "fcmae_vscyto3d_scratch_segcons_ctrl",
+    "pix2pix2d_unetvit_segcons",
+    "pix2pix2d_unetvit_segcons_ctrl",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = (
+    "celldiff_2d_segauxself",
+    "celldiff_2d_segaux",
+    "celldiff_2d_cjoint",
+    "celldiff_2d_ccond",
     "celldiff_2d_seed1",
+    "celldiff_2d_bglp",
+    "celldiff_2d_bgflat",
+    "celldiff_segaux",
+    "celldiff_cjoint",
+    "celldiff_ccond",
     "celldiff_r2",
     "celldiff_2d",
     "celldiff",
 )
 """CellDiff-family model tokens, longest first so prefix matching does not
-truncate ``celldiff_r2``/``celldiff_2d`` down to bare ``celldiff``, nor
-``celldiff_2d_seed1`` onto ``celldiff_2d`` (which would misread ``seed1`` as a
-variant)."""
+truncate ``celldiff_r2``/``celldiff_2d`` down to bare ``celldiff``, nor the
+Spotlight-v2 arms (``celldiff_2d_segaux``, ``celldiff_segaux``, ...) onto the
+baseline whose token they extend (which would misread ``segaux`` as a variant)."""
 _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 
 # Canonical on-disk organelle roots to walk. The generator keeps ``mitochondria``
@@ -377,6 +507,28 @@ _SKIP_MODELS: frozenset[str] = frozenset(
 )
 
 
+# Spotlight loss arms (v1 and v2) are registered above so their store dirs parse,
+# but they are scored ONLY by tools/generate_spotlight_v2_eval_configs.py into the
+# separate _spotlight_v2 root. They share the canonical prediction-store tree, so
+# without this skip a canonical regen would fold them into the paper buckets and
+# write their eval dirs under the canonical root. Keys are parsed model tokens
+# (`celldiff_segaux_iterative` parses to `celldiff_segaux`): the v1 arms, the v2
+# post-hoc controls (histogram-matched baselines, no training leaf) and every arm
+# the v2 leaf generator emits.
+_SPOTLIGHT_ARM_MODELS: frozenset[str] = frozenset(
+    {
+        "fnet3d_spotlight",
+        "fnet2d_spotlight",
+        "pix2pix3d_unetvit_spotlight",
+        "pix2pix2d_unetvit_spotlight",
+        "fnet3d_paper_histmatch",
+        "pix2pix3d_unetvit_v2_histmatch",
+        "fcmae_vscyto3d_scratch_v2_histmatch",
+    }
+    | {arm.model for arm in ARMS}
+)
+
+
 # Other campaigns' model dirs in the canonical tree that paths.PAPER_KEY does not know,
 # so is_foreign_model_dir cannot recognise them from it. Named one by one; an unknown dir
 # still raises.
@@ -484,7 +636,8 @@ def walk_predictions(
 
     Iterates ``<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr``
     for ``er, mito, nucleus, membrane`` and parses each into a :class:`ParsedZarr`.
-    Drops R1 CellDiff (``model`` in :data:`_SKIP_MODELS`). The canonical layout
+    Drops R1 CellDiff (``model`` in :data:`_SKIP_MODELS`) and the Spotlight loss
+    arms (:data:`_SPOTLIGHT_ARM_MODELS`, scored in their own root). The canonical layout
     guarantees exactly one prediction.zarr per identity, so a duplicate
     ``canonical_identity`` is a layout violation and raises (never silently
     prefers one). The legacy ``{predictions,joint_predictions}`` dirs are NOT
@@ -523,7 +676,7 @@ def walk_predictions(
                 n_skipped[reason] += 1
                 continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
-            if parsed.model in _SKIP_MODELS:
+            if parsed.model in _SKIP_MODELS or parsed.model in _SPOTLIGHT_ARM_MODELS:
                 continue
             existing = by_identity.get(parsed.canonical_identity)
             if existing is not None:

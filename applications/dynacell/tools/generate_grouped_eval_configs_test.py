@@ -392,6 +392,16 @@ def test_walk_predictions_skips_out_of_scope_test_sets(tmp_path: Path) -> None:
     assert [p.test_set for p in pool] == ["a549"]
 
 
+def test_walk_predictions_skips_spotlight_arms(tmp_path: Path) -> None:
+    """Spotlight arm stores share the canonical tree but never enter the paper buckets."""
+    _touch_prediction(tmp_path, "nucleus", "fnet2d", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "fnet2d_segaux", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "celldiff_segaux_iterative", "ipsc", "ipsc")
+    _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_last", "ipsc", "a549__mock")
+
+    assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
+
+
 def test_walk_predictions_skips_paper_key_models_it_does_not_register(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
