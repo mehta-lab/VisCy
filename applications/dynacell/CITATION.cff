@@ -53,13 +53,12 @@ authors:
 repository-code: "https://github.com/mehta-lab/VisCy"
 license: BSD-3-Clause
 abstract: >-
-  The DynaCell evaluation framework assesses 3D time-lapse virtual staining of
-  live cells. It combines paired 3D time-lapse images acquired with and without
-  fluorescent labels, a suite of baseline models, and three metric tiers that
+  The DynaCell evaluation suite assesses 3D time-lapse virtual staining of live
+  cells. It combines paired 3D time-lapse images acquired with and without
+  fluorescent labels, a set of baseline models, and three metric tiers that
   measure pixel-level fidelity, organelle segmentation performance, and
-  single-cell phenotype similarity. This evaluation framework is part of
-  DynaCell, a broader framework for image-based profiling of cell-state
-  dynamics.
+  single-cell phenotype similarity. This evaluation suite is part of DynaCell,
+  a broader framework for image-based profiling of cell-state dynamics.
 keywords:
   - virtual staining
   - live-cell imaging
