@@ -1,4 +1,4 @@
-"""Feature-space similarity metrics backed by torch-fidelity.
+"""Feature-space similarity metrics backed by torch-fidelity and sample-space FID.
 
 Replaces the prior in-tree implementations
 (:func:`dynacell.evaluation.utils._frechet_distance`,
@@ -48,11 +48,13 @@ def _to_tensor(x: np.ndarray) -> torch.Tensor:
 
 
 def _fid(pred: np.ndarray, target: np.ndarray) -> float:
-    """Frechet distance via torch-fidelity's eigvals-based composition.
+    """Frechet distance, using sample-space SVD when both cohorts are smaller than d.
 
-    Mirrors the math at ``torch_fidelity.metric_fid.fid_statistics_to_metric``:
-    for symmetric PSD ``Σ₁, Σ₂``, ``Σᵢ √λᵢ(Σ₁·Σ₂) == Tr(sqrt(Σ₁·Σ₂))``.
-    Faster than ``scipy.linalg.sqrtm`` and avoids its convergence warnings.
+    For centered feature matrices ``A₁, A₂`` and sample covariance matrices
+    ``Σ₁, Σ₂``, ``Tr(sqrt(Σ₁·Σ₂))`` equals the nuclear norm of ``A₁·A₂.T``
+    divided by ``sqrt((n₁-1)(n₂-1))``. This avoids a feature-dimension covariance
+    eigendecomposition for small cohorts and accumulates in float64. When either
+    cohort reaches d, keep torch-fidelity's original eigvals composition.
 
     Returns ``nan`` for cohorts with fewer than 2 rows on either side —
     ``np.cov`` is undefined at N<2 and would produce a NaN covariance
@@ -60,6 +62,18 @@ def _fid(pred: np.ndarray, target: np.ndarray) -> float:
     """
     if pred.shape[0] < 2 or target.shape[0] < 2:
         return float("nan")
+    if max(pred.shape[0], target.shape[0]) < pred.shape[1]:
+        pred = pred.astype(np.float64)
+        target = target.astype(np.float64)
+        mean_pred, mean_target = pred.mean(axis=0), target.mean(axis=0)
+        centered_pred, centered_target = pred - mean_pred, target - mean_target
+        denom_pred, denom_target = pred.shape[0] - 1, target.shape[0] - 1
+        diff = mean_pred - mean_target
+        trace_pred = np.sum(centered_pred * centered_pred) / denom_pred
+        trace_target = np.sum(centered_target * centered_target) / denom_target
+        trace_covmean = np.linalg.svd(centered_pred @ centered_target.T, compute_uv=False).sum()
+        trace_covmean /= np.sqrt(denom_pred * denom_target)
+        return float(diff @ diff + trace_pred + trace_target - 2 * trace_covmean)
     stats_pred = fid_features_to_statistics(_to_tensor(pred))
     stats_target = fid_features_to_statistics(_to_tensor(target))
     out = fid_statistics_to_metric(stats_pred, stats_target, verbose=False)
@@ -115,7 +129,15 @@ def _bootstrap_prc(
     from both ``pred`` and ``target``, rebuilds the k-NN manifolds on
     those resamples, and calls ``prc_features_to_metric`` (PRC
     convention: ``features_1=generated, features_2=real``).
+
+    Returns all-NaN when a resample cannot support the ``prc_neighborhood``
+    k-NN radius (``prc_bootstrap_size <= prc_neighborhood``) — the manifold
+    is undefined there, and torch-fidelity's ``topk`` would raise. Matches
+    how :func:`_fid` / :func:`_kid` NaN out on cohorts too small to score.
     """
+    if prc_bootstrap_size <= prc_neighborhood:
+        nan = float("nan")
+        return nan, nan, nan, nan, nan, nan
     rng = np.random.default_rng(rng_seed)
     precisions = np.empty(prc_bootstrap_subsets, dtype=np.float64)
     recalls = np.empty(prc_bootstrap_subsets, dtype=np.float64)
@@ -186,12 +208,18 @@ def compute_feature_similarity(
     mind_num_projections: int = 1000,
     rng_seed: int = 2020,
     use_gpu: bool = False,
+    compute_fid: bool = True,
+    compute_prc: bool = True,
+    compute_mind: bool = True,
 ) -> dict[str, float]:
     """Compute dataset-level feature-similarity metrics for one prefix.
 
     Returns the FID / KID (mean + std) / Precision / Recall / F1 (each
     mean + bootstrap std) / MIND / median cosine similarity dict keyed
     by ``f"{prefix}_<METRIC>"``. Empty / single-row inputs return all-NaN.
+    A metric switched off by its ``compute_*`` flag is neither computed nor
+    keyed, on the empty-input path too, so the key set depends only on the
+    flags. KID and median cosine are always computed.
 
     Parameters
     ----------
@@ -214,7 +242,19 @@ def compute_feature_similarity(
     prc_bootstrap_subsets : int
         Number of bootstrap resamples for Precision / Recall / F1.
     prc_bootstrap_size : int, optional
-        Per-resample size; defaults to ``min(n_pred, n_target)``.
+        Per-resample size; defaults to ``min(n_pred, n_target)``. PRC is
+        NaN'd when it does not exceed ``prc_neighborhood`` (the k-NN
+        manifold is undefined below k+1 rows).
+    mind_num_projections : int
+        Number of random projections for MIND.
+    rng_seed : int
+        Seed shared across KID, PRC bootstrap, and MIND.
+    use_gpu : bool
+        Route MIND through CUDA when available.
+    compute_fid, compute_prc, compute_mind : bool
+        Per-metric switches. ``False`` omits ``{prefix}_FID``; the six
+        ``{prefix}_Precision/Recall/F1`` (+ ``_std``) keys; or
+        ``{prefix}_MIND`` respectively.
 
     Notes
     -----
@@ -226,22 +266,21 @@ def compute_feature_similarity(
     the paper script. They are still directly comparable across models /
     plates / conditions evaluated with the same bootstrap scheme — but
     do not compare them to non-bootstrap PRC tables.
-    mind_num_projections : int
-        Number of random projections for MIND.
-    rng_seed : int
-        Seed shared across KID, PRC bootstrap, and MIND.
     """
-    keys = (
-        f"{prefix}_FID",
-        f"{prefix}_KID",
-        f"{prefix}_KID_std",
+    prc_keys = (
         f"{prefix}_Precision",
         f"{prefix}_Precision_std",
         f"{prefix}_Recall",
         f"{prefix}_Recall_std",
         f"{prefix}_F1",
         f"{prefix}_F1_std",
-        f"{prefix}_MIND",
+    )
+    keys = (
+        *((f"{prefix}_FID",) if compute_fid else ()),
+        f"{prefix}_KID",
+        f"{prefix}_KID_std",
+        *(prc_keys if compute_prc else ()),
+        *((f"{prefix}_MIND",) if compute_mind else ()),
         f"{prefix}_Median_Cosine_Similarity",
     )
     if pred.size == 0 or target.size == 0:
@@ -252,28 +291,20 @@ def compute_feature_similarity(
     pred = np.asarray(pred, dtype=np.float32)
     target = np.asarray(target, dtype=np.float32)
 
-    fid = _fid(pred, target)
-    kid_mean, kid_std = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
-    bootstrap_size = prc_bootstrap_size or min(pred.shape[0], target.shape[0])
-    p_mean, p_std, r_mean, r_std, f_mean, f_std = _bootstrap_prc(
-        pred, target, prc_neighborhood, prc_bootstrap_subsets, bootstrap_size, rng_seed
-    )
-    mind = _mind(pred, target, mind_num_projections, rng_seed, use_gpu=use_gpu)
-    cos = _median_cosine_similarity(pred, target)
-
-    return {
-        f"{prefix}_FID": fid,
-        f"{prefix}_KID": kid_mean,
-        f"{prefix}_KID_std": kid_std,
-        f"{prefix}_Precision": p_mean,
-        f"{prefix}_Precision_std": p_std,
-        f"{prefix}_Recall": r_mean,
-        f"{prefix}_Recall_std": r_std,
-        f"{prefix}_F1": f_mean,
-        f"{prefix}_F1_std": f_std,
-        f"{prefix}_MIND": mind,
-        f"{prefix}_Median_Cosine_Similarity": cos,
-    }
+    # Insertion order matches ``keys`` so the CSV column order is unchanged
+    # when every flag is on.
+    out: dict[str, float] = {}
+    if compute_fid:
+        out[f"{prefix}_FID"] = _fid(pred, target)
+    out[f"{prefix}_KID"], out[f"{prefix}_KID_std"] = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
+    if compute_prc:
+        bootstrap_size = prc_bootstrap_size or min(pred.shape[0], target.shape[0])
+        prc = _bootstrap_prc(pred, target, prc_neighborhood, prc_bootstrap_subsets, bootstrap_size, rng_seed)
+        out.update(zip(prc_keys, prc, strict=True))
+    if compute_mind:
+        out[f"{prefix}_MIND"] = _mind(pred, target, mind_num_projections, rng_seed, use_gpu=use_gpu)
+    out[f"{prefix}_Median_Cosine_Similarity"] = _median_cosine_similarity(pred, target)
+    return out
 
 
 def compute_feature_similarity_pairwise(
@@ -283,16 +314,18 @@ def compute_feature_similarity_pairwise(
     kid_subsets: int = 100,
     kid_subset_size: int = 1000,
     rng_seed: int = 2020,
+    compute_fid: bool = True,
 ) -> dict[str, float]:
     """Per-(FOV, timepoint) variant: FID, KID mean + std, cosine only.
 
     PRC and MIND are dataset-level metrics; running them per-timepoint
     on ~50-cell cohorts is uninformative (the manifold is too sparse
     and the bootstrap variance dominates). Returns the four-column dict
-    keyed by ``f"{prefix}_<METRIC>"``.
+    keyed by ``f"{prefix}_<METRIC>"``; ``compute_fid=False`` drops
+    ``{prefix}_FID`` (not computed, not keyed) and leaves three.
     """
     keys = (
-        f"{prefix}_FID",
+        *((f"{prefix}_FID",) if compute_fid else ()),
         f"{prefix}_KID",
         f"{prefix}_KID_std",
         f"{prefix}_Median_Cosine_Similarity",
@@ -305,13 +338,9 @@ def compute_feature_similarity_pairwise(
     pred = np.asarray(pred, dtype=np.float32)
     target = np.asarray(target, dtype=np.float32)
 
-    fid = _fid(pred, target)
-    kid_mean, kid_std = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
-    cos = _median_cosine_similarity(pred, target)
-
-    return {
-        f"{prefix}_FID": fid,
-        f"{prefix}_KID": kid_mean,
-        f"{prefix}_KID_std": kid_std,
-        f"{prefix}_Median_Cosine_Similarity": cos,
-    }
+    out: dict[str, float] = {}
+    if compute_fid:
+        out[f"{prefix}_FID"] = _fid(pred, target)
+    out[f"{prefix}_KID"], out[f"{prefix}_KID_std"] = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
+    out[f"{prefix}_Median_Cosine_Similarity"] = _median_cosine_similarity(pred, target)
+    return out

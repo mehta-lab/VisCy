@@ -1,0 +1,44 @@
+# pix2pix2d `wmatch` arm (predict) of nucleus/pix2pix2d_unetvit/a549_mantis/predict__a549_mantis_zikv.yml.
+# Checkpoint: the arm's best loss/validate_ema epoch, from a fit whose log reads
+# `Trainer.fit stopped: max_epochs=40 reached`. Output store, run root and job name
+# gain the arm name; the slab3 predict_z_planes and everything else are the baseline's.
+# Written by applications/dynacell/experiments/2026-10-22_2d-benchmark-paper-appendix/make_wmatch_predict_and_buckets.py.
+base:
+- ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_zikv.yml
+- ../../../_internal/shared/model/targets/nucleus.yml
+- ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_predict.yml
+- ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+- ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+- ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: a549_mantis
+  predict_set: a549_mantis_h2b_zikv
+  model_name: pix2pix2d_unetvit_wmatch
+  experiment_id: nucleus__a549_mantis__pix2pix2d_unetvit_wmatch__a549_mantis_h2b_zikv
+  dataset_ref:
+    target: h2b
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/pix2pix2d_unetvit_wmatch/checkpoints/epoch=35-step=10800-loss=2.055.ckpt
+data:
+  init_args:
+    predict_z_planes: /hpc/projects/virtual_staining/training/dynacell/focus2d_planes/nucleus/a549__zikv__h1.json
+    normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys:
+        - Phase3D
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    augmentations: []
+trainer:
+  callbacks:
+  - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+    init_args:
+      output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit_wmatch/a549/a549__zikv/prediction.zarr
+launcher:
+  job_name: pix2pix2d_unetvit_wmatch_PRED_A549_NUCL_ON_A549_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit_wmatch/a549/a549__zikv

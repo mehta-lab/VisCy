@@ -9,7 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from dynacell.data._yaml import load_yaml
 
@@ -21,10 +21,23 @@ class DatasetRef(BaseModel):
     The composition-time resolver reads this reference and splices
     ``data_path``, ``source_channel``, and ``target_channel`` into the
     composed Lightning config.
+
+    ``source_channel`` overrides the manifest's declared ``channels.source``
+    for input-channel ablations (e.g. feeding the raw ``Brightfield`` stack
+    instead of the ``Phase3D`` volume reconstructed from it) without minting a
+    duplicate dataset. Omit it to use the manifest default.
+
+    Extra keys are **forbidden**: Pydantic's default would silently drop a
+    misspelled ``source_channel``, and the resulting run would train on the
+    manifest's default channel while every config, log and W&B name claimed
+    otherwise — an ablation that is a silent no-op is worse than one that fails.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     dataset: str
     target: str
+    source_channel: str | None = None
 
 
 class VoxelSpacing(BaseModel):
@@ -40,9 +53,16 @@ class VoxelSpacing(BaseModel):
 
 
 class StoreLocations(BaseModel):
-    """Zarr store paths for a single organelle target."""
+    """Zarr store paths for a single organelle target.
 
-    train: Path
+    ``train`` is optional: evaluation-only datasets (e.g. the ``hek-mantis-*``
+    third-cell-type probe) ship a test store and no training data. Callers that
+    need a train store must check for ``None`` — :func:`resolve_dataset_ref`
+    propagates it as ``ResolvedDataset.data_path_train`` and the composition hook
+    raises for any non-predict Lightning mode.
+    """
+
+    train: Path | None = None
     test: Path
     cell_segmentation: Path | None = None
     gt_cache_dir: Path | None = None
@@ -93,6 +113,42 @@ class DatasetManifest(BaseModel):
         if isinstance(source, list) and len(source) == 1:
             return source[0]
         raise ValueError(f"Manifest source channel must be a string or single-element list, got {source!r}.")
+
+    def resolve_source_channel(self, name: str | None) -> str:
+        """Return the model-input channel, validating an explicit override.
+
+        Parameters
+        ----------
+        name : str or None
+            Explicit channel from :attr:`DatasetRef.source_channel`. ``None``
+            selects the manifest's declared :attr:`source_channel`.
+
+        Returns
+        -------
+        str
+            Channel name present in this manifest.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is not one of the manifest's declared channels. A typo
+            would otherwise surface as an opaque failure deep inside iohub, or
+            worse, silently select the wrong volume.
+        """
+        if name is None:
+            return self.source_channel
+        # ``auxiliary`` is optional in the schema (``channels: dict[str, str |
+        # list[str]]``), so read it defensively -- absence is legal, not an error.
+        auxiliary = self.channels.get("auxiliary", [])
+        declared = [auxiliary] if isinstance(auxiliary, str) else list(auxiliary)
+        source = self.channels["source"]
+        declared += [source] if isinstance(source, str) else list(source)
+        if name not in declared:
+            raise ValueError(
+                f"source_channel {name!r} is not declared in manifest {self.name!r}. "
+                f"Available channels: {sorted(declared)}."
+            )
+        return name
 
 
 class SplitDefinition(BaseModel):

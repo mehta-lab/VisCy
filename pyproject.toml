@@ -100,7 +100,7 @@ lint.pydocstyle.convention = "numpy"
 minversion = "9.0"
 testpaths = [ "packages/*/tests", "applications/*/tests" ]
 addopts = [ "-ra", "-q", "--import-mode=importlib", "-m", "not slow" ]
-pythonpath = [ "applications/dynacell/tools" ]
+pythonpath = [ "applications/dynacell/tools", "applications/dynacell/examples/hf_demo" ]
 # Set as an ini option, NOT as --strict-markers in addopts. pytest >= 9 backs the
 # flag with this ini option and only honours the flag from the command line — in
 # addopts it parses (config.option.strict_markers reads True) but never enforces,
@@ -118,7 +118,6 @@ markers = [
   # and errors when run as a single file.
   "slow: marks tests requiring GPU/HPC resources or live HPC data (deselect with -m 'not slow')",
   "hpc_integration: requires HPC data paths and a CUDA GPU",
-  "requires_data: reads the live dynacell training tree on disk (deselect with -m 'not requires_data')",
 ]
 
 [tool.uv-dynamic-versioning]

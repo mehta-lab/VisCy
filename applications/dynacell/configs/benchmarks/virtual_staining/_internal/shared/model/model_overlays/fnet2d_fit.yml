@@ -1,0 +1,25 @@
+# FNet2D fit overlay — model + trainer only — for the in-focus 2D
+# benchmark track. HCS data hparams (the mean/std Structure normalization
+# and 8-crops-per-FOV sampling that diverge from the CellDiff/UNetViT
+# conventions) live in data_overlays/fnet2d_fit.yml; single-store train
+# leaves compose both, joint (BatchedConcatDataModule) leaves compose only
+# this one and author data: themselves.
+#
+# Mirrors model_overlays/fnet3d_paper_fit.yml but binds the fnet2d model
+# recipe (in_stack_depth=1, downsample_z=false). FNet3D was already
+# single-GPU, so topology is unchanged. lr/schedule/loss/precision/
+# max_steps all match the 3D FNet paper baseline.
+base:
+  - ../../../../../../recipes/models/fnet2d.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+seed_everything: 0
+model:
+  init_args:
+    loss_function:
+      class_path: torch.nn.MSELoss
+    lr: 0.001
+    schedule: Constant
+trainer:
+  precision: 32-true
+  max_steps: 200000

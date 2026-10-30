@@ -1,0 +1,24 @@
+# Cellpose reference defaults for
+# `dynacell.preprocess.segmentation.run_cellpose_segmentation`.
+#
+# There is no `dynacell preprocess segment` CLI; call the function directly.
+# Keys mirror its keyword arguments, so after filling the `???` I/O fields:
+#   cfg = load_preprocess_config(Path(".../segmentation.yaml"))
+#   run_cellpose_segmentation(**OmegaConf.to_container(cfg))
+data_dir: ???
+save_dir: ???
+input_channel_names: ???
+
+use_gpu: true
+batch_size: 32
+
+# 3D-specific (do_3d: false max-projects to 2D instead)
+do_3d: true
+z_axis: 1
+flow_3d_smooth: 10
+
+# Output zarr settings
+output_channel_names: ["segmentation"]
+output_dtype: uint8
+zarr_layout: hcs
+zarr_version: "0.5"

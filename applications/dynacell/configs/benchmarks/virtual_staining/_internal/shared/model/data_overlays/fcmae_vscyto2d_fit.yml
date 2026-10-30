@@ -1,0 +1,78 @@
+# FCMAE-2D (VSCyto2D-geometry FullyConvolutionalMAE) fit-time HCS data
+# hparams for the in-focus 2D benchmark track. Split out from
+# model_overlays/fcmae_vscyto2d_fit.yml so the model+trainer half there
+# stays composable by joint-dataset (BatchedConcatDataModule) leaves that
+# author their own data: block.
+#
+# Mirrors data_overlays/fcmae_vscyto3d_fit.yml but flattens all Z
+# augmentations to the cytoland 2D convention (z_window_size=1 reads the
+# offline `_focus.zarr` 5-plane slab stores; each window is one plane):
+#   - z_window_size: 20 -> 1
+#   - RandWeightedCropd spatial_size [20,600,600] -> [1,600,600]
+#   - BatchedRandAffined rotate_range [3.14,0,0] -> [0,0,0],
+#     scale_range Z [0.7,1.3] -> [1,1] (identity = no Z scale; kornia
+#     affine scale is an absolute factor, so 1.0 is the no-op, not 0)
+#   - BatchedCenterSpatialCropd roi_size [15,384,384] -> [1,384,384]
+#   - BatchedRandGaussianSmoothd sigma_z [0.25,0.75] -> [0,0]
+# XY augmentation policy (shear/scale/contrast/intensity/noise/smooth) is
+# kept identical to the 3D overlay.
+data:
+  init_args:
+    z_window_size: 1
+    # 16 (not the 3D overlay's 32) so a single_gpu fit fits the 48 GB pool
+    # (a40|l40s|a6000): bs=32 OOMs at ~47 GB there, bs=8 uses ~half, so 16
+    # keeps ~2x headroom and constraint:null stays valid. Effective batch is
+    # deliberately not forced to match the 3D 4-GPU global batch — the 2D
+    # nets are trained to their own best on cheap hardware (plan Phase-B).
+    batch_size: 16
+    num_workers: 4
+    yx_patch_size: [384, 384]
+    augmentations:
+      # CPU weighted crop on the 5-plane focus slab: spatial_size Z=1
+      # samples a single target-weighted plane per crop.
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [1, 600, 600]
+          num_samples: 4
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.8
+          rotate_range: [0, 0, 0]
+          shear_range: [0.0, 0.05, 0.05]
+          scale_range: [[1, 1], [0.5, 1.5], [0.5, 1.5]]
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [1, 384, 384]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 0.3
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0, 0]
+    val_gpu_augmentations:
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [1, 384, 384]

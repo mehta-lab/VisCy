@@ -4,7 +4,7 @@ base:
   - ../../../_internal/shared/model/targets/nucleus.yml
   - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_celldiff.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
@@ -17,7 +17,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/nucl/celldiff_r2/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/celldiff_r2/checkpoints/epoch=19-step=86400.ckpt
     predict_method: iterative
     predict_overlap: [4, 256, 256]
 
@@ -35,8 +35,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_celldiff_r2_a549trained.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/a549/ipsc/prediction.zarr
 
 launcher:
   job_name: CELLDiff_A549_PRED_NUCL_ON_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/a549/ipsc

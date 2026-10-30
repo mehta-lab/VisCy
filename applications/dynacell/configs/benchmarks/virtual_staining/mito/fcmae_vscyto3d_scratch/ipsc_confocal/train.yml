@@ -22,7 +22,7 @@ trainer:
   logger:
     init_args:
       name: FCMAE_VSCyto3D_Scratch_iPSC_TOMM20
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fcmae_vscyto3d_scratch
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fcmae_vscyto3d_scratch
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -30,11 +30,13 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fcmae_vscyto3d_scratch/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fcmae_vscyto3d_scratch/checkpoints
 
 launcher:
   job_name: FCMAE_VSCyto3D_Scratch_TOMM20
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fcmae_vscyto3d_scratch
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fcmae_vscyto3d_scratch

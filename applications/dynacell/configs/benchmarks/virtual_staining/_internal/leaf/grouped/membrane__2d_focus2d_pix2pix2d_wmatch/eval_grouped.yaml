@@ -1,0 +1,202 @@
+# @package _global_
+# pix2pix2d warmup-matched refit: the pix2pix2d conditions of the membrane
+# 2D focus2d buckets (and seed1 bucket), on the pix2pix2d_unetvit_wmatch[_seed1] stores.
+# Same recipe, planes and caches as those buckets. Written by
+# applications/dynacell/experiments/2026-10-22_2d-benchmark-paper-appendix/make_wmatch_predict_and_buckets.py.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+  pred_masks: true
+  pred_cp: true
+  pred_dinov3: true
+  pred_dynaclr: true
+  pred_celldino: true
+  pred_morphem: true
+  pred_instances: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei
+focus2d:
+  halfwidth: 1
+conditions:
+- name: pix2pix2d_wmatch__ipsc_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__denv
+- name: pix2pix2d_wmatch__ipsc_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__mock
+- name: pix2pix2d_wmatch__ipsc_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/ipsc/a549__zikv
+- name: pix2pix2d_wmatch__ipsc_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/ipsc/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/ipsc/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/ipsc/ipsc
+- name: pix2pix2d_wmatch__a549_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/a549/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/a549/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/a549/a549__denv
+- name: pix2pix2d_wmatch__a549_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/a549/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/a549/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/a549/a549__mock
+- name: pix2pix2d_wmatch__a549_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/a549/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/a549/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/a549/a549__zikv
+- name: pix2pix2d_wmatch__a549_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/a549/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/a549/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/a549/ipsc
+- name: pix2pix2d_wmatch__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/joint/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/joint/a549__denv
+- name: pix2pix2d_wmatch__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/joint/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/joint/a549__mock
+- name: pix2pix2d_wmatch__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/joint/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/joint/a549__zikv
+- name: pix2pix2d_wmatch__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch/joint/ipsc
+- name: pix2pix2d_wmatch_seed1__ipsc_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__denv
+- name: pix2pix2d_wmatch_seed1__ipsc_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__mock
+- name: pix2pix2d_wmatch_seed1__ipsc_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/a549__zikv
+- name: pix2pix2d_wmatch_seed1__ipsc_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/eval_focus2d_h1/membrane/pix2pix2d_unetvit_wmatch_seed1/ipsc/ipsc

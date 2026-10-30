@@ -37,3 +37,4 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   precision: 16-mixed
   max_epochs: 200
+  benchmark: true  # see fcmae_vscyto3d_fit.yml

@@ -1,0 +1,43 @@
+# Smoke sibling of er/fnet3d_t01/a549_mantis/train.yml.
+# The ER counterpart of the nucleus smoke, and not redundant with it: SEC61B_t01.zarr
+# is a MIXED-length plate (half its source positions have 7 frames, half 10), it
+# carries the raw `Structure` target rather than `Nuclei`, and its per-FOV window
+# count therefore comes out of a different branch of the subset builder. Checks the
+# same things: subset `fov_statistics` survived, mmap_preload stages the store,
+# RandWeightedCropd finds foreground in 2 frames per FOV, train + val MSE finite.
+# Scratch run_root, no logger, no checkpoints, 30 steps, bounded 40-min wall.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: a549_mantis
+  model_name: fnet3d_t01
+  experiment_id: er__a549_mantis__fnet3d_t01__smoke
+
+trainer:
+  max_steps: 30
+  limit_val_batches: 2
+  logger: false
+  callbacks: []
+
+data:
+  init_args:
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/SEC61B_t01.zarr
+
+launcher:
+  job_name: FNet3DT01_SEC61B_SMOKE
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/_smoke/fnet3d_t01_a549_er
+  sbatch:
+    constraint: "a6000|a40|l40s"
+    cpus_per_task: 16
+    mem: "96G"
+    time: "00:40:00"

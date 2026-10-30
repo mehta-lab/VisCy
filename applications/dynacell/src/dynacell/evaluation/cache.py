@@ -7,14 +7,18 @@ expensive segmentation and feature-extraction work.
 Cache identity is rooted in the source plate/channel plus
 ``cell_segmentation_path`` when cell-level features are involved.
 Per-artifact invalidation is driven by extra params recorded in the manifest
-(e.g. spacing, patch_size, checkpoint hash).
+(e.g. spacing, patch_size, checkpoint hash). On the prediction side each cached
+position also records the :func:`prediction_sources` entry it was built from.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import uuid
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,11 +26,50 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
+import yaml
 import zarr
-from iohub.ngff import open_ome_zarr
-from omegaconf import OmegaConf
+from iohub.ngff import ImageArray, Position, open_ome_zarr
 
-FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino"]
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, marker_identity
+
+FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
+
+# The manifest is read and written once per FOV, and its per-position ``sources``
+# make it large; libyaml's C loader and dumper are an order of magnitude faster than
+# the pure-Python ones. They are absent only from a PyYAML built without libyaml,
+# which then falls back to the pure-Python classes.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+#: YAML 1.1 bool spellings that ``OmegaConf.save`` quotes.
+_OMEGACONF_BOOLS = frozenset(
+    "y Y yes Yes YES n N no No NO true True TRUE false False FALSE on On ON off Off OFF".split()
+)
+
+
+class _ManifestDumper(getattr(yaml, "CSafeDumper", yaml.SafeDumper)):
+    """libyaml dumper that writes what ``OmegaConf.save`` wrote: no anchors, str quoted like OmegaConf.
+
+    OmegaConf's loader reads an unquoted ``4e1234567890`` (a possible hex sha12 marker)
+    as a float, so a str that parses as a bool, int or float is single-quoted, exactly
+    as OmegaConf's own representer does. Entries sharing one object (``ctx.spacing``)
+    are written out in full rather than as ``&id001`` aliases.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
+def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
+    try:
+        float(data)
+        quoted = True
+    except ValueError:
+        quoted = data in _OMEGACONF_BOOLS
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="'" if quoted else None)
+
+
+_ManifestDumper.add_representer(str, _represent_str)
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -84,6 +127,10 @@ class CachePaths:
         """Return the zarr group path for CELL-DINO features keyed by *weights_sha12*."""
         return self.features_dir / "celldino" / f"{weights_sha12}.zarr"
 
+    def morphem_features(self, model_name: str) -> Path:
+        """Return the zarr group path for MorphEm features of *model_name*."""
+        return self.features_dir / "morphem" / f"{feature_slug(model_name)}.zarr"
+
 
 def cache_paths(cache_dir: Path | str) -> CachePaths:
     """Build a CachePaths rooted at *cache_dir* (does not create directories)."""
@@ -107,7 +154,8 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
             "cell_segmentation": None,
             "artifacts": {},
         }
-    raw = OmegaConf.to_container(OmegaConf.load(paths.manifest), resolve=True)
+    with open(paths.manifest) as f:
+        raw = yaml.load(f, Loader=_YAML_LOADER)
     if not isinstance(raw, dict):
         raise StaleCacheError(f"Manifest at {paths.manifest} is not a mapping")
     raw.setdefault("gt", None)
@@ -118,9 +166,25 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
 
 
 def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
-    """Persist *manifest* as YAML under *paths.manifest*, creating parents."""
+    """Persist *manifest* as YAML under *paths.manifest*, creating parents.
+
+    The YAML goes to a sibling temp file that is then renamed over the manifest, so a
+    reader that does not hold the manifest lock (``init_cache_context``) sees the old
+    file or the new one, never a truncated one. The temp name is unguessable and created
+    exclusively, so in a group-writable cache dir it never truncates or writes through a
+    path (or symlink) that another process made.
+    """
     paths.root.mkdir(parents=True, exist_ok=True)
-    OmegaConf.save(OmegaConf.create(manifest), paths.manifest)
+    tmp = paths.manifest.with_name(f".{paths.manifest.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "x") as f:
+            yaml.dump(manifest, f, Dumper=_ManifestDumper, sort_keys=False, allow_unicode=True)
+        os.replace(tmp, paths.manifest)
+    except FileExistsError:
+        raise  # only open(tmp, "x") raises this; the path is not ours to remove
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def check_cache_identity(
@@ -261,6 +325,204 @@ def built_at_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def json_sha256_12(obj: Any) -> str:
+    """Return the first 12 hex chars of the sha256 of *obj* serialized as JSON.
+
+    Keys are sorted, so representation-equivalent mappings hash alike; values JSON
+    cannot encode are serialized with ``str``.
+    """
+    payload = json.dumps(obj, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:12]
+
+
+def _chunk_files(directory: Path) -> Iterator[os.DirEntry]:
+    """Yield the chunk files under *directory*, depth first and lazily.
+
+    Array and group metadata (``zarr.json``, ``.zarray``, ``.zattrs``) is skipped. A
+    caller taking ``next(...)`` reads one directory batch per level instead of listing
+    every chunk.
+    """
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            if entry.is_dir():
+                yield from _chunk_files(Path(entry.path))
+            elif entry.name != "zarr.json" and not entry.name.startswith("."):
+                yield entry
+
+
+def _stored_chunk(array_dir: Path, key: str, spatial: int) -> os.DirEntry | Path | None:
+    """Return the chunk stored at *key*, else the first stored chunk sharing its ``(t, c)`` prefix.
+
+    A chunk never written, or reset to the fill value (zarr deletes it), is absent. The
+    prefix fallback exists only for ``/``-separated keys, whose ``(t, c)`` chunks share
+    one directory subtree, read one directory batch per level. A ``.``-separated key (a
+    flat zarr v2 layout) resolves only exactly; when that chunk is absent the position
+    reads as unwritten (``written_ns=None``), which rebuilds a legacy entry over it once.
+    Every evaluated non-v3 store uses ``/`` separators.
+    """
+    chunk = array_dir / key
+    if chunk.is_file():
+        return chunk
+    parts = key.split("/")
+    if len(parts) <= spatial:
+        return None
+    prefix = array_dir.joinpath(*parts[:-spatial])
+    return next(_chunk_files(prefix), None) if prefix.is_dir() else None
+
+
+def _first_channel_chunk_mtime_ns(plate_path: Path, array: ImageArray, channel_index: int) -> int | None:
+    """Return the ``st_mtime_ns`` of the first stored chunk holding *channel_index*, earliest ``t`` first.
+
+    Each candidate ``(t, c, 0, 0, 0)`` is located through the array's own chunk-key
+    encoding (zarr v2 or v3, sharded or not), so no layout is parsed by hand, and
+    :func:`_stored_chunk` falls back to the first stored chunk of that ``(t, c)``.
+    Later timepoints are tried because a blank output (all fill values, e.g. an
+    all-zero prediction) stores no chunk at all: at most one lookup per timepoint.
+
+    Returns
+    -------
+    int or None
+        ``None`` when no chunk of the channel is stored at any timepoint.
+    """
+    outer = array.shards if array.shards is not None else array.chunks
+    spatial = array.ndim - 2
+    channel_chunk = channel_index // outer[1]
+    array_dir = plate_path / array.path
+    for t_chunk in range(-(-array.shape[0] // outer[0])):
+        key = array.native.metadata.encode_chunk_key((t_chunk, channel_chunk) + (0,) * spatial)
+        found = _stored_chunk(array_dir, key, spatial)
+        if found is not None:
+            return found.stat().st_mtime_ns
+    return None
+
+
+def _position_source(plate_path: Path, position: Position, channel_name: str, archive_ns: int | None) -> dict[str, Any]:
+    """Return one position's source; see :func:`prediction_sources`."""
+    marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(channel_name)
+    digest = None if marker is None else json_sha256_12(marker_identity(marker))
+    if archive_ns is not None:
+        written_ns = archive_ns
+    else:
+        array = position[position.metadata.multiscales[0].datasets[0].path]
+        written_ns = _first_channel_chunk_mtime_ns(plate_path, array, position.get_channel_index(channel_name))
+    return {"marker": digest, "written_ns": written_ns}
+
+
+def _archive_mtime_ns(path: Path) -> int | None:
+    """Return a packed ``.ozx`` archive's own mtime, which stands in for its chunks; ``None`` for a directory store."""
+    return path.stat().st_mtime_ns if path.is_file() else None
+
+
+def prediction_sources(
+    plate_path: Path | str, channel_name: str, positions: Iterable[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Return the source identity of every position (or of *positions*) of one prediction channel.
+
+    A position's source is what a cached artifact built from it must still match:
+
+    ``marker``
+        sha256_12 of the channel's predict-writer marker
+        (:data:`~viscy_utils.prediction_metadata.PREDICTION_COMPLETE_KEY`) with its
+        provenance-only fields stripped
+        (:func:`~viscy_utils.prediction_metadata.marker_identity`), or ``None`` when the
+        position was written before markers existed. It changes when a re-predict
+        uses another checkpoint or settings.
+    ``written_ns``
+        ``st_mtime_ns`` of the channel's first stored chunk, earliest timepoint first,
+        or ``None`` when no chunk of the channel is stored (an unwritten or entirely
+        blank output). It changes on every re-predict of the channel, including one
+        that leaves the marker alone: a code-only fix, an input outside the settings
+        hash, or a writer from before the markers.
+
+    Metadata-file mtimes are deliberately not part of it: another channel's markers,
+    or a focus estimate written into the store, rewrite the position's attributes
+    without touching this channel's voxels. A packed ``.ozx`` archive stores no
+    per-chunk files, so its own mtime stands in for ``written_ns``.
+
+    Costs one attribute read, one array-metadata read and a ``stat`` per position (one
+    per timepoint while the channel's earlier chunks are blank); the store is opened
+    read-only, and the eval never writes to it.
+
+    Parameters
+    ----------
+    plate_path : Path or str
+        HCS prediction store; a missing store raises ``FileNotFoundError``.
+    channel_name : str
+        Prediction channel the eval scores.
+    positions : iterable of str, optional
+        Read only these positions, e.g. one a running predict finished after the
+        store-wide snapshot; each must exist (``KeyError`` otherwise). ``None`` reads
+        every position.
+
+    Returns
+    -------
+    dict
+        ``{position_name: {"marker": str | None, "written_ns": int | None}}``.
+    """
+    path = Path(plate_path)
+    archive_ns = _archive_mtime_ns(path)
+    with open_ome_zarr(path, mode="r") as plate:
+        items = plate.positions() if positions is None else ((name, plate[name]) for name in positions)
+        return {name: _position_source(path, position, channel_name, archive_ns) for name, position in items}
+
+
+def source_predates(source: dict[str, Any], horizon_ns: int) -> bool:
+    """Return whether a :func:`prediction_sources` entry was written no later than *horizon_ns*.
+
+    Dates caches recorded before sources existed, which carry only a time: a manifest
+    entry's ``built_at``, or a metrics sidecar's mtime. A position whose first stored
+    chunk (``written_ns``) is no newer than that time is verified; one with no stored
+    chunk cannot be dated and never is.
+
+    Parameters
+    ----------
+    source : dict
+        One position's ``{"marker", "written_ns"}``.
+    horizon_ns : int
+        The legacy record's time, in ns since the epoch.
+
+    Returns
+    -------
+    bool
+        ``written_ns is not None and written_ns <= horizon_ns``.
+    """
+    return source["written_ns"] is not None and source["written_ns"] <= horizon_ns
+
+
+def prediction_sources_sha256_12(sources: dict[str, dict[str, Any]]) -> str:
+    """Return the sha256_12 over the name-sorted ``(position, source)`` pairs of :func:`prediction_sources`.
+
+    Parameters
+    ----------
+    sources : dict
+        Output of :func:`prediction_sources`.
+
+    Returns
+    -------
+    str
+        First 12 hex characters of the digest.
+    """
+    return json_sha256_12(sorted(sources.items()))
+
+
+def _read_position_channel0(plate_path: Path, pos_name: str, dtype: npt.DTypeLike) -> np.ndarray | None:
+    """Read channel 0 of one position as ``(T, D, H, W)`` cast to *dtype*.
+
+    Returns ``None`` when the plate file or the position is absent (a cache miss).
+    """
+    if not plate_path.exists():
+        return None
+    with open_ome_zarr(plate_path, mode="r") as plate:
+        try:
+            position = plate[pos_name]
+        except KeyError:
+            return None
+        # copy=False: the read already materialized a fresh array and the on-disk
+        # dtype normally matches, so the cast is a no-op the caller shouldn't pay
+        # a second full-array copy for.
+        return np.asarray(position.data[:, 0]).astype(dtype, copy=False)
+
+
 def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str = "supermodel") -> np.ndarray | None:
     """Read cached organelle masks for a single position.
 
@@ -270,16 +532,7 @@ def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str =
         Bool array of shape ``(T, D, H, W)``, or ``None`` if the plate or
         position is absent.
     """
-    plate_path = paths.mask_plate(target_name, backend)
-    if not plate_path.exists():
-        return None
-    with open_ome_zarr(plate_path, mode="r") as plate:
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            return None
-        data = np.asarray(position.data[:, 0]).astype(bool)
-    return data
+    return _read_position_channel0(paths.mask_plate(target_name, backend), pos_name, bool)
 
 
 def _is_position_malformed(plate_path: Path, pos_name: str) -> bool:
@@ -309,35 +562,21 @@ def _rewrite_inner_array(pos_dir: Path, data: np.ndarray) -> None:
     pos_group.create_array("0", data=data)
 
 
-def write_mask(
-    paths: CachePaths,
-    target_name: str,
-    pos_name: str,
-    masks: np.ndarray,
-    *,
-    channel_name: str = _MASK_CHANNEL,
-    backend: str = "supermodel",
+def _write_position_channel0(
+    plate_path: Path, pos_name: str, arr: np.ndarray, dtype: npt.DTypeLike, channel_name: str
 ) -> None:
-    """Append masks for a single position to the ``{target_name}.zarr`` plate.
+    """Write ``arr`` ``(T, D, H, W)`` as channel 0 of one position, creating the plate if needed.
 
-    Parameters
-    ----------
-    paths
-        Cache paths.
-    target_name
-        Organelle name (used as the mask plate's filename stem).
-    pos_name
-        HCS position name in ``row/col/fov`` form.
-    masks
-        Bool array of shape ``(T, D, H, W)`` — one channel per timepoint.
-    channel_name
-        OME-Zarr channel label to write for this mask plate.
+    Casts to *dtype* only after the rank check, so the common mistake here — passing
+    a 5-D ``(T, C, D, H, W)`` array — raises without first copying it.
+
+    Repairs the partial-write signature in place (see :func:`_is_position_malformed`)
+    rather than through the plate API, which cannot recover from that state.
     """
-    if masks.ndim != 4:
-        raise ValueError(f"masks must be 4-D (T, D, H, W); got shape {masks.shape}")
-    plate_path = paths.mask_plate(target_name, backend)
+    if arr.ndim != 4:
+        raise ValueError(f"array must be 4-D (T, D, H, W); got shape {arr.shape}")
     plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = masks.astype(bool)[:, None]  # (T, 1, D, H, W)
+    data = arr.astype(dtype, copy=False)[:, None]  # (T, 1, D, H, W); write-only, so a view is fine
     if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
         _rewrite_inner_array(plate_path / pos_name, data)
         return
@@ -361,6 +600,35 @@ def write_mask(
         position.create_image("0", data)
 
 
+def write_mask(
+    paths: CachePaths,
+    target_name: str,
+    pos_name: str,
+    masks: np.ndarray,
+    *,
+    channel_name: str = _MASK_CHANNEL,
+    backend: str = "supermodel",
+) -> None:
+    """Append masks for a single position to the ``{target_name}.zarr`` plate.
+
+    Parameters
+    ----------
+    paths
+        Cache paths.
+    target_name
+        Organelle name (used as the mask plate's filename stem).
+    pos_name
+        HCS position name in ``row/col/fov`` form.
+    masks
+        Bool array of shape ``(T, D, H, W)`` — one channel per timepoint.
+    channel_name
+        OME-Zarr channel label to write for this mask plate.
+    backend
+        Segmentation backend (selects the plate filename infix).
+    """
+    _write_position_channel0(paths.mask_plate(target_name, backend), pos_name, masks, bool, channel_name)
+
+
 _INSTANCE_MASK_CHANNEL = "instance_seg"
 
 
@@ -373,16 +641,7 @@ def read_instance_mask(paths: CachePaths, target_name: str, pos_name: str, backe
         uint16 array of shape ``(T, D, H, W)`` (2-D runs are stored with
         ``D=1``), or ``None`` if the plate or position is absent.
     """
-    plate_path = paths.instance_mask_plate(target_name, backend)
-    if not plate_path.exists():
-        return None
-    with open_ome_zarr(plate_path, mode="r") as plate:
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            return None
-        data = np.asarray(position.data[:, 0]).astype(np.uint16)
-    return data
+    return _read_position_channel0(paths.instance_mask_plate(target_name, backend), pos_name, np.uint16)
 
 
 def write_instance_mask(
@@ -413,32 +672,7 @@ def write_instance_mask(
     backend
         Segmentation backend (selects the plate filename infix).
     """
-    if labels.ndim != 4:
-        raise ValueError(f"labels must be 4-D (T, D, H, W); got shape {labels.shape}")
-    plate_path = paths.instance_mask_plate(target_name, backend)
-    plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = labels.astype(np.uint16)[:, None]  # (T, 1, D, H, W)
-    if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
-        _rewrite_inner_array(plate_path / pos_name, data)
-        return
-    mode = "r+" if plate_path.exists() else "w"
-    with open_ome_zarr(
-        plate_path,
-        mode=mode,
-        layout="hcs",
-        channel_names=[channel_name],
-        version="0.5",
-    ) as plate:
-        row, col, fov = pos_name.split("/")
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            position = plate.create_position(row, col, fov)
-        try:
-            del position["0"]
-        except KeyError:
-            pass
-        position.create_image("0", data)
+    _write_position_channel0(paths.instance_mask_plate(target_name, backend), pos_name, labels, np.uint16, channel_name)
 
 
 def _features_group_path(
@@ -464,25 +698,60 @@ def _features_group_path(
         if weights_sha12 is None:
             raise ValueError("weights_sha12 is required for kind='celldino'")
         return paths.celldino_features(weights_sha12)
+    if kind == "morphem":
+        if model_name is None:
+            raise ValueError("model_name is required for kind='morphem'")
+        return paths.morphem_features(model_name)
     raise ValueError(f"Unknown feature kind: {kind!r}")
 
 
+# Group-level attribute recording the artifact's per-cell feature dimension.
+# Lets reads detect and drop stale entries left by a recipe change or an
+# interrupted partial rebuild (a feature group holding arrays of mixed column
+# counts) so the caller recomputes them at the current recipe instead of
+# crashing later on an opaque pred-vs-GT dimension mismatch.
+_FEATURE_DIM_ATTR = "feature_dim"
+
+
 def read_features_from_group(group, pos_name: str, t: int) -> np.ndarray | None:
-    """Read one ``(n_cells, feature_dim)`` array from an already-open feature group."""
+    """Read one ``(n_cells, feature_dim)`` array from an already-open feature group.
+
+    Returns ``None`` (treated as a cache miss → recompute) when the stored
+    array's feature dimension disagrees with the group's recorded
+    :data:`_FEATURE_DIM_ATTR` — i.e. a stale entry from a different recipe or a
+    partially-rebuilt cache. The zero-cell ``(0, 0)`` sentinel is exempt (it
+    carries no column count). Groups written before this attribute existed have
+    no recorded dim, so no entry is dropped (bootstrap-safe).
+    """
     key = f"{pos_name}/t{t}"
     if key not in group:
         return None
-    return np.asarray(group[key])
+    arr = np.asarray(group[key])
+    expected = group.attrs.get(_FEATURE_DIM_ATTR)
+    if expected is not None and arr.ndim == 2 and arr.shape[1] > 0 and arr.shape[1] != int(expected):
+        return None
+    return arr
 
 
 def write_features_to_group(group, pos_name: str, t: int, features: np.ndarray) -> None:
-    """Write one ``(n_cells, feature_dim)`` array to an already-open feature group."""
+    """Write one ``(n_cells, feature_dim)`` array to an already-open feature group.
+
+    Records the artifact's feature dimension in :data:`_FEATURE_DIM_ATTR` from
+    the first non-empty write (and updates it if a later write carries a
+    different dim — the current recipe is authoritative, and stale entries from
+    the old dim then fail the read-side check and get recomputed). The
+    zero-cell ``(0, 0)`` sentinel never sets the attribute.
+    """
     if features.ndim != 2:
         raise ValueError(f"features must be 2-D (n_cells, feature_dim); got shape {features.shape}")
     key = f"{pos_name}/t{t}"
     if key in group:
         del group[key]
     group.create_array(key, data=np.asarray(features))
+    if features.shape[0] > 0 and features.shape[1] > 0:
+        dim = int(features.shape[1])
+        if group.attrs.get(_FEATURE_DIM_ATTR) != dim:
+            group.attrs[_FEATURE_DIM_ATTR] = dim
 
 
 @contextmanager
@@ -557,45 +826,12 @@ def write_features(
         write_features_to_group(group, pos_name, t, features)
 
 
-def ckpt_sha256_12(path: Path | str) -> str:
-    """Return the first 12 hex chars of the sha256 of the file at *path*.
-
-    On repeated calls for the same checkpoint, reads the digest from a
-    ``<path>.sha256`` sidecar file when present and newer than the
-    checkpoint, avoiding a multi-GB re-read. Writes the sidecar after a
-    fresh hash; silently tolerates read-only parent directories and NFS
-    flakes by falling back to recompute.
-    """
-    ckpt = Path(path)
-    sidecar = ckpt.with_suffix(ckpt.suffix + ".sha256")
-    try:
-        if sidecar.stat().st_mtime >= ckpt.stat().st_mtime:
-            digest = sidecar.read_text().strip()
-            if len(digest) >= 12 and all(c in "0123456789abcdef" for c in digest[:12]):
-                return digest[:12]
-    except OSError:
-        pass
-    hasher = hashlib.sha256()
-    with open(ckpt, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            hasher.update(chunk)
-    digest = hasher.hexdigest()
-    try:
-        tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
-        tmp.write_text(digest + "\n")
-        tmp.replace(sidecar)
-    except OSError:
-        pass
-    return digest[:12]
-
-
 def encoder_config_sha256_12(encoder_cfg: dict[str, Any]) -> str:
     """Return the first 12 hex chars of the sha256 of a JSON-serialized config.
 
     Keys are sorted so representation-equivalent configs produce the same hash.
     """
-    payload = json.dumps(encoder_cfg, sort_keys=True, default=str).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()[:12]
+    return json_sha256_12(encoder_cfg)
 
 
 def feature_slug(name: str) -> str:
