@@ -87,8 +87,10 @@ On Windows, the files can be downloaded manually from the URLs.
 
 # %%
 # Install the modular packages required for this example
-# See the repositories/package indexes for the latest compatibility details
-# !pip install cytoland viscy_data viscy_transforms viscy_utils torchview cmap iohub
+# `cytoland`, `viscy-utils` and `viscy-data` are installed from the GitHub
+# monorepo: the prediction writer needs a viscy-data newer than its PyPI
+# release. viscy-models and viscy-transforms resolve from PyPI.
+# !pip install "viscy-utils @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=packages/viscy-utils" "viscy-data @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=packages/viscy-data" "cytoland @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=applications/cytoland" torchview cmap iohub
 
 # %%
 # restart kernel if running in Google Colab

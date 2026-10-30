@@ -10,6 +10,44 @@ from anndata.io import write_elem
 from pandas.arrays import ArrowStringArray
 
 
+def _object_strings(df: pd.DataFrame) -> pd.DataFrame:
+    """Copy of ``df`` with Arrow-backed strings (columns, categories, index) as object.
+
+    TODO: remove once anndata 0.13 supports pandas 3 Arrow-backed strings natively.
+    anndata 0.12.9+ requires pandas <3, so we stay on 0.12.6 + pandas 3, whose zarr
+    writer has no method for ``ArrowStringArray``.
+    """
+    df = df.copy()
+    for col in df.columns:
+        arr = df[col].array
+        if isinstance(arr, ArrowStringArray):
+            df[col] = df[col].astype(object)
+        elif isinstance(arr, pd.Categorical) and isinstance(arr.categories._values, ArrowStringArray):
+            df[col] = df[col].cat.rename_categories(arr.categories.astype(object))
+    if isinstance(df.index._values, ArrowStringArray):
+        df.index = df.index.astype(object)
+    return df
+
+
+def write_anndata_zarr(adata: ad.AnnData, zarr_path: str | Path) -> None:
+    """Write ``adata`` to a zarr store under pandas' default string inference.
+
+    Replaces ``adata.obs`` and ``adata.var`` with copies whose Arrow-backed strings
+    are object arrays (see :func:`_object_strings`), then writes. Use this instead of
+    ``adata.write_zarr`` or setting ``pd.options.future.infer_string`` globally.
+
+    Parameters
+    ----------
+    adata : ad.AnnData
+        AnnData to write; its obs and var frames are replaced in place.
+    zarr_path : str | Path
+        Output zarr store.
+    """
+    adata.obs = _object_strings(adata.obs)
+    adata.var = _object_strings(adata.var)
+    adata.write_zarr(zarr_path)
+
+
 def append_to_anndata_zarr(
     zarr_path: str | Path,
     *,
@@ -39,18 +77,7 @@ def append_to_anndata_zarr(
     ad.settings.allow_write_nullable_strings = True
 
     if obs is not None:
-        # TODO: remove once anndata 0.13 supports pandas 3 Arrow-backed strings natively.
-        # anndata 0.12.9+ requires pandas <3, so we stay on 0.12.6 + pandas 3 and
-        # must manually downcast ArrowStringArray columns to object dtype before writing.
-        obs = obs.copy()
-        for col in obs.columns:
-            arr = obs[col].array
-            if isinstance(arr, ArrowStringArray):
-                obs[col] = obs[col].astype(object)
-            elif isinstance(arr, pd.Categorical) and isinstance(arr.categories._values, ArrowStringArray):
-                obs[col] = obs[col].cat.rename_categories(arr.categories.astype(object))
-        if isinstance(obs.index._values, ArrowStringArray):
-            obs.index = obs.index.astype(object)
+        obs = _object_strings(obs)
         if "obs" in store:
             del store["obs"]
         write_elem(store, "obs", obs)

@@ -9,6 +9,7 @@ import pytest
 
 from dynaclr.evaluation.evaluate_config import AnnotationSource, LinearClassifiersStepConfig, TaskSpec
 from dynaclr.evaluation.linear_classifiers.orchestrated import run_linear_classifiers
+from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
 
 
 def _make_embeddings_zarr(
@@ -58,7 +59,7 @@ def _make_embeddings_zarr(
     df.index = pd.Index([str(i) for i in range(total)], dtype=object)
     var = pd.DataFrame(index=pd.Index([str(i) for i in range(n_features)], dtype=object))
     adata = ad.AnnData(X=X, obs=df, var=var)
-    adata.write_zarr(path)
+    write_anndata_zarr(adata, path)
     return adata
 
 
@@ -76,12 +77,12 @@ def _make_annotations(
 ) -> Path:
     """Create a synthetic annotation CSV with infection_state and organelle_state labels.
 
-    fov_name is stored as the first path component only (e.g. "A/1/FOV0" → "A"),
-    matching what load_annotation_anndata extracts from obs via .str.split("/").str[0].
+    fov_name is stored in full (e.g. "A/1/FOV0"), matching the join key
+    load_annotation_anndata actually builds: it normalizes both sides with
+    .str.strip("/") and joins on the whole path, never a split component.
     """
     labels = ["uninfected" if i % 3 != 0 else "infected" for i in range(len(fov_names))]
-    # Extract first path component to match the join key in load_annotation_anndata
-    fov_first = [str(f).split("/")[0] for f in fov_names]
+    fov_first = [str(f) for f in fov_names]
     data: dict = {
         "fov_name": fov_first,
         "t": ts,
@@ -248,7 +249,7 @@ def test_run_linear_classifiers_missing_metadata_raises(tmp_path):
     obs.index = pd.Index([str(i) for i in range(50)], dtype=object)
     var = pd.DataFrame(index=pd.Index([str(i) for i in range(8)], dtype=object))
     zarr_path = tmp_path / "embeddings.zarr"
-    ad.AnnData(X=X, obs=obs, var=var).write_zarr(zarr_path)
+    write_anndata_zarr(ad.AnnData(X=X, obs=obs, var=var), zarr_path)
 
     config = LinearClassifiersStepConfig(
         annotations=[AnnotationSource(experiment="exp_A", path=str(tmp_path / "ann.csv"))],

@@ -57,6 +57,8 @@ def convert(
     try:
         import anndata as ad
         from natsort import natsorted
+
+        from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
     except ImportError as e:
         raise ImportError(
             "anndata and natsort are required for embedding conversion. "
@@ -101,7 +103,7 @@ def convert(
 
     adata = ad.AnnData(X=X, obs=tracking_df, obsm=obsm)
 
-    adata.write_zarr(output_path)
+    write_anndata_zarr(adata, output_path)
     if return_anndata:
         return adata
 

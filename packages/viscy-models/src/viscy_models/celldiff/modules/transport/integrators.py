@@ -6,7 +6,9 @@ fixed-step SDE solvers (Euler-Maruyama, Heun).
 
 from collections.abc import Callable
 
+import numpy as np
 import torch
+from scipy.special import betaincinv
 from torch import Tensor
 from torchdiffeq import odeint
 
@@ -143,12 +145,20 @@ class ODESolver:
     sampler_type : str
         ODE solver method (e.g. ``"dopri5"``, ``"euler"``).
     num_steps : int
-        Number of time points (for fixed-step methods, this is the step count;
-        for adaptive methods, this controls the output grid).
+        Number of time points (for fixed-step methods, the solver takes
+        ``num_steps - 1`` steps on them; for adaptive methods, this controls
+        the output grid).
     atol : float
         Absolute error tolerance.
     rtol : float
         Relative error tolerance.
+    time_schedule : str or tuple of float
+        ``"uniform"`` (linearly spaced time points), ``"cosine"``
+        (``t0 + (t1 - t0) * (1 - cos(pi * s)) / 2`` over uniform ``s``, which
+        clusters the points at both ends of the interval), or ``(p, q)``: the
+        Beta(p, q) quantiles of uniform ``s``. Cosine is Beta(0.5, 0.5) and
+        uniform is Beta(1, 1); ``p`` or ``q`` below 1 packs the points toward
+        ``t0`` or ``t1``.
     """
 
     def __init__(
@@ -161,11 +171,32 @@ class ODESolver:
         num_steps: int,
         atol: float,
         rtol: float,
+        time_schedule: str | tuple[float, float] = "uniform",
     ) -> None:
         if t0 >= t1:
             raise ValueError("ODE solver requires t0 < t1")
         self.drift = drift
-        self.t = torch.linspace(t0, t1, num_steps)
+        if time_schedule == "uniform":
+            self.t = torch.linspace(t0, t1, num_steps)
+        elif time_schedule == "cosine":
+            s = torch.linspace(0.0, 1.0, num_steps, dtype=torch.float64)
+            self.t = (t0 + (t1 - t0) * (1 - torch.cos(torch.pi * s)) / 2).float()
+        elif (
+            isinstance(time_schedule, tuple | list)
+            and len(time_schedule) == 2
+            and all(0 < v < np.inf for v in time_schedule)
+        ):
+            p, q = time_schedule
+            self.t = torch.from_numpy(t0 + (t1 - t0) * betaincinv(p, q, np.linspace(0.0, 1.0, num_steps))).float()
+        else:
+            raise ValueError(
+                f"time_schedule must be 'uniform', 'cosine' or finite positive (p, q), got {time_schedule!r}"
+            )
+        if not bool((self.t.diff() > 0).all()):
+            raise ValueError(
+                f"time_schedule {time_schedule!r} puts {num_steps} time points on [{t0}, {t1}] that are not"
+                " strictly increasing in float32; use fewer points or a less extreme shape"
+            )
         self.atol = atol
         self.rtol = rtol
         self.sampler_type = sampler_type

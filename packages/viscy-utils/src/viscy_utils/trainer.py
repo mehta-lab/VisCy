@@ -26,7 +26,6 @@ class VisCyTrainer(Trainer):
         num_workers: int = 1,
         block_size: int = 32,
         compute_otsu: bool = False,
-        otsu_grid_spacing: int = 8,
         compute_fg_masks: bool = False,
         fg_mask_channels: list[str] | None = None,
         fg_mask_key: str = "fg_mask",
@@ -47,11 +46,10 @@ class VisCyTrainer(Trainer):
         compute_otsu : bool, optional
             Whether to compute Otsu thresholds for Spotlight loss,
             by default False.
-        otsu_grid_spacing : int, optional
-            Grid spacing for Otsu sampling (denser than default), by default 8.
         compute_fg_masks : bool, optional
-            Whether to precompute binary foreground masks from Otsu
-            thresholds, by default False. Requires ``compute_otsu=True``.
+            Whether to precompute binary foreground masks (see
+            :func:`~viscy_utils.meta_utils.generate_fg_masks`), by default
+            False. Requires ``compute_otsu=True``.
         fg_mask_channels : list[str] or None, optional
             Channel names to compute FG masks for. Defaults to all channels
             that had Otsu thresholds computed (``channel_names``).
@@ -75,7 +73,6 @@ class VisCyTrainer(Trainer):
             channel_ids=channel_indices,
             grid_spacing=block_size,
             compute_otsu=compute_otsu,
-            otsu_grid_spacing=otsu_grid_spacing,
         )
         if compute_fg_masks:
             if not compute_otsu:

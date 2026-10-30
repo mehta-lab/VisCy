@@ -43,6 +43,7 @@ dependencies = [
   "tensorboard",
   "tensorstore",
   "torch>=2.10",
+  "torchvision",
   "viscy-data",
   "wandb>=0.12.10",
   "xarray",
@@ -50,8 +51,8 @@ dependencies = [
 
 optional-dependencies.all = [ "viscy-utils[anndata,eval]" ]
 # Cap anndata to <0.12.9 — 0.12.9 hard-requires pandas<3, but the rest of
-# the stack runs on pandas 3 (see ArrowStringArray downcast workaround in
-# callbacks/embedding_writer.py). Lift this cap once anndata 0.13 lands
+# the stack runs on pandas 3 (see the ArrowStringArray downcast in
+# evaluation/zarr_utils.py). Lift this cap once anndata 0.13 lands
 # with native pandas-3 support.
 optional-dependencies.anndata = [ "anndata<0.12.9", "natsort" ]
 optional-dependencies.eval = [
