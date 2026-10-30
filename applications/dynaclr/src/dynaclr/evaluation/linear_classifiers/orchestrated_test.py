@@ -9,6 +9,7 @@ import pytest
 
 from dynaclr.evaluation.evaluate_config import AnnotationSource, LinearClassifiersStepConfig, TaskSpec
 from dynaclr.evaluation.linear_classifiers.orchestrated import run_linear_classifiers
+from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
 
 
 def _make_embeddings_zarr(
@@ -58,7 +59,7 @@ def _make_embeddings_zarr(
     df.index = pd.Index([str(i) for i in range(total)], dtype=object)
     var = pd.DataFrame(index=pd.Index([str(i) for i in range(n_features)], dtype=object))
     adata = ad.AnnData(X=X, obs=df, var=var)
-    adata.write_zarr(path)
+    write_anndata_zarr(adata, path)
     return adata
 
 
@@ -248,7 +249,7 @@ def test_run_linear_classifiers_missing_metadata_raises(tmp_path):
     obs.index = pd.Index([str(i) for i in range(50)], dtype=object)
     var = pd.DataFrame(index=pd.Index([str(i) for i in range(8)], dtype=object))
     zarr_path = tmp_path / "embeddings.zarr"
-    ad.AnnData(X=X, obs=obs, var=var).write_zarr(zarr_path)
+    write_anndata_zarr(ad.AnnData(X=X, obs=obs, var=var), zarr_path)
 
     config = LinearClassifiersStepConfig(
         annotations=[AnnotationSource(experiment="exp_A", path=str(tmp_path / "ann.csv"))],
