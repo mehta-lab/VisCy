@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import anndata as ad
+import numpy as np
 import pandas as pd
+from iohub import open_ome_zarr
+from pytest import TempPathFactory, fixture
 
-# anndata 0.12.x zarr writer does not support pandas ArrowStringArray (default in pandas 2.x with PyArrow installed)
-pd.options.future.infer_string = False
-
-from pathlib import Path  # noqa: E402
-
-import anndata as ad  # noqa: E402
-import numpy as np  # noqa: E402
-from iohub import open_ome_zarr  # noqa: E402
-from pytest import TempPathFactory, fixture  # noqa: E402
+from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
 
 channel_names = ["Phase", "GFP"]
 
@@ -53,7 +51,7 @@ def annotated_adata() -> ad.AnnData:
 def annotated_adata_zarr(annotated_adata, tmp_path) -> dict:
     """Write annotated_adata to zarr + CSV and return dataset dict."""
     zarr_path = tmp_path / "emb.zarr"
-    annotated_adata.write_zarr(zarr_path)
+    write_anndata_zarr(annotated_adata, zarr_path)
 
     csv_path = tmp_path / "ann.csv"
     annotated_adata.obs[["fov_name", "id", "cell_death_state"]].to_csv(csv_path, index=False)
