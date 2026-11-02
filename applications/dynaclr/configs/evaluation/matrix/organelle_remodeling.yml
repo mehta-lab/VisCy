@@ -1,6 +1,10 @@
 # Direct, progressive evaluation plan for the organelle-remodeling model matrix.
 #
-# Preview missing model x evaluation units:
+# Evaluation Step 0 prepares/reuses X_control_mad and then fits the pooled,
+# marker-specific X_normalized_pca80 before any metric job starts. Raw model X
+# remains the prediction product; these two arrays belong to analysis.
+#
+# Preview missing model x evaluation units (including Step 0 when stale):
 #   uv run --package dynaclr dynaclr run-matrix-eval -c applications/dynaclr/configs/evaluation/matrix/organelle_remodeling.yml --dry-run
 # Submit only missing/stale units (default):
 #   uv run --package dynaclr dynaclr run-matrix-eval -c applications/dynaclr/configs/evaluation/matrix/organelle_remodeling.yml
@@ -12,6 +16,15 @@
 matrix: applications/dynaclr/configs/matrix/organelle_remodeling.yml
 output_root: /hpc/projects/intracellular_dashboard/organelle_dynamics/matrix_evaluations/organelle_remodeling
 embedding_key: X_normalized_pca80
+
+prepare_representation:
+  enabled: true
+  recipe: applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml
+  resources:
+    partition: cpu
+    cpus: 8
+    memory: 128G
+    time: 1-00:00:00
 
 resources:
   partition: cpu

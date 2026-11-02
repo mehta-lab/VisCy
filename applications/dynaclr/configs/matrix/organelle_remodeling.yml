@@ -1,7 +1,7 @@
 # Organelle-remodeling model matrix — persistent, iterated on over time.
 #
-# ONE merged collection (organelle_remodeling.yml = 17 physical datasets spanning
-# SEC61B/TOMM20/G3BP1/MAP4/CAAX/H2B under ZIKV/DENV) run through MULTIPLE models. One
+# ONE merged collection (organelle_remodeling.yml = 22 physical datasets spanning
+# SEC61B/TOMM20/G3BP1/MAP4/CAAX/H2B/PCNA under ZIKV/DENV) run through MULTIPLE models. One
 # row per MODEL; run-matrix fans out predict per experiment inside the collection
 # and skips already-embedded ones.
 #
@@ -28,7 +28,7 @@ defaults:
   # pAL40 DENV); include both to embed the sensor across all datasets, or drop them
   # to embed only the organelle question.
   # (CAAX/H2B are the 2026_03_26 dual-virus markers; a marker only runs where present.)
-  markers: [SEC61B, TOMM20, G3BP1, MAP4, Phase3D, pAL17, pAL40, CAAX, H2B]
+  markers: [SEC61B, TOMM20, G3BP1, MAP4, PCNA, Phase3D, pAL17, pAL40, CAAX, H2B]
   # Focus-centered Z: window WIDTH (slices) centered per-FOV on the focus plane
   # (from focus_slice zattrs). z_reduction mip → fluorescence max-projected,
   # label-free (Phase3D) center slice. z_focus_offset = fraction below focus.
@@ -67,8 +67,37 @@ models:
 
   # --- DINOv3 (frozen ConvNeXt-Tiny foundation baseline) ---
   - model_type: foundation
-    family: DINOv3-frozen
+    family: DINOv3-ConvNeXt-Tiny-frozen
     run: frozen
     ckpt_name: frozen
-    training_config: applications/dynaclr/configs/evaluation/DINOv3-frozen/training_config_dinov3_frozen.yaml
-    eval_config: applications/dynaclr/configs/evaluation/DINOv3-frozen/infectomics-annotated.yaml
+    training_config: applications/dynaclr/configs/evaluation/DINOv3-ConvNeXt-Tiny-frozen/training_config_dinov3_convnext_tiny_frozen.yaml
+    eval_config: applications/dynaclr/configs/evaluation/DINOv3-ConvNeXt-Tiny-frozen/infectomics-annotated.yaml
+
+  # --- DINOv3 (frozen ViT-B/16 transformer foundation baseline) ---
+  - model_type: foundation
+    family: DINOv3-ViT-B-frozen
+    run: frozen
+    ckpt_name: frozen
+    # The full p160 backlog can exceed predict.sbatch's 8-hour default.
+    predict_time: "3-00:00:00"
+    training_config: applications/dynaclr/configs/evaluation/DINOv3-ViT-B-frozen/training_config_dinov3_vit_b_frozen.yaml
+    eval_config: applications/dynaclr/configs/evaluation/DINOv3-ViT-B-frozen/infectomics-annotated.yaml
+
+  # --- Katamari G10 ViT-L iBOT (frozen, one marker per embedding store) ---
+  # Input pixels use the checkpoint-native FOV p1/p99_p1 normalization and
+  # residual [-1, 2] clamp. The shared matrix normalize stage then fits the same
+  # control-MAD/PCA80 representation used for every other model.
+  - model_type: katamari
+    family: Katamari-G10-ViT-L-iBOT
+    run: student-avg-single-channel
+    ckpt_name: step227500-p160
+    checkpoint: /hpc/projects/organelle_phenotyping/models/katamari/checkpoints/g10_vitl_ibot_4hsfbq8k_step227500/epoch-0000-step-227500.ckpt
+    evolutionaryscale_root: /home/eduardo.hirata/repos/evolutionaryscale
+    pixi_executable: /home/eduardo.hirata/mydata/software/pixi/bin/pixi
+    predict_time: "3-00:00:00"
+    predict_flags:
+      batch_size: 16
+      katamari_model_input_size: [224, 224]
+      katamari_readout: avg
+      katamari_use_teacher: false
+    eval_config: applications/dynaclr/configs/evaluation/Katamari-G10-ViT-L-iBOT/infectomics-annotated.yaml

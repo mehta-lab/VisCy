@@ -1,14 +1,18 @@
 name: organelle_remodeling
 description: "Merged organelle-remodeling collection: SEC61B (ER), TOMM20 (mitochondria),
-  G3BP1 (stress granules), MAP4 (microtubules), CAAX (membrane), and H2B (nuclear) reporters under
+  G3BP1 (stress granules), MAP4 (microtubules), CAAX (membrane), H2B (nuclear), and PCNA reporters under
   ZIKV/DENV infection. One experiment per physical dataset, including five annotated
-  Mantis v1 datasets from 2025. All are prepared on VAST (normalization + focus_slice).
+  Mantis v1 datasets from 2025. Canonical entries are prepared on VAST
+  (normalization + focus_slice), except the September 22 and September 25 PCNA
+  backfills, which are read directly from their native assembled/tracking stores
+  and remain pending Airtable registration.
   mCherry viral sensor marker matches Airtable channel_2_marker: pAL17 for ZIKV,
   pAL40 for DENV. GFP reporter per Airtable.
   2026_04_21_A549_G3BP1_DENV re-concatenated to a flat store on VAST (odd 5-assemble
   layout resolved); focus_slice has a few z_focus=0 frames on 12/54 FOVs (mean 2.4 t each).
   Used by the organelle_remodeling model matrix (DynaCLR, MorphEm, CELL-DINO, and
-  DINOv3), which fans out predict per experiment and skips already-embedded datasets."
+  DINOv3 ConvNeXt-Tiny and ViT-B), which fans out predict per experiment and skips
+  already-embedded datasets."
 datasets_root: /hpc/projects/organelle_phenotyping/datasets
 
 provenance:
@@ -290,6 +294,131 @@ experiments:
     start_hpi: 3.0
     moi: 5.0
     organelle: endoplasmic_reticulum
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+    microscope: mantis_v2
+
+  # --- DENV + ZIKV on one plate, PCNA (nuclear/cell-cycle reporter) ---
+  # Airtable: B/2 control, B/3 DENV, B/4 ZIKV; no viral-sensor channel.
+  - name: 2026_08_19_A549_PCNA_DENV_ZIKV
+    data_path: ${datasets_root}/2026_08_19_A549_PCNA_DENV_ZIKV/2026_08_19_A549_PCNA_DENV_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_08_19_A549_PCNA_DENV_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: PCNA
+        wells: [B/2, B/3, B/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [B/2, B/3, B/4]
+    perturbation_wells:
+      uninfected: [B/2]
+      DENV: [B/3]
+      ZIKV: [B/4]
+    interval_minutes: 30.0
+    start_hpi: 5.0
+    moi: 5.0
+    organelle: nucleus_cell_cycle
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+    microscope: mantis_v2
+
+  # Standard 160x160 matrix only for now; intentionally absent from the p224
+  # comparison collection (organelle_remodeling_2026.yml).
+  - name: 2026_08_25_A549_PCNA_DENV_ZIKV
+    data_path: ${datasets_root}/2026_08_25_A549_PCNA_DENV_ZIKV/2026_08_25_A549_PCNA_DENV_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_08_25_A549_PCNA_DENV_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: PCNA
+        wells: [B/2, B/3, B/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [B/2, B/3, B/4]
+    perturbation_wells:
+      uninfected: [B/2]
+      DENV: [B/3]
+      ZIKV: [B/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: nucleus_cell_cycle
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+    microscope: mantis_v2
+
+  # Standard 160x160 matrix only for now; intentionally absent from the p224
+  # comparison collection (organelle_remodeling_2026.yml).
+  - name: 2026_08_27_A549_PCNA_DENV_ZIKV
+    data_path: ${datasets_root}/2026_08_27_A549_PCNA_DENV_ZIKV/2026_08_27_A549_PCNA_DENV_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_08_27_A549_PCNA_DENV_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: PCNA
+        wells: [C/2, C/3, C/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [C/2, C/3, C/4]
+    perturbation_wells:
+      uninfected: [C/2]
+      DENV: [C/3]
+      ZIKV: [C/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: nucleus_cell_cycle
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+    microscope: mantis_v2
+
+  # Standard 160x160 matrix only for now. The native image store and QC report
+  # contain 84 positions: assemble 78 pass / 6 fail and tracking
+  # 83 pass / 1 fail (C/2/0003, low instance count). Read directly from the
+  # native source stores; only PCNA and Phase3D are selected for inference.
+  - name: 2026_09_22_A549_PCNA_DENV_ZIKV
+    data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_09_22_A549_PCNA_DENV_ZIKV/4-assemble/2026_09_22_A549_PCNA_DENV_ZIKV_1.zarr
+    tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_09_22_A549_PCNA_DENV_ZIKV/5-track/2026_09_22_A549_PCNA_DENV_ZIKV_1.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: PCNA
+        wells: [C/2, C/3, C/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [C/2, C/3, C/4]
+    perturbation_wells:
+      uninfected: [C/2]
+      DENV: [C/3]
+      ZIKV: [C/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: nucleus_cell_cycle
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+    microscope: mantis_v2
+
+  # Mantis v2 PCNA dual-virus acquisition. Source QC: 94/99 assembled FOVs pass;
+  # C/2/0001 and C/4/0004 also fail tracking, while three additional C/2 FOVs
+  # fail image SNR only. Keep the complete plate here so downstream filtering
+  # can use the persisted QC metadata consistently. Read directly from the
+  # native source stores; only PCNA and Phase3D are selected for inference.
+  - name: 2026_09_25_A549_PCNA_DENV_ZIKV
+    data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_09_25_A549_PCNA_DENV_ZIKV/4-assemble/2026_09_25_A549_PCNA_DENV_ZIKV_1.zarr
+    tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_09_25_A549_PCNA_DENV_ZIKV/5-track/2026_09_25_A549_PCNA_DENV_ZIKV_1.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: PCNA
+        wells: [C/2, C/3, C/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [C/2, C/3, C/4]
+    perturbation_wells:
+      uninfected: [C/2]
+      DENV: [C/3]
+      ZIKV: [C/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: nucleus_cell_cycle
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
     microscope: mantis_v2

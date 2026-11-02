@@ -1,8 +1,9 @@
 # Canonical pooled biological-state recipe.
 #
 # This is the only maintained recipe for the validated stack. Edit both sections
-# so their input paths refer to the same per-marker stores. Run pooled_representation
-# first to write obsm["X_normalized_pca80"], then run witness_gmm_labels.
+# so their input paths refer to the same per-marker stores. Evaluation Step 0
+# first persists obsm["X_control_mad"] and then fits/writes pooled marker-specific
+# obsm["X_normalized_pca80"]. Downstream metrics consume the requested key.
 
 pooled_representation:
   input_paths:
