@@ -20,6 +20,8 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv-phenotyping/
+.phenotyping-batch/
 venv/
 ENV/
 

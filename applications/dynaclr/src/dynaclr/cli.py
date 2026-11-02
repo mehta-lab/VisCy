@@ -65,6 +65,32 @@ def dynaclr():
 
 dynaclr.add_command(
     LazyCommand(
+        name="filter-embedding-observations",
+        import_path="dynaclr.evaluation.phenotyping_eligibility.main",
+        short_help="Audit eligibility or export filtered raw embeddings",
+    )
+)
+
+
+dynaclr.add_command(
+    LazyCommand(
+        name="phenotype-cells",
+        import_path="dynaclr.phenotyping.pipeline.main",
+        short_help="Segment cells and measure organelle fluorescence",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="phenotyping-batch",
+        import_path="dynaclr.evaluation.orchestration.phenotyping.main",
+        short_help="Plan or submit shared dataset phenotyping jobs",
+    )
+)
+
+
+dynaclr.add_command(
+    LazyCommand(
         name="train-linear-classifier",
         import_path="dynaclr.evaluation.linear_classifiers.train_linear_classifier.main",
         short_help="Train a linear classifier on cell embeddings",
@@ -325,6 +351,14 @@ dynaclr.add_command(
         name="predict-batch",
         import_path="dynaclr.evaluation.orchestration.predict_batch.main",
         short_help="Batch predict embeddings for one model over a collection (+ AI-ready preflight)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="audit-ai-readiness",
+        import_path="dynaclr.evaluation.orchestration.readiness.main",
+        short_help="Report collection storage locations and live AI-readiness",
     )
 )
 
