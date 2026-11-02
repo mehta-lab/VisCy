@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from dynaclr.evaluation.mmd.export_representation import load_pooled_representation_config
 from dynaclr.evaluation.orchestration import matrix_eval
 from dynaclr.evaluation.representation import representation_as_x
 
@@ -59,6 +60,8 @@ def test_plan_defaults_to_normalized_representation():
         evaluations=[{"name": "smooth", "type": "smoothness"}],
     )
     assert plan.embedding_key == "X_normalized_pca80"
+    assert plan.prepare_representation.enabled
+    assert plan.prepare_representation.recipe.endswith("witness_gmm_pooled_joint_pca80.yaml")
 
 
 def test_success_manifest_skips_only_matching_fingerprint(tmp_path):
@@ -81,6 +84,22 @@ def test_submit_command_carries_representation_and_overwrite(tmp_path):
     assert command[-1] == "1"
 
 
+def test_prepare_command_is_evaluation_step_zero(tmp_path):
+    unit = _unit(tmp_path)
+    unit.model.update(
+        {
+            "collection": "full_collection.yml",
+            "markers": ["PCNA", "Phase3D"],
+        }
+    )
+    command = matrix_eval.build_prepare_cmd(unit)
+
+    assert command[0] == "sbatch"
+    assert str(matrix_eval._PREPARE_SBATCH) in command
+    assert "full_collection.yml" in command
+    assert "PCNA,Phase3D" in command
+
+
 def test_validate_unit_inputs_requires_selected_representation(tmp_path):
     path = tmp_path / "SEC61B.zarr"
     _write_embedding(path, normalized=False)
@@ -90,6 +109,27 @@ def test_validate_unit_inputs_requires_selected_representation(tmp_path):
 
     raw_unit = matrix_eval.EvaluationUnit(**{**unit.__dict__, "embedding_key": "X"})
     matrix_eval.validate_unit_inputs(raw_unit)
+
+
+def test_representation_step_zero_detects_current_fit(tmp_path):
+    path = tmp_path / "SEC61B.zarr"
+    _write_embedding(path)
+    unit = _unit(tmp_path, input_paths=(path,))
+    recipe = matrix_eval._preparation_recipe(unit)
+    config = load_pooled_representation_config(recipe)
+    adata = ad.read_zarr(path)
+    adata.obsm["X_control_mad"] = np.asarray(adata.X, dtype=np.float32)
+    adata.uns["X_control_mad"] = {"schema_version": 2}
+    adata.uns["X_normalized_pca80"] = {
+        "schema_version": 2,
+        "fit_input_paths": [str(path)],
+        "normalization": config.representation.model_dump(mode="json"),
+        "condition_aliases": config.condition_aliases,
+        "pca_fit_id": "fit-123",
+    }
+    adata.write_zarr(path)
+
+    assert matrix_eval.representation_is_current(unit)
 
 
 def test_run_unit_writes_success_and_then_skips(tmp_path, monkeypatch):

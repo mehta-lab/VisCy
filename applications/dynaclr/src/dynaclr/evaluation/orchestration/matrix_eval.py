@@ -1,9 +1,11 @@
-"""Run selected evaluations directly over every model in a matrix.
+"""Prepare analysis representations, then run evaluations over a model matrix.
 
 This is the development-friendly counterpart to :mod:`matrix`: it submits one
 plain SLURM job per model/checkpoint/evaluation and does not invoke Nextflow.
-Completion is recorded by a fingerprinted ``_SUCCESS.json`` manifest.  The
-default behavior skips current units; ``--overwrite`` reruns them.
+For normalized evaluations it first schedules one shared Step-0 job per model
+checkpoint (raw X -> X_control_mad -> X_normalized_pca80). Completion is
+recorded by a fingerprinted ``_SUCCESS.json`` manifest. The default behavior
+skips current preparation/evaluation units; ``--overwrite`` reruns them.
 """
 
 from __future__ import annotations
@@ -29,8 +31,11 @@ from viscy_utils.cli_utils import load_config
 from viscy_utils.compose import load_composed_config
 
 _TASK_SBATCH = Path("applications/dynaclr/tools/matrix_eval.sbatch")
+_PREPARE_SBATCH = Path("applications/dynaclr/tools/normalize.sbatch")
 _SUCCESS_FILE = "_SUCCESS.json"
 _RAW_EMBEDDING_KEY = "X"
+_DEFAULT_PREPARED_KEY = "X_normalized_pca80"
+_DEFAULT_RECIPE = "applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml"
 
 
 class SlurmResources(BaseModel):
@@ -47,7 +52,7 @@ class EvaluationSpec(BaseModel):
     """One named metric requested by a matrix-evaluation plan."""
 
     name: str
-    type: Literal["embedding_consistency", "smoothness", "linear_classifiers"]
+    type: Literal["embedding_consistency", "smoothness", "linear_classifiers", "temporal_forecast"]
     config: str | None = None
     embedding_key: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -56,9 +61,17 @@ class EvaluationSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_config(self) -> "EvaluationSpec":
-        if self.type == "embedding_consistency" and not self.config:
+        if self.type in {"embedding_consistency", "temporal_forecast"} and not self.config:
             raise ValueError(f"evaluation {self.name!r} requires config")
         return self
+
+
+class RepresentationPreparation(BaseModel):
+    """Evaluation Step 0: persist control-MAD, then fit pooled marker PCA."""
+
+    enabled: bool = True
+    recipe: str = _DEFAULT_RECIPE
+    resources: SlurmResources = Field(default_factory=lambda: SlurmResources(cpus=8, memory="128G", time="1-00:00:00"))
 
 
 class MatrixEvaluationPlan(BaseModel):
@@ -67,6 +80,7 @@ class MatrixEvaluationPlan(BaseModel):
     matrix: str
     output_root: str
     embedding_key: str = "X_normalized_pca80"
+    prepare_representation: RepresentationPreparation = Field(default_factory=RepresentationPreparation)
     resources: SlurmResources = Field(default_factory=SlurmResources)
     evaluations: list[EvaluationSpec]
 
@@ -192,6 +206,24 @@ def _resolved_evaluation_config(unit: EvaluationUnit) -> dict[str, Any] | None:
     return load_config(path)
 
 
+def _representation_fingerprints(unit: EvaluationUnit) -> list[str | None]:
+    """Return the saved Step-0 fit identity for each input store."""
+    if unit.embedding_key == _RAW_EMBEDDING_KEY:
+        return [None] * len(unit.input_paths)
+    import zarr
+    from anndata.io import read_elem
+
+    fingerprints: list[str | None] = []
+    for path in unit.input_paths:
+        try:
+            root = zarr.open_group(str(path), mode="r", use_consolidated=False)
+            metadata = read_elem(root[f"uns/{unit.embedding_key}"])
+            fingerprints.append(str(metadata.get("pca_fit_id") or metadata.get("pca_model_checksums")))
+        except (KeyError, OSError, TypeError):
+            fingerprints.append(None)
+    return fingerprints
+
+
 def unit_fingerprint(unit: EvaluationUnit) -> str:
     """Fingerprint the requested computation and exact expected store list."""
     payload = {
@@ -203,6 +235,7 @@ def unit_fingerprint(unit: EvaluationUnit) -> str:
         "resolved_config": _resolved_evaluation_config(unit),
         "embedding_key": unit.embedding_key,
         "input_paths": [str(path) for path in unit.input_paths],
+        "representation_fingerprints": _representation_fingerprints(unit),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -244,6 +277,125 @@ def validate_unit_inputs(unit: EvaluationUnit) -> None:
             f"{len(missing_key)} store(s):\n{preview}\n"
             "Run `dynaclr run-matrix --stages normalize` or select `--embedding-key X`."
         )
+
+
+def _validate_raw_inputs(unit: EvaluationUnit) -> None:
+    incomplete = [str(path) for path in unit.input_paths if not _zarr_complete(path)]
+    if incomplete:
+        preview = "\n".join(f"  - {path}" for path in incomplete[:20])
+        raise FileNotFoundError(
+            f"{unit.label}: {len(incomplete)} raw embedding store(s) missing/incomplete:\n{preview}"
+        )
+
+
+def _preparation_recipe(unit: EvaluationUnit) -> Path:
+    return _resolve_path(unit.plan.prepare_representation.recipe, unit.plan_path)
+
+
+def _plain_metadata(value: Any) -> Any:
+    """Convert AnnData/Zarr array scalars to ordinary JSON-comparable values."""
+    if isinstance(value, dict):
+        return {str(key): _plain_metadata(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_metadata(item) for item in value]
+    if hasattr(value, "tolist"):
+        return _plain_metadata(value.tolist())
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+def representation_is_current(unit: EvaluationUnit) -> bool:
+    """Whether Step 0 matches the exact current collection and recipe."""
+    if unit.embedding_key == _RAW_EMBEDDING_KEY:
+        return True
+    if unit.embedding_key != _DEFAULT_PREPARED_KEY:
+        return _has_representation(unit.input_paths[0], unit.embedding_key) if unit.input_paths else False
+    if not unit.plan.prepare_representation.enabled:
+        return all(_has_representation(path, unit.embedding_key) for path in unit.input_paths)
+
+    import zarr
+    from anndata.io import read_elem
+
+    from dynaclr.evaluation.mmd.export_representation import load_pooled_representation_config
+
+    expected_paths = [str(path) for path in unit.input_paths]
+    expected_config = load_pooled_representation_config(_preparation_recipe(unit))
+    expected_normalization = expected_config.representation.model_dump(mode="json")
+    expected_aliases = expected_config.condition_aliases
+    fit_ids: set[str] = set()
+    for path in unit.input_paths:
+        try:
+            root = zarr.open_group(str(path), mode="r", use_consolidated=False)
+            if "obsm/X_control_mad" not in root or "uns/X_control_mad" not in root:
+                return False
+            metadata = read_elem(root[f"uns/{unit.embedding_key}"])
+        except (KeyError, OSError, TypeError):
+            return False
+        if (
+            int(metadata.get("schema_version", 0)) < 2
+            or list(metadata.get("fit_input_paths", ())) != expected_paths
+            or _plain_metadata(metadata.get("normalization")) != _plain_metadata(expected_normalization)
+            or _plain_metadata(metadata.get("condition_aliases")) != _plain_metadata(expected_aliases)
+        ):
+            return False
+        fit_ids.add(str(metadata.get("pca_fit_id", "")))
+    return len(fit_ids) == 1 and bool(next(iter(fit_ids), ""))
+
+
+def build_prepare_cmd(unit: EvaluationUnit, *, overwrite: bool = False) -> list[str]:
+    """Build evaluation Step-0 submission for one model/checkpoint."""
+    resources = unit.plan.prepare_representation.resources
+    markers = ",".join(unit.model.get("markers") or ())
+    cmd = [
+        "sbatch",
+        f"--partition={resources.partition}",
+        f"--cpus-per-task={resources.cpus}",
+        f"--mem={resources.memory}",
+        f"--time={resources.time}",
+    ]
+    if resources.gpus:
+        cmd.append(f"--gpus={resources.gpus}")
+    cmd.extend(
+        [
+            str(_PREPARE_SBATCH),
+            str(unit.model["collection"]),
+            unit.model["family"],
+            unit.model["run"],
+            unit.checkpoint_name,
+            str(unit.model["datasets_root"]),
+            markers,
+            str(_preparation_recipe(unit)),
+        ]
+    )
+    return cmd
+
+
+def prepare_representation(unit: EvaluationUnit, *, overwrite: bool = False) -> bool:
+    """Run Step 0 locally, returning False when the pooled fit is current."""
+    if unit.embedding_key == _RAW_EMBEDDING_KEY:
+        return False
+    if unit.embedding_key != _DEFAULT_PREPARED_KEY:
+        raise ValueError(f"automatic Step 0 only prepares {_DEFAULT_PREPARED_KEY!r}, got {unit.embedding_key!r}")
+    if not unit.plan.prepare_representation.enabled:
+        validate_unit_inputs(unit)
+        return False
+    if not overwrite and representation_is_current(unit):
+        return False
+
+    from dynaclr.evaluation.mmd.checkpoint_representation import export_checkpoint_representation
+
+    export_checkpoint_representation(
+        Path(unit.model["collection"]),
+        model_family=unit.model["family"],
+        run=unit.model["run"],
+        ckpt_name=unit.checkpoint_name,
+        datasets_root=Path(unit.model["datasets_root"]),
+        markers=unit.model.get("markers"),
+        recipe=_preparation_recipe(unit),
+        overwrite=True,
+    )
+    return True
 
 
 def _api_embedding_key(value: str) -> str | None:
@@ -323,10 +475,29 @@ def _run_linear_classifiers(unit: EvaluationUnit) -> None:
         raise RuntimeError(f"{unit.label}: no classifier metrics were produced")
 
 
+def _run_temporal_forecast(unit: EvaluationUnit) -> None:
+    from dynaclr.evaluation.temporal.config_forecast import (
+        TemporalForecastConfig,
+    )
+    from dynaclr.evaluation.temporal.forecast import run_temporal_forecast
+
+    resolved = dict(_resolved_evaluation_config(unit) or {})
+    if "temporal_forecast" in resolved:
+        resolved = resolved["temporal_forecast"]
+    config = TemporalForecastConfig(**resolved)
+    run_temporal_forecast(
+        unit.input_paths,
+        config,
+        unit.output_dir,
+        embedding_key=unit.embedding_key,
+    )
+
+
 _RUNNERS = {
     "embedding_consistency": _run_embedding_consistency,
     "smoothness": _run_smoothness,
     "linear_classifiers": _run_linear_classifiers,
+    "temporal_forecast": _run_temporal_forecast,
 }
 
 
@@ -371,7 +542,12 @@ def _resources(unit: EvaluationUnit) -> SlurmResources:
     return unit.evaluation.resources or unit.plan.resources
 
 
-def build_submit_cmd(unit: EvaluationUnit, *, overwrite: bool = False) -> list[str]:
+def build_submit_cmd(
+    unit: EvaluationUnit,
+    *,
+    overwrite: bool = False,
+    dependency: str | None = None,
+) -> list[str]:
     """Build one sbatch command for a direct evaluation unit."""
     resources = _resources(unit)
     cmd = [
@@ -381,6 +557,8 @@ def build_submit_cmd(unit: EvaluationUnit, *, overwrite: bool = False) -> list[s
         f"--mem={resources.memory}",
         f"--time={resources.time}",
     ]
+    if dependency:
+        cmd.append(f"--dependency=afterok:{dependency}")
     if resources.gpus:
         cmd.append(f"--gpus={resources.gpus}")
     cmd.extend(
@@ -424,7 +602,7 @@ def main(
     dry_run: bool,
     local: bool,
 ) -> None:
-    """Run configured evaluations over a model matrix without Nextflow."""
+    """Prepare requested representations, then evaluate without Nextflow."""
     units = build_units(
         config,
         evaluation_names=set(evaluation_names) or None,
@@ -441,22 +619,63 @@ def main(
     click.echo(f"{len(units)} unit(s): {len(units) - len(pending)} current, {len(pending)} pending")
     if not pending:
         return
+
+    grouped: dict[tuple[str, str, str], list[EvaluationUnit]] = {}
+    for unit in pending:
+        grouped.setdefault((unit.model["family"], unit.model["run"], unit.checkpoint_name), []).append(unit)
     if local:
-        for unit in pending:
-            run_unit(unit, overwrite=overwrite)
+        for group in grouped.values():
+            for unit in group:
+                _validate_raw_inputs(unit)
+            prepared = next(
+                (unit for unit in group if unit.embedding_key == _DEFAULT_PREPARED_KEY),
+                None,
+            )
+            if prepared is not None:
+                changed = prepare_representation(prepared, overwrite=overwrite)
+                click.echo(
+                    f"{'RUN ' if changed else 'SKIP'} evaluation Step 0 for "
+                    f"{prepared.model['family']}/{prepared.model['run']}/{prepared.checkpoint_name}"
+                )
+            for unit in group:
+                run_unit(unit, overwrite=overwrite)
         return
     if not dry_run:
-        # Match prediction's fail-before-submit behavior: do not leave a
-        # partially submitted matrix when a later model lacks its requested X.
+        # Fail before any submission if raw model outputs are incomplete. A
+        # missing derived representation is expected: Step 0 creates it.
         for unit in pending:
-            validate_unit_inputs(unit)
-    for unit in pending:
-        cmd = build_submit_cmd(unit, overwrite=overwrite)
-        if dry_run:
-            click.echo(f"# {unit.label}\n{' '.join(cmd)}")
-        else:
-            job_id = _submit(cmd)
-            click.echo(f"{unit.label} -> job {job_id}")
+            _validate_raw_inputs(unit)
+    for group in grouped.values():
+        prepared = next(
+            (unit for unit in group if unit.embedding_key == _DEFAULT_PREPARED_KEY),
+            None,
+        )
+        dependency: str | None = None
+        if prepared is not None and (overwrite or not representation_is_current(prepared)):
+            prepare_cmd = build_prepare_cmd(prepared, overwrite=overwrite)
+            label = (
+                f"{prepared.model['family']}/{prepared.model['run']}/"
+                f"{prepared.checkpoint_name} [prepare-representation]"
+            )
+            if dry_run:
+                click.echo(f"# {label}\n{' '.join(prepare_cmd)}")
+                dependency = "<prepare-representation>"
+            else:
+                dependency = _submit(prepare_cmd)
+                click.echo(f"{label} -> job {dependency}")
+        for unit in group:
+            if dependency is None and not dry_run:
+                validate_unit_inputs(unit)
+            cmd = build_submit_cmd(
+                unit,
+                overwrite=overwrite,
+                dependency=dependency if unit.embedding_key == _DEFAULT_PREPARED_KEY else None,
+            )
+            if dry_run:
+                click.echo(f"# {unit.label}\n{' '.join(cmd)}")
+            else:
+                job_id = _submit(cmd)
+                click.echo(f"{unit.label} -> job {job_id}")
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})

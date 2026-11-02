@@ -43,7 +43,7 @@ from pathlib import Path
 import click
 import yaml
 
-from dynaclr.evaluation.orchestration.predict_batch import check_ai_ready
+from dynaclr.evaluation.orchestration.predict_batch import SOURCE_DATASETS_ROOT, check_ai_ready
 from dynaclr.evaluation.paths import DATASETS_ROOT
 
 # Wrapper sbatch scripts the launcher submits for the downstream links.
@@ -54,10 +54,10 @@ _DEFAULT_NORMALIZATION_RECIPE = Path(
     "applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml"
 )
 
-_ALL_STAGES = ("train", "predict", "normalize", "eval")
+_ALL_STAGES = ("phenotype", "train", "predict", "normalize", "eval")
 
 
-def matrix_preflight(models: list[dict]) -> None:
+def matrix_preflight(models: list[dict], *, source_root: Path = SOURCE_DATASETS_ROOT) -> None:
     """Report AI-readiness for every model's collection before submitting anything.
 
     Runs once upfront (only relevant when the predict stage is included) so all
@@ -67,16 +67,31 @@ def matrix_preflight(models: list[dict]) -> None:
     seen: set[str] = set()
     missing_focus: list[str] = []
     missing_norm: list[str] = []
+    stale_sources: list[str] = []
     for model in models:
         collection = model.get("collection")
         if not collection or str(collection) in seen:
             continue
         seen.add(str(collection))
-        for r in check_ai_ready(Path(collection)):
+        for r in check_ai_ready(Path(collection), source_root=source_root):
             if r["missing_focus_slice"]:
-                missing_focus.append(f"{r['name']} ({r['data_path']})")
+                missing_focus.append(f"{r['name']}: {r['missing_focus_slice_channels']} ({r['data_path']})")
             if r["missing_normalization"]:
-                missing_norm.append(f"{r['name']} ({r['data_path']})")
+                missing_norm.append(f"{r['name']}: {r['missing_normalization_channels']} ({r['data_path']})")
+            if r["stale_source"]:
+                stale_sources.append(
+                    f"{r['name']}: source {r['source_mtime']} ({r['source_assembly']}) "
+                    f"> VAST {r['vast_mtime']} ({r['data_path']})"
+                )
+
+    if stale_sources:
+        lines = "\n".join(f"    - {item}" for item in stale_sources)
+        raise ValueError(
+            "[preflight] refusing inference because VAST is older than the active "
+            "source assembly:\n"
+            f"{lines}\n"
+            "Re-run concatenate, QC, and preprocessing from the corrected assembly, then retry."
+        )
 
     if missing_norm:
         print("[preflight] datasets missing normalization (run `viscy preprocess` — safe/auto):", file=sys.stderr)
@@ -93,7 +108,8 @@ def matrix_preflight(models: list[dict]) -> None:
     if missing_norm:
         raise ValueError(
             "[preflight] datasets missing normalization (see above). Run "
-            "`viscy preprocess --data_path <zarr> --channel_names=-1` for each, then retry."
+            "`viscy preprocess --data_path <zarr> --channel_names <required-channel>` "
+            "for each missing channel, then retry."
         )
     print("[preflight] all datasets AI-ready.", file=sys.stderr)
 
@@ -108,11 +124,30 @@ def _embedding_complete(output_path: Path) -> bool:
     return output_path.exists() and ((output_path / "zarr.json").exists() or (output_path / ".zgroup").exists())
 
 
+def _normalized_complete(output_path: Path, embedding_key: str = "X_normalized_pca80") -> bool:
+    """Whether a store has both the normalized array and its PCA provenance.
+
+    The pooled normalization exporter writes the representation to ``obsm`` and
+    its marker-specific PCA/MAD metadata to ``uns`` under the same key. Checking
+    the Zarr metadata files keeps skip-existing fast and avoids loading arrays.
+    """
+
+    def _member_complete(path: Path) -> bool:
+        return any((path / metadata).exists() for metadata in ("zarr.json", ".zarray", ".zgroup"))
+
+    return (
+        _embedding_complete(output_path)
+        and _member_complete(output_path / "obsm" / embedding_key)
+        and _member_complete(output_path / "uns" / embedding_key)
+    )
+
+
 def resolve_datasets_to_run(
     models: list[dict],
     overwrite: bool,
     *,
     preserve_complete_rows: bool = False,
+    validate_only: bool = False,
 ) -> list[dict]:
     """Prune already-embedded datasets so predict runs only what's missing.
 
@@ -124,13 +159,20 @@ def resolve_datasets_to_run(
     experiments) and their ``collection`` repointed to it. When
     ``preserve_complete_rows`` is true, fully-done rows remain in the matrix
     with prediction disabled so normalization/evaluation can still run.
-    ``overwrite`` skips the check entirely (whole collection runs).
+    ``overwrite`` runs the whole collection but still checks eligibility identity.
 
     Every survivor retains the original full collection in
     ``_normalization_collection``. This matters because the pooled PCA basis
     must be refit across all expected stores, not just newly predicted ones.
 
-    Read-only w.r.t. the datasets (only checks existence); the only writes are
+    Eligibility uses the optional defaults/model-level ``eligibility`` path.
+    Both its file SHA and canonical record SHA must match cached provenance.
+    A mismatch rejects reuse or overwrite of that output identity. Use a fresh
+    run label for a changed table; normalization is still scheduled only when
+    its stage is requested. ``validate_only`` checks downstream inputs without
+    pruning collections or changing stage skip decisions.
+
+    Read-only w.r.t. the datasets (checks metadata); the only writes are
     pruned collection YAMLs next to the original collection.
 
     Parameters
@@ -148,23 +190,45 @@ def resolve_datasets_to_run(
         Filtered rows; survivors may have ``collection`` set to a pruned
         prediction YAML while ``_normalization_collection`` remains full.
     """
+    from dynaclr.evaluation.phenotyping_eligibility import (
+        eligibility_cache_matches,
+        load_eligibility,
+        require_eligibility_output_identity,
+        resolve_eligibility_path,
+    )
     from dynaclr.evaluation.predict_triplet import plan_predict_runs
     from viscy_data.collection import load_collection, save_collection
 
     if overwrite:
         print("[skip-existing] --overwrite: running the full collection for every row.", file=sys.stderr)
-        return models
 
     survivors: list[dict] = []
+    eligibility_identities: dict[Path, dict] = {}
     for model in models:
+        original_model = model
         model = {**model, "_normalization_collection": model["collection"]}
+        model.pop("_skip_predict", None)
+        eligibility_path = resolve_eligibility_path(model.get("eligibility"), model.get("predict_flags"))
+        expected_eligibility = None
+        if eligibility_path is not None:
+            if eligibility_path not in eligibility_identities:
+                _, eligibility_identities[eligibility_path] = load_eligibility(eligibility_path)
+            expected_eligibility = eligibility_identities[eligibility_path]
+
+        def raw_complete(path: Path) -> bool:
+            return _embedding_complete(path) and eligibility_cache_matches(path, expected_eligibility)
+
         family, run = model["family"], model["run"]
         collection = load_collection(Path(model["collection"]))
         markers = model.get("markers")
         datasets_root = model.get("datasets_root", DATASETS_ROOT)
 
         # An experiment is done only when done for EVERY checkpoint this row sweeps.
+        # Track normalized checkpoints separately so downstream pooled normalization
+        # is skipped only when every expected store already has both the canonical
+        # representation and its provenance.
         done_names: set[str] = None  # type: ignore[assignment]
+        normalized_ckpts: set[str] = set()
         for ckpt_name, _ in resolve_checkpoints(model):
             runs = plan_predict_runs(
                 collection,
@@ -176,20 +240,41 @@ def resolve_datasets_to_run(
             )
             paths_by_exp: dict[str, list[Path]] = {}
             for r in runs:
+                require_eligibility_output_identity(r.output_path, expected_eligibility)
+                if validate_only and not _embedding_complete(r.output_path):
+                    raise ValueError(f"Missing raw prediction embeddings: {r.output_path}; run predict first")
                 paths_by_exp.setdefault(r.experiment, []).append(r.output_path)
-            ckpt_done = {exp for exp, paths in paths_by_exp.items() if all(_embedding_complete(p) for p in paths)}
+            if overwrite or validate_only:
+                continue
+            ckpt_done = {exp for exp, paths in paths_by_exp.items() if all(raw_complete(p) for p in paths)}
+            if runs and all(raw_complete(r.output_path) and _normalized_complete(r.output_path) for r in runs):
+                normalized_ckpts.add(ckpt_name)
             done_names = ckpt_done if done_names is None else (done_names & ckpt_done)
+
+        if overwrite or validate_only:
+            survivors.append(
+                {
+                    key: value
+                    for key, value in original_model.items()
+                    if validate_only or key not in {"_skip_predict", "_skip_normalize_ckpts"}
+                }
+            )
+            continue
 
         done_names = done_names or set()
         all_names = [exp.name for exp in collection.experiments]
         missing_names = [n for n in all_names if n not in done_names]
+        # The pending collection is predicted for every checkpoint. Even a
+        # previously compatible checkpoint loses its derived arrays when any
+        # pending dataset is overwritten, so pooled normalization must refit.
+        model = {**model, "_skip_normalize_ckpts": frozenset() if missing_names else frozenset(normalized_ckpts)}
         label = f"{family}/{run}"
 
         if not missing_names:
             if preserve_complete_rows:
                 print(
                     f"[skip-existing] {label}: all {len(all_names)} dataset(s) done → "
-                    "skip predict, retain downstream stages.",
+                    "skip predict, retain missing downstream stages.",
                     file=sys.stderr,
                 )
                 survivors.append({**model, "_skip_predict": True})
@@ -280,6 +365,19 @@ def resolve_model(model: dict, defaults: dict) -> dict:
                     f"foundation model entry needs explicit '{required}' (no train_sbatch parsing): {model}"
                 )
         return merged
+    if merged["model_type"] == "katamari":
+        required_fields = (
+            "family",
+            "run",
+            "ckpt_name",
+            "checkpoint",
+            "evolutionaryscale_root",
+            "pixi_executable",
+        )
+        for required in required_fields:
+            if required not in merged:
+                raise ValueError(f"katamari model entry needs explicit '{required}': {model}")
+        return merged
 
     if "train_sbatch" not in merged:
         raise ValueError(f"model entry has no 'train_sbatch' (and no explicit identity): {model}")
@@ -336,12 +434,18 @@ def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]
     """The predict sbatch command for one checkpoint of a model.
 
     ``markers`` and ``predict_flags`` are forwarded as positional values to
-    the prediction wrapper. ``model_type`` (dynaclr | foundation) and
+    the prediction wrapper. ``model_type`` (dynaclr | foundation | katamari) and
     ``training_config`` (foundation only) are the last two positionals; for
     dynaclr rows ``training_config`` is empty and ``checkpoint`` is forwarded.
+    Optional defaults/model ``eligibility`` is exported without adding positionals.
     """
+    import os
+
+    from dynaclr.evaluation.phenotyping_eligibility import resolve_eligibility_path
+
     markers = ",".join(model["markers"]) if model.get("markers") else ""
     predict_flags = model.get("predict_flags", {})
+    eligibility_path = resolve_eligibility_path(model.get("eligibility"), predict_flags)
     z_range = predict_flags.get("z_range")
     z_window = predict_flags.get("z_window")
     if z_range is not None and z_window is not None:
@@ -350,11 +454,29 @@ def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]
         raise ValueError("predict_flags.reference_pixel_size_z_um requires predict_flags.z_window.")
     if z_range is not None and len(z_range) != 2:
         raise ValueError("predict_flags.z_range must contain exactly two values.")
+    yx_patch_size = predict_flags.get("yx_patch_size")
+    if yx_patch_size is not None and len(yx_patch_size) != 2:
+        raise ValueError("predict_flags.yx_patch_size must contain exactly two values.")
+    katamari_model_input_size = predict_flags.get("katamari_model_input_size", [224, 224])
+    if len(katamari_model_input_size) != 2:
+        raise ValueError("predict_flags.katamari_model_input_size must contain exactly two values.")
     z_start, z_end = ("", "") if z_range is None else map(str, z_range)
     model_type = model.get("model_type", "dynaclr")
     training_config = str(model["training_config"]) if model_type == "foundation" else ""
-    args = [
-        "sbatch",
+    args = ["sbatch"]
+    if model.get("predict_time"):
+        # Per-row walltime override for long inference sweeps. Keep the sbatch
+        # script's conservative 8-hour default when the matrix omits it.
+        args.append(f"--time={model['predict_time']}")
+    if eligibility_path is not None or "DYNACLR_ELIGIBILITY" in os.environ:
+        eligibility_value = str(eligibility_path) if eligibility_path is not None else ""
+        # Slurm's ALL environment takes precedence over explicit export values.
+        if os.environ.get("DYNACLR_ELIGIBILITY", eligibility_value) != eligibility_value:
+            raise ValueError("Unset conflicting DYNACLR_ELIGIBILITY before submitting; configure defaults.eligibility")
+        if any(character in eligibility_value for character in (",", "\n", "\r")):
+            raise ValueError("Eligibility path cannot contain commas or newlines in sbatch --export")
+        args.append(f"--export=ALL,DYNACLR_ELIGIBILITY={eligibility_value}")
+    args += [
         str(_PREDICT_SBATCH),
         model["collection"],
         model["family"],
@@ -368,7 +490,7 @@ def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]
         str(predict_flags.get("z_reduction") or ""),
         str(predict_flags.get("reference_pixel_size") or ""),
         str(predict_flags.get("batch_size") or ""),
-        model_type,  # dynaclr | foundation
+        model_type,  # dynaclr | foundation | katamari
         training_config,  # foundation only; empty for dynaclr
         str(z_window or ""),  # focus-centered Z window WIDTH (excl. with z_range)
         str(predict_flags.get("focus_channel") or ""),
@@ -376,6 +498,26 @@ def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]
     ]
     if predict_flags.get("reference_pixel_size_z_um") is not None:
         args.append(str(predict_flags["reference_pixel_size_z_um"]))
+    elif yx_patch_size is not None or model_type == "katamari":
+        # $18 is the optional Z reference in predict.sbatch. Preserve its empty
+        # positional when later optional arguments are supplied.
+        args.append("")
+    if yx_patch_size is not None:
+        args.append(",".join(map(str, yx_patch_size)))
+    elif model_type == "katamari":
+        # Katamari adds more positionals after $19, so preserve the model-matrix
+        # default sampled crop when no explicit YX override is present.
+        args.append("")
+    if model_type == "katamari":
+        args.extend(
+            [
+                ",".join(map(str, katamari_model_input_size)),
+                str(predict_flags.get("katamari_readout", "avg")),
+                "1" if predict_flags.get("katamari_use_teacher", False) else "0",
+                str(model["evolutionaryscale_root"]),
+                str(model["pixi_executable"]),
+            ]
+        )
     return args
 
 
@@ -419,13 +561,13 @@ def build_stage_cmds(model: dict, stages: tuple[str, ...]) -> list[tuple[str, li
     """
     ckpt_name, checkpoint = resolve_checkpoints(model)[0]
     m = {**model, "ckpt_name": ckpt_name, "checkpoint": checkpoint}
-    is_foundation = model.get("model_type", "dynaclr") == "foundation"
+    is_frozen = model.get("model_type", "dynaclr") in {"foundation", "katamari"}
     cmds: list[tuple[str, list[str]]] = []
-    if "train" in stages and not is_foundation:
+    if "train" in stages and not is_frozen:
         cmds.append(("train", build_train_cmd(m)))
     if "predict" in stages and not model.get("_skip_predict", False):
         cmds.append(("predict", build_predict_cmd(m, ckpt_name, checkpoint)))
-    if "normalize" in stages:
+    if "normalize" in stages and ckpt_name not in model.get("_skip_normalize_ckpts", ()):
         cmds.append(("normalize", build_normalize_cmd(m, ckpt_name)))
     if "eval" in stages:
         cmds.append(("eval", build_eval_cmd(m, ckpt_name)))
@@ -464,17 +606,20 @@ def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
     chains otherwise run in parallel via normal SLURM scheduling).
     """
     base = f"{model['family']}/{model['run']}"
-    is_foundation = model.get("model_type", "dynaclr") == "foundation"
+    is_frozen = model.get("model_type", "dynaclr") in {"foundation", "katamari"}
     train_jid: str | None = None
-    if "train" in stages and not is_foundation:
+    if "train" in stages and not is_frozen:
         train_jid = _emit("train", base, build_train_cmd(model), None, print_only)
 
     for ckpt_name, checkpoint in resolve_checkpoints(model):
         label = f"{base}/{ckpt_name}"
-        prev = train_jid  # predict depends on the shared train (if any)
+        dependencies = list(model.get("_phenotyping_dependencies", ()))
+        if train_jid:
+            dependencies.append(train_jid)
+        prev = ":".join(dependencies) or None
         if "predict" in stages and not model.get("_skip_predict", False):
             prev = _emit("predict", label, build_predict_cmd(model, ckpt_name, checkpoint), prev, print_only)
-        if "normalize" in stages:
+        if "normalize" in stages and ckpt_name not in model.get("_skip_normalize_ckpts", ()):
             prev = _emit("normalize", label, build_normalize_cmd(model, ckpt_name), prev, print_only)
         if "eval" in stages:
             _emit("eval", label, build_eval_cmd(model, ckpt_name), prev, print_only)
@@ -519,6 +664,14 @@ def main(matrix: Path, stages: str, dry_run: bool, print_cmd: bool, skip_preflig
     models = load_matrix(matrix)
     print_only = dry_run or print_cmd
 
+    # Phenotyping is a shared dataset stage: plan before embedding-cache pruning
+    # so completed models cannot accidentally hide datasets from this stage.
+    phenotyping_runs = []
+    if "phenotype" in stage_tuple:
+        from dynaclr.evaluation.orchestration.phenotyping import plan_matrix_phenotyping
+
+        phenotyping_runs = plan_matrix_phenotyping(models, stages=stage_tuple)
+
     # Skip-existing pre-step: prune already-embedded datasets so predict runs only the
     # missing ones (login node, read-only w.r.t. datasets — safe in dry-run too). Only
     # meaningful when predicting.
@@ -528,11 +681,30 @@ def main(matrix: Path, stages: str, dry_run: bool, print_cmd: bool, skip_preflig
             overwrite,
             preserve_complete_rows=any(stage in stage_tuple for stage in ("normalize", "eval")),
         )
+    elif any(stage in stage_tuple for stage in ("normalize", "eval")):
+        # Downstream-only requests must validate the same identity before any
+        # stage can reuse raw arrays or fitted representations.
+        models = resolve_datasets_to_run(models, overwrite=False, validate_only=True)
 
     # Upfront preflight: only meaningful when we will predict, and only on a real
     # submission (dry-run must stay side-effect-free / offline).
     if "predict" in stage_tuple and not print_only and not skip_preflight:
         matrix_preflight(models)
+
+    if phenotyping_runs:
+        from dynaclr.evaluation.orchestration.phenotyping import (
+            print_phenotyping_plan,
+            submit_phenotyping_runs,
+        )
+
+        resources = dict(config_dir=matrix.resolve().parent / ".phenotyping-batch", workspace=Path.cwd())
+        if print_only:
+            print_phenotyping_plan(phenotyping_runs, **resources)
+            dependencies = ["<phenotyping>"]
+        else:
+            jobs = submit_phenotyping_runs(phenotyping_runs, **resources)
+            dependencies = list(jobs.values())
+        models = [{**model, "_phenotyping_dependencies": dependencies} for model in models]
 
     print(f"{len(models)} model(s); stages={stage_tuple}; {'DRY-RUN' if print_only else 'SUBMITTING'}", file=sys.stderr)
     for model in models:

@@ -153,6 +153,46 @@ def test_matrix_forwards_focus_centered_z_window():
     assert predict_cmd[9] == "" and predict_cmd[10] == ""
 
 
+def test_matrix_forwards_yx_patch_size_as_optional_final_positional():
+    model = {
+        "collection": "c.yml",
+        "family": "family",
+        "run": "run",
+        "datasets_root": "/datasets",
+        "predict_flags": {"yx_patch_size": [224, 224]},
+    }
+    predict_cmd = submit_matrix.build_predict_cmd(model, "epoch105-step84800-p224", "/model.ckpt")
+    assert predict_cmd[-2:] == ["", "224,224"]
+
+
+def test_matrix_forwards_predict_time_as_sbatch_override():
+    model = {
+        "collection": "c.yml",
+        "family": "family",
+        "run": "run",
+        "datasets_root": "/datasets",
+        "predict_time": "3-00:00:00",
+    }
+    predict_cmd = submit_matrix.build_predict_cmd(model, "frozen-p224", "")
+    assert predict_cmd[:3] == [
+        "sbatch",
+        "--time=3-00:00:00",
+        "applications/dynaclr/tools/predict.sbatch",
+    ]
+
+
+def test_matrix_rejects_invalid_yx_patch_size():
+    model = {
+        "collection": "c.yml",
+        "family": "family",
+        "run": "run",
+        "datasets_root": "/datasets",
+        "predict_flags": {"yx_patch_size": [224]},
+    }
+    with pytest.raises(ValueError, match="yx_patch_size"):
+        submit_matrix.build_predict_cmd(model, "last", "")
+
+
 def test_matrix_z_range_and_z_window_mutually_exclusive():
     model = {
         "collection": "c.yml",
@@ -226,6 +266,55 @@ def test_foundation_predict_cmd_carries_model_type_and_config():
     assert predict_cmd[-5:] == ["foundation", "cfg.yaml", "", "", ""]
     # checkpoint positional stays empty for foundation rows
     assert predict_cmd[7] == ""
+
+
+def test_katamari_row_resolves_and_carries_external_runtime():
+    model = {
+        "model_type": "katamari",
+        "family": "Katamari-G10-ViT-L-iBOT",
+        "run": "student-avg-single-channel",
+        "ckpt_name": "step227500-p160",
+        "checkpoint": "/models/katamari.ckpt",
+        "evolutionaryscale_root": "/repos/evolutionaryscale",
+        "pixi_executable": "/bin/pixi",
+        "collection": "c.yml",
+        "datasets_root": "/d",
+        "predict_flags": {
+            "katamari_model_input_size": [224, 224],
+            "katamari_readout": "avg",
+            "katamari_use_teacher": False,
+        },
+    }
+    resolved = submit_matrix.resolve_model(model, {})
+    assert "train_sbatch" not in resolved
+
+    predict_cmd = submit_matrix.build_predict_cmd(resolved, "step227500-p160", "/models/katamari.ckpt")
+    assert predict_cmd[-7:] == [
+        "",
+        "",
+        "224,224",
+        "avg",
+        "0",
+        "/repos/evolutionaryscale",
+        "/bin/pixi",
+    ]
+    assert "katamari" in predict_cmd
+    assert "/models/katamari.ckpt" in predict_cmd
+
+
+def test_katamari_is_frozen_and_skips_train_stage():
+    model = {
+        "model_type": "katamari",
+        "family": "katamari",
+        "run": "single-channel",
+        "ckpt_name": "step",
+        "checkpoint": "/models/katamari.ckpt",
+        "collection": "c.yml",
+        "datasets_root": "/d",
+        "evolutionaryscale_root": "/repos/evolutionaryscale",
+        "pixi_executable": "/bin/pixi",
+    }
+    assert [stage for stage, _ in submit_matrix.build_stage_cmds(model, ("train", "predict"))] == ["predict"]
 
 
 def test_foundation_run_model_skips_train(capsys):
@@ -419,6 +508,23 @@ def test_matrix_preflight_raises_on_missing_focus(tmp_path):
         submit_matrix.matrix_preflight(models)
 
 
+def test_matrix_preflight_raises_on_stale_vast_source(tmp_path):
+    z = tmp_path / "ready.zarr"
+    _zarr(z, normalization=True, focus_slice=True)
+    source = tmp_path / "sources" / "ds" / "4-assemble" / "ds.zarr"
+    source.mkdir(parents=True)
+    (source / "zarr.json").write_text("{}")
+    source_metadata = source / "zarr.json"
+    vast_metadata = next(path for path in (z / "zarr.json", z / ".zattrs", z / ".zgroup") if path.exists())
+    source_time = vast_metadata.stat().st_mtime_ns + 1_000_000_000
+    source_metadata.touch()
+    os.utime(source_metadata, ns=(source_time, source_time))
+
+    models = [{"collection": str(_collection_for(tmp_path, z))}]
+    with pytest.raises(ValueError, match="VAST is older than the active source assembly"):
+        submit_matrix.matrix_preflight(models, source_root=tmp_path / "sources")
+
+
 def test_resolve_checkpoints_scalar(tmp_path):
     sh = _write_sh(tmp_path)
     m = submit_matrix.resolve_model({"train_sbatch": str(sh)}, {"ckpt_name": "last"})
@@ -492,6 +598,27 @@ def _mark_done(tmp_path, dataset: str) -> None:
         )
         d.mkdir(parents=True, exist_ok=True)
         (d / "zarr.json").write_text("{}")
+
+
+def _mark_normalized(tmp_path, dataset: str) -> None:
+    """Add canonical normalized-array and provenance metadata to completed stores."""
+    _mark_done(tmp_path, dataset)
+    for marker in _MARKERS:
+        d = (
+            tmp_path
+            / "datasets"
+            / dataset
+            / "2-phenotyping"
+            / "predictions"
+            / _FAMILY
+            / _RUN
+            / _CKPT
+            / "embeddings"
+            / f"{marker}.zarr"
+        )
+        for member in (d / "obsm" / "X_normalized_pca80", d / "uns" / "X_normalized_pca80"):
+            member.mkdir(parents=True, exist_ok=True)
+            (member / "zarr.json").write_text("{}")
 
 
 def _model(coll, tmp_path) -> dict:
@@ -594,6 +721,47 @@ def test_resolve_retains_complete_row_for_normalization(tmp_path):
         "normalize",
         "eval",
     ]
+
+
+def test_resolve_skips_completed_normalization(tmp_path):
+    coll = _two_exp_collection_yaml(tmp_path)
+    _mark_normalized(tmp_path, "DS_A")
+    _mark_normalized(tmp_path, "DS_B")
+    survivor = submit_matrix.resolve_datasets_to_run(
+        [_model(coll, tmp_path)], overwrite=False, preserve_complete_rows=True
+    )[0]
+    assert survivor["_skip_predict"] is True
+    assert survivor["_skip_normalize_ckpts"] == frozenset({_CKPT})
+    survivor["eval_config"] = "eval.yml"
+    assert [stage for stage, _ in submit_matrix.build_stage_cmds(survivor, ("predict", "normalize", "eval"))] == [
+        "eval"
+    ]
+
+
+def test_normalization_without_provenance_is_not_complete(tmp_path):
+    coll = _two_exp_collection_yaml(tmp_path)
+    _mark_normalized(tmp_path, "DS_A")
+    _mark_normalized(tmp_path, "DS_B")
+    missing_uns = (
+        tmp_path
+        / "datasets"
+        / "DS_B"
+        / "2-phenotyping"
+        / "predictions"
+        / _FAMILY
+        / _RUN
+        / _CKPT
+        / "embeddings"
+        / "SEC61B.zarr"
+        / "uns"
+        / "X_normalized_pca80"
+        / "zarr.json"
+    )
+    missing_uns.unlink()
+    survivor = submit_matrix.resolve_datasets_to_run(
+        [_model(coll, tmp_path)], overwrite=False, preserve_complete_rows=True
+    )[0]
+    assert survivor["_skip_normalize_ckpts"] == frozenset()
 
 
 def test_resolve_partial_normalization_still_uses_full_collection(tmp_path):
