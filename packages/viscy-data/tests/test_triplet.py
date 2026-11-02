@@ -5,6 +5,48 @@ from pytest import mark, raises
 
 from viscy_data import TripletDataModule, TripletDataset
 from viscy_data.channel_utils import parse_channel_name
+from viscy_data.triplet import _raw_blank_mask
+
+
+def test_raw_blank_mask_flags_any_all_zero_or_nan_channel():
+    """Blank QC is exact and all-channel: no intensity/morphology thresholding."""
+    patches = torch.ones((6, 3, 1, 2, 2), dtype=torch.float32)
+    patches[1, 1] = 0
+    patches[2, 2] = torch.nan
+    patches[3, 0] = 0
+    patches[3, 0, 0, 0, 0] = torch.nan
+    patches[4, 1] = 0
+    patches[4, 1, 0, 0, 0] = 0.01
+    patches[5, 2] = torch.inf
+
+    assert _raw_blank_mask(patches).tolist() == [False, True, True, True, False, False]
+
+
+def test_predict_index_carries_blank_mask():
+    """Predict-mode rows carry the raw mask for the embedding writer."""
+    dataset = TripletDataset.__new__(TripletDataset)
+    dataset.fit = False
+    dataset.valid_anchors = pd.DataFrame(
+        {
+            "fov_name": ["A/1/0", "A/1/0"],
+            "track_id": [4, 4],
+            "t": [0, 1],
+            "id": [10, 11],
+            "parent_track_id": [-1, -1],
+            "parent_id": [-1, -1],
+            "z": [0, 0],
+            "y": [16, 16],
+            "x": [16, 16],
+        }
+    )
+    dataset._slice_patches = lambda rows: (
+        torch.ones((len(rows), 1, 1, 2, 2)),
+        [None] * len(rows),
+        torch.tensor([True, False]),
+    )
+
+    batch = dataset.__getitems__([0, 1])
+    assert [row["is_blank"] for row in batch["index"]] == [True, False]
 
 
 @mark.parametrize("include_wells", [None, ["A/1", "A/2", "B/1"]])

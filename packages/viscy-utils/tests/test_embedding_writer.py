@@ -47,3 +47,17 @@ def test_no_uns_metadata_is_fine(tmp_path):
         index_df=_index_df(2),
     )
     assert ad.read_zarr(out).n_obs == 2
+
+
+def test_is_blank_index_column_round_trips_to_obs(tmp_path):
+    """Predict-time blank flags carried in the index land in AnnData obs."""
+    out = tmp_path / "emb.zarr"
+    index = _index_df(3)
+    index["is_blank"] = [False, True, False]
+    write_embedding_dataset(
+        output_path=out,
+        features=np.random.default_rng(2).random((3, 4), dtype=np.float32),
+        index_df=index,
+    )
+
+    assert ad.read_zarr(out).obs["is_blank"].tolist() == [False, True, False]

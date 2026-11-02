@@ -174,6 +174,21 @@ def _default_tensorstore_config(cache_pool_bytes: int = 0) -> TensorStoreConfig:
     )
 
 
+def _raw_blank_mask(patches: Tensor) -> Tensor:
+    """Return one blank flag per sample from raw ``(B, C, ...)`` patches.
+
+    A channel is blank only when every pixel is zero or NaN. A sample is blank
+    when any channel is blank. This deliberately avoids intensity or morphology
+    heuristics: a channel containing even one value other than zero or NaN is
+    not considered blank.
+    """
+    if patches.ndim < 3:
+        raise ValueError(f"Expected raw patches with shape (B, C, ...), got {tuple(patches.shape)}")
+    spatial_dims = tuple(range(2, patches.ndim))
+    channel_is_blank = torch.all(torch.isnan(patches) | patches.eq(0), dim=spatial_dims)
+    return torch.any(channel_is_blank, dim=1)
+
+
 class TripletDataset(Dataset):
     """Dataset for triplet sampling of cells based on tracking."""
 
@@ -190,6 +205,7 @@ class TripletDataset(Dataset):
         include_track_ids: list[int] | None = None,
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
+        blank_qc_channel_names: list[str] | None = None,
     ) -> None:
         """Dataset for triplet sampling of cells based on tracking.
 
@@ -225,6 +241,12 @@ class TripletDataset(Dataset):
             Whether to return the negative sample during the fit stage
             (can be set to False when using a loss function like NT-Xent),
             by default True
+        blank_qc_channel_names : list[str] | None, optional
+            Co-imaged raw channels used to compute a single predict-time
+            ``is_blank`` flag. The flag is true when any listed channel crop is
+            entirely zeros and/or NaNs. These channels are read before image
+            transforms but only ``channel_names`` are returned to the model.
+            ``None`` disables the flag, by default None.
         """
         if pd is None:
             raise ImportError("pandas is required for TripletDataset. Install with: pip install 'viscy-data[triplet]'")
@@ -235,6 +257,11 @@ class TripletDataset(Dataset):
         self.positions = positions
         self.channel_names = channel_names
         self.channel_indices = [positions[0].get_channel_index(ch) for ch in channel_names]
+        self.blank_qc_channel_names = list(dict.fromkeys(blank_qc_channel_names or []))
+        read_channel_names = list(dict.fromkeys([*channel_names, *self.blank_qc_channel_names]))
+        self._read_channel_indices = [positions[0].get_channel_index(ch) for ch in read_channel_names]
+        self._model_read_positions = [read_channel_names.index(ch) for ch in channel_names]
+        self._blank_qc_read_positions = [read_channel_names.index(ch) for ch in self.blank_qc_channel_names]
         self.z_range = z_range
         self.fit = fit
         self.yx_patch_size = initial_yx_patch_size
@@ -367,7 +394,7 @@ class TripletDataset(Dataset):
         y_half, x_half = (d // 2 for d in self.yx_patch_size)
         patch = image.oindex[
             time,
-            [int(i) for i in self.channel_indices],
+            [int(i) for i in self._read_channel_indices],
             self._fov_z_range(position.zgroup.name),
             slice(y_center - y_half, y_center + y_half),
             slice(x_center - x_half, x_center + x_half),
@@ -383,12 +410,17 @@ class TripletDataset(Dataset):
             patches.append(patch)
             norms.append(norm)
         results = ts.stack([p.translate_to[0] for p in patches]).read().result()  # noqa: PD013
-        return torch.from_numpy(results), norms
+        raw_patches = torch.from_numpy(results)
+        is_blank = None
+        if self._blank_qc_read_positions:
+            is_blank = _raw_blank_mask(raw_patches[:, self._blank_qc_read_positions])
+        model_patches = raw_patches[:, self._model_read_positions]
+        return model_patches, norms, is_blank
 
     def __getitems__(self, indices: list[int]) -> dict[str, torch.Tensor]:
         """Return a batch of triplet samples for the given indices."""
         anchor_rows = self.valid_anchors.iloc[indices]
-        anchor_patches, anchor_norms = self._slice_patches(anchor_rows)
+        anchor_patches, anchor_norms, anchor_is_blank = self._slice_patches(anchor_rows)
         sample = {"anchor": anchor_patches, "anchor_norm_meta": anchor_norms}
         if self.fit:
             if self.time_interval == "any":
@@ -396,24 +428,27 @@ class TripletDataset(Dataset):
                 positive_norms = anchor_norms
             else:
                 positive_rows = self._sample_positives(anchor_rows)
-                positive_patches, positive_norms = self._slice_patches(positive_rows)
+                positive_patches, positive_norms, _ = self._slice_patches(positive_rows)
 
             sample["positive"] = positive_patches
             sample["positive_norm_meta"] = positive_norms
             if self.return_negative:
                 negative_rows = self._sample_negatives(anchor_rows)
-                negative_patches, negative_norms = self._slice_patches(negative_rows)
+                negative_patches, negative_norms, _ = self._slice_patches(negative_rows)
                 sample["negative"] = negative_patches
                 sample["negative_norm_meta"] = negative_norms
         else:
             indices_list = []
-            for _, anchor_row in anchor_rows.iterrows():
+            blank_values = anchor_is_blank.tolist() if anchor_is_blank is not None else [None] * len(anchor_rows)
+            for (_, anchor_row), is_blank in zip(anchor_rows.iterrows(), blank_values, strict=True):
                 index_dict = {}
                 for col in ULTRACK_INDEX_COLUMNS:
                     if col in anchor_row.index:
                         index_dict[col] = anchor_row[col]
                     elif col not in ["y", "x", "z"]:
                         raise KeyError(f"Required column '{col}' not found in data")
+                if is_blank is not None:
+                    index_dict["is_blank"] = bool(is_blank)
                 indices_list.append(index_dict)
             sample["index"] = indices_list
 
@@ -455,6 +490,7 @@ class TripletDataModule(HCSDataModule):
         reference_pixel_size: float | None = None,
         reference_pixel_size_z_um: float | None = None,
         z_reduction: Literal["mip", "center"] | None = None,
+        blank_qc_channels: str | Sequence[str] | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -519,6 +555,12 @@ class TripletDataModule(HCSDataModule):
             which Z-planes are collapsed by setting ``z_range`` (e.g. a window
             centered on the focus plane). By default ``None`` (no reduction;
             full ``z_range`` is kept).
+        blank_qc_channels : str or sequence[str] or None, optional
+            Co-imaged raw channels used to add one ``is_blank`` Boolean to each
+            predict-mode index row. A row is blank when any listed channel crop
+            contains only zeros and/or NaNs. The check occurs before
+            normalization, resizing, augmentation, or Z reduction. ``None``
+            disables the flag, by default None.
         split_ratio : float, optional
             Ratio of training samples, by default 0.8
         batch_size : int, optional
@@ -639,6 +681,9 @@ class TripletDataModule(HCSDataModule):
         self._cache_pool_bytes = cache_pool_bytes
         self.reference_pixel_size_z_um = reference_pixel_size_z_um
         self.z_reduction = z_reduction
+        if isinstance(blank_qc_channels, str):
+            blank_qc_channels = [blank_qc_channels]
+        self.blank_qc_channels = list(blank_qc_channels) if blank_qc_channels is not None else None
 
         # Physical Z normalization must happen before slice-based augmentations
         # and MIP, as it does in MultiExperimentTripletDataset. Keep the legacy
@@ -753,6 +798,7 @@ class TripletDataModule(HCSDataModule):
             "channel_names": self.source_channel,
             "z_range": self.z_range,
             "time_interval": self.time_interval,
+            "blank_qc_channel_names": self.blank_qc_channels,
         }
 
     def _resolve_z_range(self, positions: "list[Position]") -> "slice | dict[str, slice]":
