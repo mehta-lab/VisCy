@@ -16,12 +16,19 @@
 #   $10 z_reduction    (optional) mip | center
 #   $11 reference_pixel_size (optional) microns per pixel
 #   $12 batch_size     (optional) prediction batch size
-#   $13 model_type     (optional) dynaclr | foundation; empty = dynaclr
+#   $13 model_type     (optional) dynaclr | foundation | katamari; empty = dynaclr
 #   $14 training_config (optional) LightningCLI config for --model-type foundation
 #   $15 z_window        (optional) focus-centered Z window WIDTH (mutually excl. with z_range)
 #   $16 focus_channel   (optional) channel whose focus_slice centers --z-window
 #   $17 z_focus_offset  (optional) fraction of --z-window below focus (default 0.3)
 #   $18 reference_pixel_size_z_um (optional) model Z sampling in microns per slice
+#   $19 yx_patch_size  (optional) comma-separated final patch size, e.g. 224,224
+#   $20 katamari_model_input_size (optional) comma-separated encoder YX size
+#   $21 katamari_readout (optional) avg | cls | cls_plus_gap
+#   $22 katamari_use_teacher (optional) 1 = EMA teacher; 0 = student
+#   $23 evolutionaryscale_root (required for model_type=katamari)
+#   $24 pixi_executable (required for model_type=katamari)
+# Optional DYNACLR_ELIGIBILITY environment path is forwarded as --eligibility.
 #
 #SBATCH --job-name=dynaclr_predict
 #SBATCH --nodes=1
@@ -56,6 +63,18 @@ Z_WINDOW="${15:-}"
 FOCUS_CHANNEL="${16:-}"
 Z_FOCUS_OFFSET="${17:-}"
 REFERENCE_PIXEL_SIZE_Z_UM="${18:-}"
+YX_PATCH_SIZE="${19:-}"
+KATAMARI_MODEL_INPUT_SIZE="${20:-}"
+KATAMARI_READOUT="${21:-}"
+KATAMARI_USE_TEACHER="${22:-0}"
+EVOLUTIONARYSCALE_ROOT="${23:-}"
+PIXI_EXECUTABLE="${24:-}"
+
+# Katamari runs from the EvolutionaryScale checkout so Pixi can discover that
+# project's environment. Resolve VisCy-owned paths before changing directory.
+if [ "$MODEL_TYPE" = "katamari" ] && [[ "$COLLECTION" != /* ]]; then
+  COLLECTION="$WORKSPACE_DIR/$COLLECTION"
+fi
 
 CKPT_FLAG=()
 if [ -n "$CHECKPOINT" ]; then
@@ -81,6 +100,13 @@ if [ -n "$MARKERS" ]; then
 fi
 
 PREDICT_FLAG=()
+if [ -n "${DYNACLR_ELIGIBILITY:-}" ]; then
+  _ELIGIBILITY_PATH="$DYNACLR_ELIGIBILITY"
+  if [[ "$_ELIGIBILITY_PATH" != /* ]]; then
+    _ELIGIBILITY_PATH="$WORKSPACE_DIR/$_ELIGIBILITY_PATH"
+  fi
+  PREDICT_FLAG+=(--eligibility "$_ELIGIBILITY_PATH")
+fi
 if [ -n "$Z_START" ] || [ -n "$Z_END" ]; then
   if [ -z "$Z_START" ] || [ -z "$Z_END" ]; then
     echo "Both z_start and z_end are required." >&2
@@ -109,8 +135,41 @@ fi
 if [ -n "$Z_FOCUS_OFFSET" ]; then
   PREDICT_FLAG+=(--z-focus-offset "$Z_FOCUS_OFFSET")
 fi
+if [ -n "$YX_PATCH_SIZE" ]; then
+  IFS=',' read -ra _YX <<< "$YX_PATCH_SIZE"
+  if [ "${#_YX[@]}" -ne 2 ]; then
+    echo "yx_patch_size must contain two comma-separated integers." >&2
+    exit 2
+  fi
+  PREDICT_FLAG+=(--yx-patch-size "${_YX[0]}" "${_YX[1]}")
+fi
+if [ -n "$KATAMARI_MODEL_INPUT_SIZE" ]; then
+  IFS=',' read -ra _KAT_YX <<< "$KATAMARI_MODEL_INPUT_SIZE"
+  if [ "${#_KAT_YX[@]}" -ne 2 ]; then
+    echo "katamari_model_input_size must contain two comma-separated integers." >&2
+    exit 2
+  fi
+  PREDICT_FLAG+=(--katamari-model-input-size "${_KAT_YX[0]}" "${_KAT_YX[1]}")
+fi
+if [ -n "$KATAMARI_READOUT" ]; then
+  PREDICT_FLAG+=(--katamari-readout "$KATAMARI_READOUT")
+fi
+if [ "$KATAMARI_USE_TEACHER" = "1" ]; then
+  PREDICT_FLAG+=(--katamari-use-teacher)
+fi
 
-srun uv run --project "$WORKSPACE_DIR" dynaclr predict-batch \
+RUNNER=(uv run --project "$WORKSPACE_DIR" dynaclr predict-batch)
+if [ "$MODEL_TYPE" = "katamari" ]; then
+  if [ ! -d "$EVOLUTIONARYSCALE_ROOT" ] || [ ! -x "$PIXI_EXECUTABLE" ]; then
+    echo "Katamari requires a valid EvolutionaryScale root and Pixi executable." >&2
+    exit 2
+  fi
+  export PYTHONPATH="$WORKSPACE_DIR/applications/dynaclr/src:$WORKSPACE_DIR/packages/viscy-data/src:$WORKSPACE_DIR/packages/viscy-models/src:$WORKSPACE_DIR/packages/viscy-transforms/src:$WORKSPACE_DIR/packages/viscy-utils/src:$EVOLUTIONARYSCALE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+  cd "$EVOLUTIONARYSCALE_ROOT"
+  RUNNER=("$PIXI_EXECUTABLE" run -e katamari python -m dynaclr.evaluation.orchestration.predict_batch)
+fi
+
+srun "${RUNNER[@]}" \
   -c "$COLLECTION" \
   --model-family "$MODEL_FAMILY" \
   --run "$RUN" \
