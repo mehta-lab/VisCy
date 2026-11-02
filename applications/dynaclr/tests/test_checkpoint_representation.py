@@ -41,6 +41,34 @@ def test_plan_checkpoint_representation_resolves_full_pool(monkeypatch, tmp_path
     assert plan.artifact_dir == (tmp_path / "_pooled_representation/family/run/last/X_normalized_pca80")
 
 
+def test_plan_checkpoint_representation_routes_canonical_dataset_root(monkeypatch, tmp_path):
+    _patch_plan(monkeypatch, tmp_path)
+    plan = checkpoint.plan_checkpoint_representation(
+        tmp_path / "collection.yml",
+        model_family="family",
+        run="run",
+        ckpt_name="last",
+        datasets_root=checkpoint.ORGANELE_DYNAMICS_DATASETS_ROOT,
+    )
+    assert plan.artifact_dir == (
+        checkpoint.DEFAULT_IMPLEMENTATION_ROOT / "pooled_representation/family/run/last/X_normalized_pca80"
+    )
+
+
+def test_plan_checkpoint_representation_preserves_explicit_artifact_override(monkeypatch, tmp_path):
+    _patch_plan(monkeypatch, tmp_path)
+    override = tmp_path / "explicit-artifacts"
+    plan = checkpoint.plan_checkpoint_representation(
+        tmp_path / "collection.yml",
+        model_family="family",
+        run="run",
+        ckpt_name="last",
+        datasets_root=checkpoint.ORGANELE_DYNAMICS_DATASETS_ROOT,
+        artifact_dir=override,
+    )
+    assert plan.artifact_dir == override
+
+
 def test_plan_checkpoint_representation_rejects_unrepresented_experiment(monkeypatch, tmp_path):
     _patch_plan(monkeypatch, tmp_path, missing_experiment=True)
     with pytest.raises(ValueError, match="DS_B"):

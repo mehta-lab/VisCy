@@ -1,4 +1,4 @@
-"""Export the canonical pooled representation for one model checkpoint."""
+"""Evaluation Step 0 for one model checkpoint: normalize, then fit PCA."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from dynaclr.evaluation.predict_triplet import plan_predict_runs
 from viscy_data.collection import load_collection
 
 DEFAULT_RECIPE = Path("applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml")
+DEFAULT_IMPLEMENTATION_ROOT = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/infectomics-to-ops/implementation"
+)
+ORGANELE_DYNAMICS_DATASETS_ROOT = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics")
 
 
 @dataclass(frozen=True)
@@ -68,9 +72,21 @@ def plan_checkpoint_representation(
             f"Missing or incomplete ({len(incomplete)}):\n{preview}{suffix}"
         )
 
-    artifacts = artifact_dir or (
-        datasets_root / "_pooled_representation" / model_family / run / ckpt_name / DEFAULT_REPRESENTATION_KEY
-    )
+    if artifact_dir is not None:
+        artifacts = artifact_dir
+    elif Path(datasets_root) == ORGANELE_DYNAMICS_DATASETS_ROOT:
+        artifacts = (
+            DEFAULT_IMPLEMENTATION_ROOT
+            / "pooled_representation"
+            / model_family
+            / run
+            / ckpt_name
+            / DEFAULT_REPRESENTATION_KEY
+        )
+    else:
+        artifacts = (
+            Path(datasets_root) / "_pooled_representation" / model_family / run / ckpt_name / DEFAULT_REPRESENTATION_KEY
+        )
     return CheckpointRepresentationPlan(
         input_paths=paths,
         experiments=tuple(sorted(planned_experiments)),
@@ -90,7 +106,7 @@ def export_checkpoint_representation(
     artifact_dir: Path | None = None,
     overwrite: bool = True,
 ):
-    """Fit pooled control-MAD/PCA80 and update every checkpoint store."""
+    """Persist/reuse control-MAD, fit pooled PCA80, and update every store."""
     plan = plan_checkpoint_representation(
         collection_path,
         model_family=model_family,
@@ -134,7 +150,7 @@ def main(
     artifact_dir: Path | None,
     overwrite: bool,
 ) -> None:
-    """Write pooled control-MAD/PCA80 coordinates to a checkpoint's stores."""
+    """Run evaluation Step 0 for a checkpoint's stores."""
     manifest = export_checkpoint_representation(
         collection,
         model_family=model_family,

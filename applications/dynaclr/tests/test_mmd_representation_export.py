@@ -8,6 +8,7 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 import pytest
+import zarr
 
 from dynaclr.evaluation.mmd.config import ComparisonSpec, MMDPooledConfig
 from dynaclr.evaluation.mmd.export_representation import (
@@ -77,6 +78,8 @@ def test_export_pooled_representation_updates_only_named_slots(tmp_path: Path):
         assert np.array_equal(result.obsm["X_existing"], np.ones((len(result), 2)))
         assert result.uns["existing"]["preserved"]
         scores = result.obsm["X_normalized_pca80"]
+        normalized = result.obsm["X_control_mad"]
+        assert normalized.shape == original.shape
         assert scores.shape[0] == len(result)
         assert scores.shape[1] <= original.shape[1]
         metadata = result.uns["X_normalized_pca80"]
@@ -85,10 +88,21 @@ def test_export_pooled_representation_updates_only_named_slots(tmp_path: Path):
         assert metadata["condition_column"] == "perturbation"
         assert list(metadata["condition_aliases"]["uninfected"]) == ["uninfected", "mock"]
         assert metadata["fit_cells"] == 188
+        assert metadata["schema_version"] == 2
+        assert metadata["intermediate_embedding_key"] == "X_control_mad"
+        assert metadata["pca_algorithm"]["solver"] == "numpy.linalg.eigh"
+        assert not metadata["pca_algorithm"]["whitened"]
         assert metadata["n_components_by_marker"]["SEC61B"] == scores.shape[1]
+        normalized_metadata = result.uns["X_control_mad"]
+        assert normalized_metadata["source_values_sha256"]
+        assert normalized_metadata["normalized_values_sha256"]
+        assert normalized_metadata["normalization_obs_checksum"]
 
     assert (artifact_dir / "zarr_export_manifest.csv").exists()
     assert (artifact_dir / "zarr_export_metadata.json").exists()
+    assert (artifact_dir / "input_store_manifest.csv").exists()
+    assert (artifact_dir / "pca_fit_manifest.csv").exists()
+    assert (artifact_dir / "pca_fit_rows" / "SEC61B.npz").exists()
     assert (artifact_dir / "pca_models" / "SEC61B.npz").exists()
     assert (artifact_dir / "marker_pca_scree.pdf").read_bytes().startswith(b"%PDF")
 
@@ -134,6 +148,48 @@ def test_export_uses_each_markers_exact_global_pca80_width(tmp_path: Path):
         assert width == metadata["n_dimensions"]
     assert widths["CORRELATED"] < widths["ISOTROPIC"]
     assert set(manifest["n_dimensions"]) == set(widths.values())
+
+
+def test_export_reuses_control_mad_when_refitting_pca(tmp_path: Path):
+    first = tmp_path / "exp_a.zarr"
+    second = tmp_path / "exp_b.zarr"
+    _write_store(first, "exp_a", seed=21)
+    _write_store(second, "exp_b", seed=22)
+
+    export_pooled_representation(
+        _config([first], tmp_path / "output"),
+        artifact_dir=tmp_path / "first_fit",
+    )
+    cached_before = ad.read_zarr(first).obsm["X_control_mad"].copy()
+
+    config = _config([first, second], tmp_path / "output")
+    config.representation.pca_max_cells_per_dataset_class = 20
+    manifest = export_pooled_representation(config, artifact_dir=tmp_path / "second_fit")
+
+    reused = manifest.set_index("input_path")["normalization_cache_reused"].to_dict()
+    assert bool(reused[str(first)])
+    assert not bool(reused[str(second)])
+    assert np.array_equal(ad.read_zarr(first).obsm["X_control_mad"], cached_before)
+    metadata = ad.read_zarr(first).uns["X_normalized_pca80"]
+    assert metadata["pca_fit_id"]
+    assert list(metadata["fit_input_paths"]) == [str(first), str(second)]
+    assert metadata["pca_fit_row_checksums"]["SEC61B"]
+    assert (tmp_path / "second_fit" / "control_mad_summary.csv").exists()
+    assert len(list((tmp_path / "second_fit" / "control_mad_contracts").glob("*.npz"))) == 2
+
+
+def test_export_invalidates_control_mad_after_in_place_source_rewrite(tmp_path: Path):
+    path = tmp_path / "exp.zarr"
+    _write_store(path, "exp", seed=23)
+    config = _config([path], tmp_path / "output")
+    export_pooled_representation(config, artifact_dir=tmp_path / "first_fit")
+
+    root = zarr.open_group(path, mode="a", use_consolidated=False)
+    root["X"][0, 0] = float(root["X"][0, 0]) + 10.0
+
+    manifest = export_pooled_representation(config, artifact_dir=tmp_path / "second_fit")
+
+    assert not bool(manifest.loc[0, "normalization_cache_reused"])
 
 
 def test_export_pooled_representation_can_refuse_replacement(tmp_path: Path):

@@ -38,6 +38,7 @@ class PreparedMMDRepresentation:
     n_components_by_marker: dict[str, int]
     normalization_contracts: tuple[dict, ...]
     pca_fits: dict[str, ExplainedVariancePCA]
+    pca_fit_rows: dict[str, np.ndarray]
     normalization_summary: pd.DataFrame
     pca_summary: pd.DataFrame
 
@@ -217,8 +218,16 @@ def prepare_mmd_representation(
     *,
     artifact_dir: Path | None = None,
     fit_mask: np.ndarray | None = None,
+    pre_normalized: np.ndarray | None = None,
+    normalization_contracts: tuple[dict, ...] = (),
+    normalization_summary: pd.DataFrame | None = None,
 ) -> PreparedMMDRepresentation:
-    """Fit control-MAD/PCA once and return row-aligned MMD coordinates."""
+    """Fit control-MAD/PCA once and return row-aligned MMD coordinates.
+
+    ``pre_normalized`` is the durable boundary between the two operations. It
+    allows callers to reuse a previously persisted control-MAD matrix while
+    fitting a new pooled PCA basis after the collection changes.
+    """
     x = np.asarray(x, dtype=np.float32)
     obs = obs.copy()
     if config.marker_key not in obs:
@@ -231,13 +240,20 @@ def prepare_mmd_representation(
             raise ValueError(f"fit_mask must have shape ({len(obs)},), got {fit_mask.shape}")
     if not fit_mask.any():
         raise ValueError("fit_mask does not select any rows")
-    if config.normalization == "control_mad":
+    if pre_normalized is not None:
+        normalized = np.asarray(pre_normalized, dtype=np.float32)
+        if normalized.shape != x.shape:
+            raise ValueError(f"pre_normalized must have shape {x.shape}, got {normalized.shape}")
+        contracts = normalization_contracts
+        normalization_summary = pd.DataFrame() if normalization_summary is None else normalization_summary.copy()
+    elif config.normalization == "control_mad":
         normalized, contracts, normalization_summary = _control_mad_normalize(x, obs, config, fit_mask)
     else:
         normalized, contracts, normalization_summary = x.copy(), (), pd.DataFrame()
 
     markers = obs[config.marker_key].astype(str).to_numpy()
     pca_fits: dict[str, ExplainedVariancePCA] = {}
+    pca_fit_rows: dict[str, np.ndarray] = {}
     pca_rows: list[dict] = []
     if config.pca_variance is None:
         transformed = normalized
@@ -247,6 +263,7 @@ def prepare_mmd_representation(
         for marker in sorted(np.unique(markers)):
             marker_mask = markers == marker
             fit_rows = _balanced_pca_rows(obs, marker_mask, config, marker, fit_mask)
+            pca_fit_rows[marker] = fit_rows
             fit = fit_pca_for_explained_variance(normalized[fit_rows], config.pca_variance, marker=marker)
             indices = np.flatnonzero(marker_mask)
             outputs[marker] = (indices, fit.transform(normalized[indices]).astype(np.float32))
@@ -276,6 +293,7 @@ def prepare_mmd_representation(
         n_components_by_marker=n_components,
         normalization_contracts=contracts,
         pca_fits=pca_fits,
+        pca_fit_rows=pca_fit_rows,
         normalization_summary=normalization_summary,
         pca_summary=pd.DataFrame(pca_rows),
     )
@@ -301,6 +319,7 @@ def save_representation_artifacts(
     if not prepared.pca_summary.empty:
         prepared.pca_summary.to_csv(artifact_dir / "marker_pca_summary.csv", index=False)
     model_dir = artifact_dir / "pca_models"
+    fit_rows_dir = artifact_dir / "pca_fit_rows"
     scree: list[dict] = []
     for marker, fit in prepared.pca_fits.items():
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -314,6 +333,12 @@ def save_representation_artifacts(
             explained_variance_ratio=fit.explained_variance_ratio,
             cumulative_explained_variance=fit.cumulative_explained_variance,
             checksum=checksum,
+        )
+        fit_rows_dir.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            fit_rows_dir / f"{safe}.npz",
+            marker=marker,
+            pooled_row_indices=prepared.pca_fit_rows[marker].astype(np.int64),
         )
         scree.extend(
             {
@@ -331,7 +356,15 @@ def save_representation_artifacts(
         pd.DataFrame(scree).to_csv(artifact_dir / "marker_pca_scree.csv", index=False)
         _save_marker_scree_pdf(prepared, config, artifact_dir)
     run_info = {
+        "schema_version": 2,
         "representation": prepared.label,
+        "pca_algorithm": {
+            "solver": "numpy.linalg.eigh",
+            "covariance": "sample covariance (n - 1 denominator)",
+            "centered": True,
+            "whitened": False,
+            "component_selection": "fewest components reaching cumulative explained variance target",
+        },
         "normalization": config.normalization,
         "control_key": config.control_key,
         "control_values": config.control_values,
@@ -340,6 +373,14 @@ def save_representation_artifacts(
         "pca_variance": config.pca_variance,
         "pca_max_cells_per_dataset_class": config.pca_max_cells_per_dataset_class,
         "random_seed": config.random_seed,
+        "pca_sampling": {
+            "strata": [config.experiment_key, "control_vs_perturbed"],
+            "control_key": config.control_key,
+            "control_values": config.control_values,
+            "max_cells_per_dataset_class": config.pca_max_cells_per_dataset_class,
+            "marker_seed": "random_seed + uint32(sha256(marker)[:4], little-endian)",
+            "without_replacement": True,
+        },
         "n_components_by_marker": prepared.n_components_by_marker,
     }
     (artifact_dir / "run_info.json").write_text(json.dumps(run_info, indent=2) + "\n", encoding="utf-8")

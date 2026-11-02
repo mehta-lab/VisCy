@@ -386,6 +386,7 @@ def _generate_linear_classifiers_yaml(
         "solver": lc.solver,
         "split_train_data": lc.split_train_data,
         "random_seed": lc.random_seed,
+        "embedding_key": lc.embedding_key,
     }
     if lc.split_groups_by:
         cfg_dict["split_groups_by"] = lc.split_groups_by
