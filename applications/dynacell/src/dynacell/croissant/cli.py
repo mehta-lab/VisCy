@@ -179,8 +179,8 @@ _CORRESPONDING_AUTHOR: dict[str, object] = {
 
 _DYNACELL_BIBTEX = (
     "@inproceedings{dynacell2026, "
-    "title={Evaluating Dynamic 3D Virtual Staining of Live Cells "
-    "with {DynaCell}}, "
+    "title={The {DynaCell} Evaluation Suite for Dynamic 3D Virtual "
+    "Staining of Live Cells}, "
     "author={Kalinin, Alexandr A. and Zheng, Dihan and "
     "Theodoro, Taylla Milena and Ivanov, Ivan and "
     "Hirata-Miyasaki, Eduardo and Lee, See-Chi and Liu, Aofei and "

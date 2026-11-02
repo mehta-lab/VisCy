@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "Evaluating Dynamic 3D Virtual Staining of Live Cells with DynaCell"
+title: "The DynaCell Evaluation Suite for Dynamic 3D Virtual Staining of Live Cells"
 message: >-
   If you use DynaCell (code, data, or trained checkpoints), please cite the
   paper listed under preferred-citation.
@@ -67,7 +67,7 @@ keywords:
   - deep learning
 preferred-citation:
   type: conference-paper
-  title: "Evaluating Dynamic 3D Virtual Staining of Live Cells with DynaCell"
+  title: "The DynaCell Evaluation Suite for Dynamic 3D Virtual Staining of Live Cells"
   collection-title: "Advances in Neural Information Processing Systems (NeurIPS 2026), Evaluations and Datasets Track"
   year: 2026
   authors:
