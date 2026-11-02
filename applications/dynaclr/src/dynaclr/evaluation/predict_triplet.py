@@ -39,7 +39,6 @@ import yaml
 
 from dynaclr.evaluation.paths import (
     DATASETS_ROOT,
-    dataset_name_from_data_path,
     embedding_store,
 )
 from viscy_data.channel_utils import parse_channel_name
@@ -85,6 +84,9 @@ class ReporterRun:
         Destination embeddings zarr.
     is_labelfree : bool
         Whether the channel is label-free (phase/brightfield).
+    blank_qc_channels : list[str]
+        Unique co-imaged raw channels used to compute one all-channel
+        ``is_blank`` flag before prediction transforms.
     """
 
     experiment: str
@@ -96,6 +98,7 @@ class ReporterRun:
     pixel_size_xy_um: float | None
     output_path: Path
     is_labelfree: bool
+    blank_qc_channels: list[str]
     exclude_fovs: list[str] | None = None
 
 
@@ -224,8 +227,10 @@ def plan_predict_runs(
     Each embedding zarr lands in the dataset-centric tree
     ``{dataset}/2-phenotyping/predictions/{model_family}/{run}/{ckpt_name}/{marker}.zarr``
     (see :mod:`dynaclr.evaluation.paths`). The dataset is derived per experiment
-    from its ``data_path``, so multiple markers of one physical dataset
-    co-locate in the same ``{model_family}/{run}/{ckpt_name}/`` directory.
+    from the collection experiment name, so native stage paths such as
+    ``4-assemble/{dataset}_1.zarr`` still map to the acquisition dataset and
+    multiple markers of one physical dataset co-locate in the same
+    ``{model_family}/{run}/{ckpt_name}/`` directory.
 
     Parameters
     ----------
@@ -251,7 +256,13 @@ def plan_predict_runs(
     """
     runs: list[ReporterRun] = []
     for exp in collection.experiments:
-        dataset = dataset_name_from_data_path(exp.data_path)
+        # ``data_path`` may point directly into a native numbered stage such as
+        # ``.../{dataset}/4-assemble/{dataset}_1.zarr``. Deriving the identity
+        # from its immediate parent would incorrectly call every such dataset
+        # ``4-assemble`` and collide their outputs. Collection experiment names
+        # are the curated acquisition identity and are stable across layouts.
+        dataset = exp.name
+        blank_qc_channels = list(dict.fromkeys(ch.name for ch in exp.channels))
         for ch in exp.channels:
             is_labelfree = parse_channel_name(ch.name)["channel_type"] == "labelfree"
             if not include_labelfree and is_labelfree:
@@ -277,6 +288,7 @@ def plan_predict_runs(
                         datasets_root=datasets_root,
                     ),
                     is_labelfree=is_labelfree,
+                    blank_qc_channels=blank_qc_channels,
                 )
             )
     if not runs:
@@ -324,6 +336,30 @@ def _build_foundation_module(training_config: str):
     return init.model
 
 
+def _build_katamari_module(
+    checkpoint: str,
+    model_input_size: tuple[int, int],
+    readout: str,
+    use_teacher: bool,
+):
+    """Build the canonical Katamari single-channel prediction adapter."""
+    from dynaclr.evaluation.katamari import KatamariPredictModule
+
+    return KatamariPredictModule(
+        checkpoint,
+        model_input_size=model_input_size,
+        readout=readout,
+        use_teacher=use_teacher,
+    )
+
+
+def _input_normalization(model_type: str) -> tuple[str, str]:
+    """Return the source-FOV statistics required by an inference route."""
+    if model_type == "katamari":
+        return "p1", "p99_p1"
+    return "mean", "std"
+
+
 def _run_predict(
     entry: ReporterRun,
     *,
@@ -340,16 +376,22 @@ def _run_predict(
     reference_pixel_size: float | None,
     reference_pixel_size_z_um: float | None,
     yx_patch_size: tuple[int, int],
+    katamari_model_input_size: tuple[int, int],
+    katamari_readout: str,
+    katamari_use_teacher: bool,
     batch_size: int,
     num_workers: int,
     uns_metadata: dict | None = None,
+    eligibility_table=None,
+    eligibility_provenance: dict | None = None,
 ) -> None:
     """Build the model and run Lightning predict for one reporter.
 
     ``model_type="dynaclr"`` builds a :class:`ContrastiveModule` from
     ``encoder_kwargs`` and loads ``checkpoint``. ``model_type="foundation"``
     instantiates the ``model:`` block of ``training_config`` (weights load inside
-    the foundation wrapper — no Lightning checkpoint).
+    the foundation wrapper — no Lightning checkpoint). ``model_type="katamari"``
+    loads the canonical Katamari checkpoint behind a single-channel adapter.
 
     Z selection is either a fixed absolute ``z_range`` (same slices for every
     FOV) or, when ``z_extraction_window`` is given, a fixed-width window centered
@@ -358,18 +400,28 @@ def _run_predict(
     """
     from lightning.pytorch import Trainer, seed_everything
 
+    from dynaclr.evaluation.phenotyping_eligibility import require_eligibility_output_identity
     from viscy_data.triplet import TripletDataModule
-    from viscy_transforms import NormalizeSampled
     from viscy_utils.callbacks.embedding_writer import EmbeddingWriter
 
+    require_eligibility_output_identity(entry.output_path, eligibility_provenance)
     seed_everything(42)
 
-    if model_type == "dynaclr":
-        module = _build_dynaclr_module(checkpoint, encoder_kwargs, example_input_array_shape)
-    elif model_type == "foundation":
-        module = _build_foundation_module(training_config)
+    if model_type == "katamari":
+        from dynaclr.evaluation.katamari import KatamariFovNormalize, mask_incompatible_flash_attn
+
+        mask_incompatible_flash_attn()
+        normalization = KatamariFovNormalize(keys=[entry.channel])
     else:
-        raise ValueError(f"unknown model_type {model_type!r}; expected 'dynaclr' or 'foundation'")
+        from viscy_transforms import NormalizeSampled
+
+        norm_subtrahend, norm_divisor = _input_normalization(model_type)
+        normalization = NormalizeSampled(
+            keys=[entry.channel],
+            level="fov_statistics",
+            subtrahend=norm_subtrahend,
+            divisor=norm_divisor,
+        )
 
     # Fixed absolute window vs per-FOV focus-centered window (mutually exclusive).
     if z_extraction_window is not None:
@@ -381,7 +433,26 @@ def _run_predict(
     else:
         z_kwargs = {"z_range": list(z_range)}
 
-    datamodule = TripletDataModule(
+    datamodule_class = TripletDataModule
+    eligibility_kwargs = {}
+    if eligibility_table is not None:
+        from dynaclr.evaluation.phenotyping_eligibility import EligibilityTripletMixin
+
+        class EligibleTripletDataModule(EligibilityTripletMixin, TripletDataModule):
+            """Filter per-reporter tracking rows before image patches are read."""
+
+        datamodule_class = EligibleTripletDataModule
+        uns_metadata = dict(uns_metadata or {})
+        audit = dict(eligibility_provenance or {})
+        eligibility_kwargs = {
+            "eligibility_table": eligibility_table,
+            "eligibility_dataset": entry.experiment,
+            "eligibility_channel": entry.channel,
+            "eligibility_audit": audit,
+            "eligibility_metadata": uns_metadata,
+        }
+
+    datamodule = datamodule_class(
         data_path=entry.data_path,
         tracks_path=entry.tracks_path,
         source_channel=[entry.channel],
@@ -395,15 +466,29 @@ def _run_predict(
         num_workers=num_workers,
         fit_include_wells=entry.wells,
         fit_exclude_fovs=entry.exclude_fovs,
-        normalizations=[
-            NormalizeSampled(
-                keys=[entry.channel],
-                level="fov_statistics",
-                subtrahend="mean",
-                divisor="std",
-            )
-        ],
+        blank_qc_channels=entry.blank_qc_channels,
+        normalizations=[normalization],
+        **eligibility_kwargs,
     )
+
+    if eligibility_table is not None:
+        # Read tracking rows/image metadata before model or GPU setup. The
+        # mixin retains this selection for Lightning's setup.
+        datamodule._align_tracks_tables_with_positions()
+
+    if model_type == "dynaclr":
+        module = _build_dynaclr_module(checkpoint, encoder_kwargs, example_input_array_shape)
+    elif model_type == "foundation":
+        module = _build_foundation_module(training_config)
+    elif model_type == "katamari":
+        module = _build_katamari_module(
+            checkpoint,
+            katamari_model_input_size,
+            katamari_readout,
+            katamari_use_teacher,
+        )
+    else:
+        raise ValueError(f"unknown model_type {model_type!r}; expected 'dynaclr', 'foundation', or 'katamari'")
 
     writer = EmbeddingWriter(
         output_path=entry.output_path,
@@ -450,11 +535,12 @@ _DEFAULT_ENCODER_KWARGS = {
 )
 @click.option(
     "--model-type",
-    type=click.Choice(["dynaclr", "foundation"]),
+    type=click.Choice(["dynaclr", "foundation", "katamari"]),
     default="dynaclr",
     show_default=True,
     help="'dynaclr' loads a checkpoint into a ContrastiveEncoder; 'foundation' "
-    "instantiates the model: block of --training-config (weights in the wrapper).",
+    "instantiates the model: block of --training-config; 'katamari' loads the "
+    "canonical checkpoint in the EvolutionaryScale runtime.",
 )
 @click.option(
     "--checkpoint",
@@ -542,8 +628,33 @@ _DEFAULT_ENCODER_KWARGS = {
     "reference-grid slice count to the native count covering the same physical depth.",
 )
 @click.option("--yx-patch-size", nargs=2, type=int, default=(160, 160), show_default=True, help="Final YX patch.")
+@click.option(
+    "--katamari-model-input-size",
+    nargs=2,
+    type=int,
+    default=(224, 224),
+    show_default=True,
+    help="Katamari encoder YX size after sampling the physical --yx-patch-size crop.",
+)
+@click.option(
+    "--katamari-readout",
+    type=click.Choice(["avg", "cls", "cls_plus_gap"]),
+    default="avg",
+    show_default=True,
+)
+@click.option(
+    "--katamari-use-teacher/--katamari-use-student",
+    default=False,
+    help="Use checkpoint EMA-teacher weights instead of the student (Katamari only).",
+)
 @click.option("--batch-size", type=int, default=32, show_default=True)
 @click.option("--num-workers", type=int, default=0, show_default=True, help="Must be 0 for predict (zarr-fork).")
+@click.option(
+    "--eligibility",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Optional approved eligibility parquet; excludes only explicit False before reading image patches.",
+)
 @click.option(
     "--no-enrich-obs",
     "enrich_obs",
@@ -571,13 +682,17 @@ def main(
     reference_pixel_size: float,
     reference_pixel_size_z_um: float | None,
     yx_patch_size: tuple[int, int],
+    katamari_model_input_size: tuple[int, int],
+    katamari_readout: str,
+    katamari_use_teacher: bool,
     batch_size: int,
     num_workers: int,
     enrich_obs: bool,
+    eligibility: Path | None = None,
 ) -> None:
     """Run per-reporter triplet embedding inference from a collection + model."""
-    if model_type == "dynaclr" and checkpoint is None:
-        raise click.UsageError("--checkpoint is required for --model-type dynaclr.")
+    if model_type in {"dynaclr", "katamari"} and checkpoint is None:
+        raise click.UsageError(f"--checkpoint is required for --model-type {model_type}.")
     if model_type == "foundation" and training_config is None:
         raise click.UsageError("--training-config is required for --model-type foundation.")
     if z_range and z_window is not None:
@@ -587,6 +702,13 @@ def main(
     # Focus-centered when --z-window given; otherwise fixed window (default (15, 45)).
     if z_window is None and not z_range:
         z_range = (15, 45)
+
+    eligibility_table = None
+    eligibility_provenance = None
+    if eligibility is not None:
+        from dynaclr.evaluation.phenotyping_eligibility import load_eligibility
+
+        eligibility_table, eligibility_provenance = load_eligibility(eligibility)
 
     collection = load_collection(collection_path)
     experiments_by_name = {exp.name: exp for exp in collection.experiments}
@@ -601,6 +723,11 @@ def main(
         include_labelfree=include_labelfree,
     )
 
+    from dynaclr.evaluation.phenotyping_eligibility import require_eligibility_output_identity
+
+    for reporter in runs:
+        require_eligibility_output_identity(reporter.output_path, eligibility_provenance)
+
     click.echo("=== Provenance ===")
     click.echo(f"model_type   : {model_type}")
     click.echo(f"model_family : {model_family}")
@@ -609,6 +736,10 @@ def main(
         click.echo(f"training_cfg : {ckpt_name} ({training_config})")
     else:
         click.echo(f"checkpoint   : {ckpt_name} ({checkpoint})")
+    if model_type == "katamari":
+        click.echo("input recipe : single-channel p1/p99_p1 -> clamp[-1,2]")
+        click.echo(f"model input  : {katamari_model_input_size}; readout={katamari_readout}")
+        click.echo(f"weights      : {'EMA teacher' if katamari_use_teacher else 'student'}")
     click.echo(f"planned runs : {len(runs)}")
     for r in runs:
         wells = "all wells" if r.wells is None else ", ".join(r.wells)
@@ -628,7 +759,23 @@ def main(
             "marker": r.marker,
             "channel": r.channel,
             "reference_pixel_size_z_um": reference_pixel_size_z_um,
+            "yx_patch_size": list(yx_patch_size),
         }
+        if model_type == "katamari":
+            provenance.update(
+                {
+                    "channel_encoding": "single_channel_per_marker_store",
+                    "input_normalization_level": "fov_statistics",
+                    "input_normalization_subtrahend": "p1",
+                    "input_normalization_divisor": "p99_p1",
+                    "input_clamp": [-1.0, 2.0],
+                    "katamari_model_input_size": list(katamari_model_input_size),
+                    "katamari_resize_mode": "bilinear_antialias",
+                    "katamari_readout": katamari_readout,
+                    "katamari_use_teacher": katamari_use_teacher,
+                    "feature_normalization": "deferred_to_model_matrix_normalize_stage",
+                }
+            )
         _run_predict(
             r,
             model_type=model_type,
@@ -644,9 +791,17 @@ def main(
             reference_pixel_size=reference_pixel_size,
             reference_pixel_size_z_um=reference_pixel_size_z_um,
             yx_patch_size=yx_patch_size,
+            katamari_model_input_size=katamari_model_input_size,
+            katamari_readout=katamari_readout,
+            katamari_use_teacher=katamari_use_teacher,
             batch_size=batch_size,
             num_workers=num_workers,
             uns_metadata=provenance,
+            **(
+                {"eligibility_table": eligibility_table, "eligibility_provenance": eligibility_provenance}
+                if eligibility_table is not None
+                else {}
+            ),
         )
         if enrich_obs:
             counts = enrich_embedding_obs(r.output_path, experiments_by_name[r.experiment], r.marker)

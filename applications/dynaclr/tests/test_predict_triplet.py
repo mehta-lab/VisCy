@@ -13,6 +13,7 @@ import pytest
 
 from dynaclr.evaluation.predict_triplet import (
     COLLECTION_OBS_COLUMNS,
+    _input_normalization,
     build_obs_metadata,
     plan_predict_runs,
 )
@@ -59,6 +60,19 @@ def test_one_run_per_channel_entry():
     assert [r.marker for r in runs] == ["SEC61B", "TOMM20", "G3BP1", "pAL17", "Phase3D"]
 
 
+def test_blank_qc_uses_all_unique_coimaged_channels():
+    """Every reporter checks the same unique raw channels before transforms."""
+    runs = _plan()
+    expected = ["raw GFP EX488 EM525-45", "raw mCherry EX561 EM600-37", "Phase3D"]
+    assert all(r.blank_qc_channels == expected for r in runs)
+
+
+def test_katamari_uses_checkpoint_fov_percentile_normalization():
+    assert _input_normalization("katamari") == ("p1", "p99_p1")
+    assert _input_normalization("dynaclr") == ("mean", "std")
+    assert _input_normalization("foundation") == ("mean", "std")
+
+
 def test_per_reporter_well_subset():
     """Wells carry through as fit_include_wells; empty -> None (all wells)."""
     runs = {r.marker: r for r in _plan()}
@@ -73,6 +87,25 @@ def test_output_path_is_dataset_centric():
     assert run.output_path == Path(
         "/data/2026_07_01_ZIKV/2-phenotyping/predictions/"
         "DynaCLR-2D-MIP-BagOfChannels/2d-mip-fix-shuffler/epoch105-step84800/embeddings/SEC61B.zarr"
+    )
+
+
+def test_native_assemble_path_uses_experiment_name_for_output():
+    """Numbered native-stage inputs must not write under a shared 4-assemble key."""
+    collection = _box_collection()
+    collection.experiments[0].data_path = "/source/2026_07_01_ZIKV/4-assemble/2026_07_01_ZIKV_1.zarr"
+    run = plan_predict_runs(
+        collection,
+        model_family=MODEL_FAMILY,
+        run=RUN,
+        ckpt_name=CKPT,
+        datasets_root="/outputs",
+        markers=["SEC61B"],
+    )[0]
+    assert run.output_path == Path(
+        "/outputs/2026_07_01_ZIKV/2-phenotyping/predictions/"
+        "DynaCLR-2D-MIP-BagOfChannels/2d-mip-fix-shuffler/"
+        "epoch105-step84800/embeddings/SEC61B.zarr"
     )
 
 
