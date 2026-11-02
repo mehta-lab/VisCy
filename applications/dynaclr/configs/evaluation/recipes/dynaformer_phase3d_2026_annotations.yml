@@ -1,0 +1,49 @@
+# DynaFormer: self-supervised temporal head on frozen Phase3D embeddings plus the
+# raw-sequence baseline ladder, scored on human-annotated infection onset.
+# Sequences are lineage paths (track_id -> parent_track_id per FOV), not tracks.
+dynaformer:
+  feature_key: X
+  marker: Phase3D
+  primary_event: infection
+  datasets:
+    - experiment: 2026_04_21_A549_G3BP1_DENV
+      annotation: /hpc/projects/organelle_phenotyping/datasets/annotations/2026_04_21_G3BP1_DENV/2026_04_21_G3BP1_DENV_combined_annotations.csv
+    - experiment: 2026_04_28_A549_SEC61B_DENV
+      annotation: /hpc/projects/organelle_phenotyping/datasets/annotations/2026_04_28_SEC61B_DENV/2026_04_28_SEC61B_DENV_combined_annotations.csv
+  events:
+    - {name: infection, column: infection_state, negative: uninfected, positive: infected}
+    - {name: remodeling, column: organelle_state, negative: noremodel, positive: remodel}
+    - {name: division, column: cell_division_state, negative: interphase, positive: mitosis}
+    - {name: death, column: cell_death_state, negative: alive, positive: dead}
+  cohort_intersection_paths: []
+  k_frames: [1, 2, 4, 8, 16]
+  horizons_hours: [1.0, 2.0, 4.0, 8.0]
+  n_max_frames: 32
+  frame_dropout: 0.1
+  causal_probability: 0.5
+  history_budget: [1, 2, 4, 8, 16, 32]
+  future_budget: [0, 2, 4, 8]
+  n_folds: 5
+  random_seed: 42
+  forecast_reference_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/matrix_evaluations/temporal_forecast_patch_size
+  head:
+    d_model: 128
+    n_heads: 4
+    n_layers: 3
+    feedforward_multiplier: 2
+    dropout: 0.1
+    rope_min_period_hours: 0.1667
+    rope_max_period_hours: 96.0
+  train:
+    steps: 5000
+    batch_size: 256
+    learning_rate: 3.0e-4
+    weight_decay: 0.05
+    temperature: 0.1
+    n_negatives: 64
+    log_every: 250
+  probe:
+    C: 1.0
+    smoothing_sigma_hours: 1.0
+    last_k: [4, 8]
+    hysteresis_frames: 2

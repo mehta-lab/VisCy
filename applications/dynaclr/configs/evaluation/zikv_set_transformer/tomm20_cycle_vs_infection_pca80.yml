@@ -1,0 +1,99 @@
+# Fig 6 attempt 25: Alex Lin's OPS set classifier (czbiohub-sf/ops_monorepo@ab11b56, unchanged) on cached
+# DynaCLR TOMM20 embeddings, to separate cell-cycle-linked from infection-induced TOMM20 changes.
+# Run: .venv/bin/python applications/dynaclr/tools/tomm20_set_classifier.py --config <this file> --stage <stage>
+# Record of attempt 25 (outputs produced at viscy commit 77113bac). TCN-only lineage labels.
+attempt: 25
+seed: 17
+
+fig_root: /home/eduardo.hirata/repos/dynaclr-organelle-paper/organelle_remodeling_paper/figures/labelfree_infection
+labels: /hpc/mydata/eduardo.hirata/fig6_inputs/attempt23_phase_embedding_e017ba39.parquet
+labels_origin: FIG/23_tomm20_density_montage/source_data/phase_embedding.parquet
+labels_sha256: e017ba39f4cd542c10784e3ba462e30143064a9e73e2a7cfe1820f4ab1e7e806
+require_sensor_agreement: false
+compare_to: null
+expected_frames: 94101
+attempt13_manifest: /home/eduardo.hirata/repos/dynaclr-organelle-paper/organelle_remodeling_paper/figures/labelfree_infection/13_crop_candidate_gallery/manifest.json
+crop_helpers: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/scripts/evaluation/build_fig6_crop_candidates.py
+crop_helper_dependencies: [build_fig6_phase_prototype, build_fig6_phase_labels]
+
+embedding_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+embedding_suffix: 2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800/embeddings/TOMM20.zarr
+embedding_key: X_normalized_pca80
+embedding_dims: 49
+pca_checksum_prefix: c81187f1
+datasets:
+  "07_01": 2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV
+  "04_10": 2026_04_10_A549_TOMM20_ZIKV
+control_wells:
+  "07_01": A/3
+  "04_10": A/2
+units13:
+  "07_01": 07_01_SEC61B_TOMM20_G3BP1
+  "04_10": 04_10_TOMM20
+
+pinned_root: /hpc/mydata/eduardo.hirata/fig6_inputs/ops_set_classifier_ab11b56
+hydra_config_dir: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/evaluation/zikv_set_transformer/set_classifier_hydra
+hydra_train_config: train_tomm20_set_classifier
+hydra_eval_config: eval_tomm20_set_classifier
+work_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/infectomics-to-ops/implementation/tomm20_cycle_vs_infection/01_dynaclr_tomm20_pca80_2h
+fig_dir: /home/eduardo.hirata/repos/dynaclr-organelle-paper/organelle_remodeling_paper/figures/labelfree_infection/25_tomm20_set_classifier_cycle_vs_infection
+
+tau_start: -8
+tau_stop: 12
+bin_hours: 2
+phases: [G1, S, G2]
+min_train_cells: 20
+min_m_cells: 30
+n_folds: 5
+lodo_val_fraction: 0.2
+dump_n_cells: 100
+
+run:
+  host: gpu-sm02-10
+  allocation: "37374328"
+  python: /hpc/mydata/eduardo.hirata/repos/viscy/.venv/bin/python
+  log_dir: /hpc/mydata/eduardo.hirata/slurm_logs
+  log_prefix: attempt25
+  parallel: 2
+  threads_per_job: 4
+  n_cells_per_set: [10, 25, 50, 100]
+  eval_n_cells: [1, 2, 5, 10, 25, 50, 100, 200]
+  eval_repetitions: 30
+  score_bag_sizes: [1, 2, 5, 10, 20, 50, 100]
+  score_reps: 50
+  smoke:
+    fold: fold0
+    n_cells_per_set: 10
+    num_epochs: 2
+
+analyze:
+  test_bags_per_class: 30
+  baseline_train_bags_per_class: 200
+  baseline_c_grid: [0.01, 0.1, 1.0, 10.0]
+  distortion_max_bag: 25
+  distortion_partitions: 30
+  distortion_min_cells: 5
+  cross_top: 50
+  bootstrap: 2000
+
+render:
+  per_column: 4
+  montage_per_class: 10
+  per_fov: 2
+  umap_top: 50
+  m_row:
+    division_min: 0.98
+    death_max: 0.9
+    window: [-1, 0, 1]
+
+report_notes:
+- 'Visual check of the montages: a few top BYSTANDER and cell-cycle-classifier G2 cells, including one control-well G2 cell, show diffuse nuclear pAL17. Whether these are infected cells without a TCN onset call or cycle-linked sensor redistribution is not resolved here; the reference pools are not sensor-verified.'
+deviations:
+- 'Infection AUROC: added variant B with reference bags matched to each τ bag''s (dataset, 2 h HPI bin) composition (cross-dataset only where a fold''s reference test pool lacks that dataset), because the HPI-only baseline separates τ bags from pool references almost perfectly; variant A is the specified analysis.'
+- Analysis bags (AUROC, confusion, cross-checks) use the largest eval size ≤ the chosen size and ≤ half the smallest CV test pool (10 cells), not the chosen training size, because late τ test pools (21–48 cells) are smaller than the chosen size; eval.py lists are capped per fold at the smallest test pool.
+- Classes are also dropped from a fold if their val or test pool is empty (an empty pool would give all-masked bags); no class was dropped.
+- 'Hydra configs: num_workers 0 (≤ 8 threads on the shared node) and eval show_progress false; everything else as shipped. Training seed 42 as shipped; our sampling uses seed 17.'
+- Cross-scoring adds a random same-class (forward) and random post-onset (reverse) comparator next to the specified random reference cells; the reverse random reference is also matched on source (bystander or control); the UMAP figure adds a Cell-cycle classifier panel.
+- 'Provenance: the export and run stages ran with an earlier revision of this wrapper (same export/run logic; later edits changed analyze/render/report, export-record tabulation, the label-path check and line wrapping); analyze, render and report were re-run with the revision recorded in manifest.json.'
+- Labels are read from the fixed snapshot fig6_inputs/attempt23_phase_embedding_e017ba39.parquet (sha256 asserted) because attempt 23 is being rewritten; the export stage had read the identical bytes from attempt 23's source_data/phase_embedding.parquet (sha256 checked against attempt 23's manifest at that time).
+- Folds deal FOVs round-robin within well type across datasets, so each fold has 2 control FOVs but 07_01's 4 control FOVs cannot reach all 5 folds (fold0 test lacks one).

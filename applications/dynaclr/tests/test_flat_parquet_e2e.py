@@ -14,6 +14,7 @@ Tests cover:
 from __future__ import annotations
 
 import pytest
+from iohub.ngff import open_ome_zarr
 
 from dynaclr.data.dataset import MultiExperimentTripletDataset
 from dynaclr.data.experiment import ExperimentRegistry
@@ -132,6 +133,24 @@ class TestFlatParquetRegistry:
             assert abs(exp.pixel_size_xy_um - 0.108) < 1e-3
             assert exp.pixel_size_z_um is not None
             assert abs(exp.pixel_size_z_um - 0.3) < 1e-3
+
+    def test_missing_pixel_sizes_fall_back_to_ome_metadata(self, flat_parquet_setup, tmp_path):
+        """Legacy parquets with null pixel sizes use the source FOV's OME scale."""
+        _, _, df = flat_parquet_setup
+        legacy_df = df.copy()
+        legacy_df["pixel_size_xy_um"] = None
+        legacy_df["pixel_size_z_um"] = None
+        legacy_path = tmp_path / "legacy_missing_pixel_sizes.parquet"
+        legacy_df.to_parquet(legacy_path)
+
+        registry, _ = ExperimentRegistry.from_cell_index(legacy_path)
+        for exp in registry.experiments:
+            group = legacy_df[legacy_df["experiment"] == exp.name]
+            first = group.iloc[0]
+            fov_path = f"{first['store_path']}/{first['well']}/{first['fov']}"
+            with open_ome_zarr(fov_path, mode="r") as pos:
+                assert exp.pixel_size_xy_um == pytest.approx(float(pos.scale[-1]))
+                assert exp.pixel_size_z_um == pytest.approx(float(pos.scale[-3]))
 
     def test_valid_anchors_have_channel_name(self, flat_parquet_setup):
         index, _, _ = flat_parquet_setup

@@ -130,6 +130,45 @@ class TestExperimentRegistry:
         registry = ExperimentRegistry(collection=collection, z_window=1)
         assert len(registry.source_channel_labels) == 3
 
+    def test_reference_z_sampling_equalizes_physical_depth(self, tmp_path):
+        """Different native Z samplings resolve to the same reference-grid slab depth."""
+        experiments = []
+        for name, pixel_size_z_um in [("mantis", 0.174), ("dragonfly", 0.288)]:
+            zarr_path = tmp_path / f"{name}.zarr"
+            with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=["GFP"]) as plate:
+                pos = plate.create_position("A", "1", "0")
+                pos.create_zeros("0", shape=(1, 1, 12, 16, 16), dtype=np.float32)
+            experiments.append(
+                ExperimentEntry(
+                    name=name,
+                    data_path=str(zarr_path),
+                    tracks_path="",
+                    channels=[ChannelEntry(name="GFP", marker="GFP")],
+                    channel_names=["GFP"],
+                    perturbation_wells={"control": ["A/1"]},
+                    interval_minutes=30.0,
+                    pixel_size_z_um=pixel_size_z_um,
+                )
+            )
+
+        reference_window = 10
+        reference_pixel_size_z_um = 0.174
+        registry = ExperimentRegistry(
+            collection=Collection(name="physical-z", experiments=experiments),
+            z_window=1,
+            z_extraction_window=reference_window,
+            reference_pixel_size_z_um=reference_pixel_size_z_um,
+        )
+
+        native_counts = {
+            exp.name: registry.z_ranges[exp.name][1] - registry.z_ranges[exp.name][0] for exp in experiments
+        }
+        assert native_counts == {"mantis": 10, "dragonfly": 6}
+        target_depth_um = reference_window * reference_pixel_size_z_um
+        for exp in experiments:
+            native_depth_um = native_counts[exp.name] * exp.pixel_size_z_um
+            assert abs(native_depth_um - target_depth_um) <= exp.pixel_size_z_um / 2
+
     def test_registry_zarr_channel_mismatch(self, mini_zarr, tmp_path):
         """ValueError when channel_names don't match zarr metadata."""
         exp = ExperimentEntry(

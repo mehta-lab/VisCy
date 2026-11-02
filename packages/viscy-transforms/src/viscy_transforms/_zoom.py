@@ -15,16 +15,15 @@ __all__ = ["BatchedZoom", "BatchedZoomd"]
 
 
 class BatchedZoom(Transform):
-    """Zoom (resize) a batched tensor by a scale factor.
+    """Resize a batched tensor by a scale factor or explicit size.
 
     Uses ``torch.nn.functional.interpolate`` for GPU-efficient resizing
     of batched 3D data. Supports various interpolation modes.
 
     Parameters
     ----------
-    scale_factor : float | tuple[float, float, float]
-        Multiplier for spatial size. If float, same factor is used for
-        all dimensions. If tuple, specifies (depth, height, width) factors.
+    scale_factor : float | tuple[float, float, float] | None
+        Multiplier for spatial size. Must be ``None`` when ``size`` is set.
     mode : str
         Interpolation algorithm. Options:
         - "nearest": Nearest neighbor interpolation
@@ -44,6 +43,9 @@ class BatchedZoom(Transform):
     antialias : bool
         If True, applies anti-aliasing when downsampling.
         Only effective for bilinear and bicubic modes. Default: False.
+    size : tuple[int, int, int] | None
+        Exact output ``(depth, height, width)``. Exactly one of ``size`` and
+        ``scale_factor`` must be provided.
 
     Returns
     -------
@@ -61,7 +63,7 @@ class BatchedZoom(Transform):
 
     def __init__(
         self,
-        scale_factor: float | tuple[float, float, float],
+        scale_factor: float | tuple[float, float, float] | None,
         mode: Literal[
             "nearest",
             "nearest-exact",
@@ -74,8 +76,12 @@ class BatchedZoom(Transform):
         align_corners: bool | None = None,
         recompute_scale_factor: bool | None = None,
         antialias: bool = False,
+        size: tuple[int, int, int] | None = None,
     ) -> None:
+        if (scale_factor is None) == (size is None):
+            raise ValueError("Provide exactly one of scale_factor or size.")
         self.scale_factor = scale_factor
+        self.size = size
         self.mode = mode
         self.align_corners = align_corners
         self.recompute_scale_factor = recompute_scale_factor
@@ -96,6 +102,7 @@ class BatchedZoom(Transform):
         """
         return torch.nn.functional.interpolate(
             sample,
+            size=self.size,
             scale_factor=self.scale_factor,
             mode=self.mode,
             align_corners=self.align_corners,
@@ -113,9 +120,8 @@ class BatchedZoomd(MapTransform):
     ----------
     keys : Sequence[str]
         Keys of the data dictionary to apply zoom to.
-    scale_factor : float | tuple[float, float, float]
-        Multiplier for spatial size. If float, same factor is used for
-        all dimensions. If tuple, specifies (depth, height, width) factors.
+    scale_factor : float | tuple[float, float, float] | None
+        Multiplier for spatial size. Must be ``None`` when ``size`` is set.
     mode : str
         Interpolation algorithm. See :class:`BatchedZoom` for options.
     align_corners : bool | None
@@ -124,6 +130,9 @@ class BatchedZoomd(MapTransform):
         If True, recomputes scale_factor for interpolation. Default: None.
     antialias : bool
         If True, applies anti-aliasing when downsampling. Default: False.
+    size : tuple[int, int, int] | None
+        Exact output ``(depth, height, width)``. Exactly one of ``size`` and
+        ``scale_factor`` must be provided.
 
     Returns
     -------
@@ -148,7 +157,7 @@ class BatchedZoomd(MapTransform):
     def __init__(
         self,
         keys: Sequence[str],
-        scale_factor: float | tuple[float, float, float],
+        scale_factor: float | tuple[float, float, float] | None,
         mode: Literal[
             "nearest",
             "nearest-exact",
@@ -161,6 +170,7 @@ class BatchedZoomd(MapTransform):
         align_corners: bool | None = None,
         recompute_scale_factor: bool | None = None,
         antialias: bool = False,
+        size: tuple[int, int, int] | None = None,
     ) -> None:
         super().__init__(keys)
         self.transform = BatchedZoom(
@@ -169,6 +179,7 @@ class BatchedZoomd(MapTransform):
             align_corners=align_corners,
             recompute_scale_factor=recompute_scale_factor,
             antialias=antialias,
+            size=size,
         )
 
     def __call__(self, data: dict[str, Tensor]) -> dict[str, Tensor]:

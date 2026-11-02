@@ -65,6 +65,32 @@ def dynaclr():
 
 dynaclr.add_command(
     LazyCommand(
+        name="filter-embedding-observations",
+        import_path="dynaclr.evaluation.phenotyping_eligibility.main",
+        short_help="Audit eligibility or export filtered raw embeddings",
+    )
+)
+
+
+dynaclr.add_command(
+    LazyCommand(
+        name="phenotype-cells",
+        import_path="dynaclr.phenotyping.pipeline.main",
+        short_help="Segment cells and measure organelle fluorescence",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="phenotyping-batch",
+        import_path="dynaclr.evaluation.orchestration.phenotyping.main",
+        short_help="Plan or submit shared dataset phenotyping jobs",
+    )
+)
+
+
+dynaclr.add_command(
+    LazyCommand(
         name="train-linear-classifier",
         import_path="dynaclr.evaluation.linear_classifiers.train_linear_classifier.main",
         short_help="Train a linear classifier on cell embeddings",
@@ -84,6 +110,22 @@ dynaclr.add_command(
         name="evaluate-smoothness",
         import_path="dynaclr.evaluation.benchmarking.smoothness.evaluate_smoothness.main",
         short_help="Evaluate temporal smoothness of embedding models",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="temporal-forecast",
+        import_path="dynaclr.evaluation.temporal.forecast.main",
+        short_help="Predict future event onset from causal embedding histories",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="dynaformer",
+        import_path="dynaclr.evaluation.temporal.dynaformer.main",
+        short_help="Train the DynaFormer temporal head on frozen embeddings and evaluate the baseline ladder.",
     )
 )
 
@@ -132,6 +174,14 @@ dynaclr.add_command(
         name="cross-validate",
         import_path="dynaclr.evaluation.linear_classifiers.cross_validation.main",
         short_help="Run rotating leave-one-dataset-out cross-validation",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="witness-gmm-labels",
+        import_path="dynaclr.evaluation.linear_classifiers.witness_gmm_labels.main",
+        short_help="Generate an annotation file from the MMD witness + GMM (Stage A)",
     )
 )
 
@@ -225,6 +275,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="embedding-consistency-qc",
+        import_path="dynaclr.evaluation.mmd.consistency.main",
+        short_help="Per-marker dataset x dataset embedding-consistency MMD matrix (control cells)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="prepare-eval-configs",
         import_path="dynaclr.evaluation.evaluate.main",
         short_help="Generate evaluation YAML configs and print JSON manifest (Nextflow entry point)",
@@ -258,9 +316,97 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="run-matrix",
+        import_path="dynaclr.evaluation.orchestration.matrix.main",
+        short_help="Run models through train→predict→normalize→eval (SLURM afterok chain)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="run-matrix-eval",
+        import_path="dynaclr.evaluation.orchestration.matrix_eval.main",
+        short_help="Run missing configured evaluations over a model matrix (direct SLURM, no Nextflow)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="evaluate-matrix-unit",
+        import_path="dynaclr.evaluation.orchestration.matrix_eval.task_main",
+        short_help="Execute one direct model-matrix evaluation unit",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="normalize-embeddings",
+        import_path="dynaclr.evaluation.mmd.checkpoint_representation.main",
+        short_help="Write pooled control-MAD/PCA80 coordinates to checkpoint embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="predict-batch",
+        import_path="dynaclr.evaluation.orchestration.predict_batch.main",
+        short_help="Batch predict embeddings for one model over a collection (+ AI-ready preflight)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="audit-ai-readiness",
+        import_path="dynaclr.evaluation.orchestration.readiness.main",
+        short_help="Report collection storage locations and live AI-readiness",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="eval",
+        import_path="dynaclr.evaluation.orchestration.eval_launch.main",
+        short_help="Launch eval_from_embeddings over a model/run/ckpt's embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="plot-embeddings",
         import_path="dynaclr.evaluation.plot_embeddings.main",
         short_help="Generate scatter plots from an AnnData embedding store",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="fit-lot-correction",
+        import_path="dynaclr.evaluation.lot_correction.fit_lot_correction.main",
+        short_help="Fit a LOT batch-correction pipeline on source and target embedding zarrs",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="apply-lot-correction",
+        import_path="dynaclr.evaluation.lot_correction.apply_lot_correction.main",
+        short_help="Apply a fitted LOT pipeline to correct batch effects in an embedding zarr",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="predict-triplet",
+        import_path="dynaclr.evaluation.predict_triplet.main",
+        short_help="Per-reporter triplet embedding inference from a collection + checkpoint",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="enrich-obs-from-collection",
+        import_path="dynaclr.evaluation.predict_triplet.enrich_main",
+        short_help="Backfill collection metadata (perturbation/hpi/marker/...) onto embedding obs",
     )
 )
 

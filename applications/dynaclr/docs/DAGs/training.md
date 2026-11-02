@@ -1,164 +1,131 @@
-# Training DAG
+# Train a DynaCLR model
 
-## Prerequisites
+Build a training-ready cell index from an AI-ready dataset collection, then run
+the Lightning training config.
 
-Datasets must be AI-ready before building a collection. See [ai_ready_datasets.md](ai_ready_datasets.md)
-for the full data preparation pipeline (`prepare run` → concatenate → QC → preprocess).
-
-A dataset is ready when `prepare status` shows `preprocessed: yes` — meaning both
-`normalization` and `focus_slice` metadata exist in the zarr zattrs.
-
-## Step-by-step detail
-
-```
-zarr stores (preprocessed: normalization + focus_slice in zattrs)
-tracking.zarr (per-dataset, synced from NFS)
-  │
-  ├──► collection.yml              # defines experiments, channels, perturbation_wells
-  │                                # versioned in git under configs/collections/
-  ▼
-dynaclr build-cell-index \
-    configs/collections/<collection>.yml \
-    /hpc/projects/organelle_phenotyping/models/collections/<collection>.parquet \
-    --num-workers 8
-  │  reads tracking CSVs + zarr shape metadata
-  │  one row per (cell, timepoint, channel)
-  │  sets z=0 placeholder (overwritten in next step)
-  ▼
-<collection>.parquet  (raw: shape columns, z=0, no norm stats)
-  │
-  ▼
-dynaclr preprocess-cell-index \
-    /hpc/.../collections/<collection>.parquet \
-    --focus-channel Phase3D
-  │  opens each unique FOV once from zarr zattrs:
-  │    norm_mean/std/median/iqr/max/min  — per (cell, timepoint, channel)
-  │    z_focus_mean                      — per FOV (mean across timepoints)
-  │    z                                 — per timepoint focus slice index
-  │  drops empty frames (max == 0)
-  ▼
-<collection>.parquet  (ready: self-contained, no zarr reads at training time)
-  │
-  ▼
-viscy fit --config configs/training/<model>.yml
-  │  OR: sbatch configs/training/<model>.sh   (SLURM, recommended)
-  │  MultiExperimentDataModule reads parquet only at init
-  │  tensorstore opens zarr lazily on first batch
-  │  ExperimentRegistry reads plate.zattrs["focus_slice"] once at startup
-  │  for z_ranges (z_extraction_window centered on dataset z_focus_mean)
-  ▼
-checkpoints/  +  wandb logs
+```mermaid
+flowchart LR
+    A["collection YAML"] --> B["build-cell-index"]
+    B --> C["cell index parquet"]
+    C --> D["preprocess-cell-index"]
+    D --> E["training-ready parquet"]
+    E --> F["dynaclr fit"]
+    F --> G["checkpoints + logs"]
 ```
 
-## Pipeline DAG (process dependency)
+## Inputs
 
-```
-collection.yml
-  │
-  ▼
-build-cell-index  (CPU, ~1 min)
-  │
-  ▼
-preprocess-cell-index  (CPU, ~5 min, I/O bound)
-  │
-  ▼
-viscy fit  (GPU, hours–days)
-```
+- AI-ready zarrs with `focus_slice` and `normalization` metadata; see
+  [ai_ready_datasets.md](ai_ready_datasets.md).
+- Tracking zarrs.
+- A collection YAML under
+  [`applications/dynaclr/configs/collections/`](../../configs/collections/).
+- A training YAML under
+  [`applications/dynaclr/configs/training/`](../../configs/training/).
 
-## Key commands
-
-
-| Step                  | Command                                                                   | Input                                  | Output                                                    |
-| --------------------- | ------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------- |
-| Build cell index      | `dynaclr build-cell-index <collection.yml> <out.parquet> --num-workers 8` | collection YAML + zarr + tracking CSVs | parquet with TCZYX shape columns                          |
-| Preprocess cell index | `dynaclr preprocess-cell-index <parquet> --focus-channel Phase3D`         | parquet + zarr zattrs                  | parquet with norm stats, per-timepoint z, empties removed |
-| Train (interactive)   | `uv run viscy fit --config configs/training/<model>.yml`                  | training config + parquet              | checkpoints + logs                                        |
-| Train (SLURM)         | `sbatch configs/training/<model>.sh`                                      | training config + parquet              | checkpoints + logs                                        |
-| Resume (SLURM)        | `CKPT_PATH=.../last.ckpt sbatch configs/training/<model>.sh`              | checkpoint path env var                | resumed checkpoints                                       |
-
-
-## What lives where
-
-
-| Data                                    | Location                                                  | When written                                 |
-| --------------------------------------- | --------------------------------------------------------- | -------------------------------------------- |
-| Pixel data (TCZYX arrays)               | zarr store on VAST                                        | `prepare run` → concatenate                  |
-| Cell tracking (y, x, t, track_id)       | tracking.zarr on VAST                                     | `prepare run` → concatenate                  |
-| Normalization stats (per FOV/timepoint) | zarr zattrs → parquet `norm_*` columns                    | `viscy preprocess` → `preprocess-cell-index` |
-| Focus slice (per timepoint)             | zarr zattrs → parquet `z` column                          | `viscy preprocess` → `preprocess-cell-index` |
-| Focus slice mean (per FOV)              | zarr zattrs → parquet `z_focus_mean`                      | `viscy preprocess` → `preprocess-cell-index` |
-| TCZYX shape per FOV                     | parquet columns                                           | `build-cell-index`                           |
-| Collection definition                   | `configs/collections/<name>.yml` in git                   | manually authored                            |
-| Parquet                                 | `/hpc/projects/organelle_phenotyping/models/collections/` | `build-cell-index`                           |
-
-
-## collection.yml format
+The collection maps each experiment to its image store, tracking store,
+channels, wells, and timing metadata:
 
 ```yaml
 name: <collection-name>
-description: "..."
-
 experiments:
-  - name: <experiment_name>                     # {date}_{cell}_{marker}_{perturbation}
-    data_path: /hpc/projects/.../dataset.zarr
-    tracks_path: /hpc/projects/.../tracking.zarr
+  - name: <experiment-name>
+    data_path: /path/to/dataset.zarr
+    tracks_path: /path/to/tracking.zarr
     channels:
-      - name: "raw GFP EX488 EM525-45"         # zarr channel name (exact match)
-        marker: G3BP1                           # protein label used in parquet
+      - name: "raw GFP EX488 EM525-45"
+        marker: G3BP1
     perturbation_wells:
-      uninfected: [C/1]
-      infected: [C/2]
+      control: [C/1]
+      perturbed: [C/2]
     interval_minutes: 30.0
-    start_hpi: 3.5
-    marker: G3BP1
-    organelle: stress_granules
-    moi: 5.0
     pixel_size_xy_um: 0.1494
     pixel_size_z_um: 0.174
 ```
 
-Experiment name convention: `{date}_{cell_line}_{marker}_{perturbation}` —
-perturbation suffix is always included (e.g., `_ZIKV`, `_DENV`, `_ZIKV_DENV`).
+## Build and preprocess the cell index
 
-## Training config structure
+Run both steps through Nextflow:
 
-Training configs use Lightning CLI `base:` inheritance:
+```sh
+module load nextflow/24.10.5
+
+nextflow run applications/dynaclr/nextflow/main.nf \
+  -entry training_preprocessing \
+  --collection_yaml applications/dynaclr/configs/collections/<name>.yml \
+  --parquet_out /path/to/collections/<name>.parquet \
+  --focus_channel Phase3D \
+  --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+  -resume
+```
+
+Equivalent direct commands:
+
+```sh
+uv run dynaclr build-cell-index \
+  applications/dynaclr/configs/collections/<name>.yml \
+  /path/to/collections/<name>.parquet \
+  --num-workers 8
+
+uv run dynaclr preprocess-cell-index \
+  /path/to/collections/<name>.parquet \
+  --focus-channel Phase3D
+```
+
+`preprocess-cell-index` updates the parquet in place unless `--output` is set.
+It adds focus and normalization fields and removes empty frames.
+
+## Training config
+
+Training leaves compose reusable recipes with `base:`:
 
 ```yaml
 base:
-  - ../recipes/trainer/fit.yml                              # seed, logger, callbacks
-  - ../recipes/topology/ddp_2gpu.yml                        # accelerator/strategy/devices
-  - ../recipes/model/contrastive_encoder_convnext_tiny.yml  # or dinov3_frozen_mlp.yml, cell_dino_frozen_mlp.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_2gpu.yml
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml
 
 trainer:
   precision: bf16-mixed
   max_epochs: 150
 
 data:
-  cell_index_path: /hpc/.../collections/<collection>.parquet
-  ...
+  cell_index_path: /path/to/collections/<name>.parquet
 ```
 
-Recipes are split into orthogonal axes (`trainer/`, `topology/`,
-`data/`, `augmentations/`, `model/`) so leaves only re-declare what
-varies per experiment.
+The complete model, data, augmentation, and trainer settings must resolve to a
+valid Lightning config. Use an existing leaf in the training config directory
+as the starting point.
 
-SLURM `.sh` scripts export `PYTHONNOUSERSITE=1` and launch via `srun` for DDP.
+## Train
 
-## Reproducibility
+Interactive or allocated-node run:
 
-Version `collection.yml` in git. The parquet is derived deterministically from:
+```sh
+uv run dynaclr fit -c applications/dynaclr/configs/training/<model>.yml
+```
 
-1. The collection YAML (experiment definitions, channels, wells)
-2. Tracking zarrs (cell positions)
-3. Zarr zattrs (normalization + focus stats from `viscy preprocess` + `qc run`)
+SLURM run:
 
-To reproduce: `build-cell-index` → `preprocess-cell-index` from the same collection YAML.
+```sh
+sbatch applications/dynaclr/configs/training/<model>.sh
+```
 
-## Notes
+Resume behavior is defined by the model's SLURM wrapper. For wrappers that read
+`CKPT_PATH`:
 
-- `preprocess-cell-index` overwrites the parquet in-place by default. Pass `--output` to write elsewhere.
-- `--focus-channel Phase3D` selects which channel's `per_timepoint` focus indices are written to the `z` column. Use the channel that has the sharpest axial contrast (label-free Phase3D for most experiments).
-- At training time, `ExperimentRegistry.__post_init__` reads `plate.zattrs["focus_slice"][channel]["dataset_statistics"]["z_focus_mean"]` to compute per-experiment z_ranges for patch extraction. This is the only zarr metadata read at training startup; the parquet is self-contained for all per-cell data.
-- The `z` column in the parquet is carried through to embeddings obs during predict — downstream consumers (e.g., visualization) can use it to recover the in-focus plane for each cell at each timepoint.
-- For performance tuning (num_workers, pin_memory, batch_size, augmentation placement), see [profiling.md](profiling.md) — authored after the first validated profiling sweep.
+```sh
+CKPT_PATH=/path/to/last.ckpt \
+  sbatch applications/dynaclr/configs/training/<model>.sh
+```
+
+## Outputs and checks
+
+- The cell-index parquet contains the expected experiments, markers, focus
+  indices, and normalization columns.
+- Training writes checkpoints and logger output under the run directory.
+- Preserve the collection YAML, resolved training YAML, and checkpoint together
+  so inference can reproduce the feature space.
+
+Continue with [inference_triplet.md](inference_triplet.md) or the full
+[evaluation.md](evaluation.md) workflow.

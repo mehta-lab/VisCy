@@ -1,0 +1,70 @@
+# Proof-of-principle: recover remodeled-vs-non-remodeled organelle state from
+# DynaCLR embeddings per organelle marker, with little/no manual annotation.
+#
+# Mirrors zikv_infection_pop.yml but for `organelle_state` (remodel/noremodel).
+# Each organelle is classified from ITS OWN marker's embeddings (G3BP1 remodeling
+# from G3BP1 embeddings, ER remodeling from SEC61B embeddings) — the marker that
+# images that organelle. TOMM20 is NOT included: it has no embedding zarr in this
+# eval set (was not embedded as a single-marker file).
+#
+# Note the class imbalance: G3BP1 has only ~422 remodel / 9649 labeled (~4%);
+# SEC61B is better at ~1834 / 5850 (~31%). Read balanced_accuracy + per-class F1,
+# not raw accuracy.
+#
+# See .ed_planning/dynaclr/clustering/PLAN.md
+
+title: "Organelle-remodeling clustering — proof of principle"
+# Ground-truth label column (human annotation, sparse) baked into embedding obs.
+label_column: organelle_state
+positive_class: remodel
+negative_class: noremodel
+# The existing linear-classifier column, used only as a baseline comparison.
+baseline_column: predicted_organelle_state
+# Grouping column for leakage-free CV (no track spans train/val).
+group_column: fov_name
+
+# Supervised KNN arm.
+knn:
+  k_grid: [5, 15, 30]
+  n_splits: 5
+
+# Unsupervised HDBSCAN arm.
+hdbscan:
+  # "X_pca" = precomputed 32-d obsm; "umap2d"/"phate2d" computed here. Raw 768-d
+  # "X" excluded (O(n^2), all-noise — see PLAN dead-ends).
+  spaces: [X_pca, umap2d, phate2d]
+  min_cluster_size: [50, 100, 200]
+  min_samples: [5, 25]
+  # Pick the plotted/montaged clustering by max well_separation (§5, control-vs-
+  # infected enrichment) among displayable configs (noise + cluster-count capped).
+  select_max_noise_frac: 0.5
+  select_max_clusters: 20
+
+# Qualitative single-cell image samples.
+samples:
+  n_samples: 24          # per class (remodel / noremodel)
+  patch_size: 160        # y/x crop side length (pixels)
+  z_window: 5            # +/- slices MIP'd for fluorescence markers
+  # Show the viral-sensor (mCherry) channel beside each organelle-marker crop,
+  # so remodeling can be read against the infection reporter of the same cell.
+  pair_channel: "raw mCherry EX561 EM600-37"
+  pair_mip: true
+
+random_seed: 42
+
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/clustering_remodel_pop
+
+# One entry per organelle marker. Both G3BP1 and SEC61B are GFP-tagged reporters
+# (imaged in different wells of the same plate); the well/FOV in obs disambiguates
+# which organelle. Both are fluorescence -> MIP over the focus z-window.
+datasets:
+  - marker: G3BP1
+    embeddings: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/embeddings/2025_07_24_A549_G3BP1_ZIKV.zarr
+    image_zarr: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    image_channel: "raw GFP EX488 EM525-45"
+    mip: true
+  - marker: SEC61B
+    embeddings: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/embeddings/2025_07_24_A549_SEC61_ZIKV.zarr
+    image_zarr: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    image_channel: "raw GFP EX488 EM525-45"
+    mip: true

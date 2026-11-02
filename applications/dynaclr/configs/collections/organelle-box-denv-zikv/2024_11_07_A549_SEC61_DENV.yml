@@ -1,0 +1,41 @@
+name: organelle-box-2024_11_07_A549_SEC61_DENV
+description: "Profiling/handoff collection: 2024_11_07 A549 SEC61 DENV (single-marker
+  organelle box). Channels embedded as bag-of-channels samples: SEC61B (GFP),
+  viral_sensor (mCherry), Phase3D. Prepared zarr on VAST with timepoint_statistics +
+  focus_slice. Sourced from Airtable base app8vqaoWyOwa0sB5 (dataset
+  '2024_11_07_A549_SEC61_DENV'). FOV C/1/000000 exists in the zarr but has no tracking
+  CSV and is excluded at build time."
+datasets_root: /hpc/projects/organelle_phenotyping/datasets
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "{dataset}=\"2024_11_07_A549_SEC61_DENV\""
+  created_by: "eduardo.hirata"
+
+experiments:
+  - name: 2024_11_07_A549_SEC61_DENV
+    data_path: ${datasets_root}/2024_11_07_A549_SEC61_DENV/2024_11_07_A549_SEC61_DENV.zarr
+    tracks_path: ${datasets_root}/2024_11_07_A549_SEC61_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - B/1
+        - B/3
+      DENV:
+        - B/2
+        - C/2
+    exclude_fovs:
+      - C/1/000000
+    interval_minutes: 10.0
+    start_hpi: 4.0
+    marker: SEC61B
+    organelle: endoplasmic_reticulum
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174

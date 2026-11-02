@@ -1,0 +1,54 @@
+name: organelle-box-2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV
+description: "Embed-only collection: 2026_07_01 A549 SEC61B/TOMM20/G3BP1 ZIKV (multi-organelle box).
+  Bag-of-channels DynaCLR-2D-MIP embedding. The GFP reporter varies by plate column
+  (col 2=SEC61B, col 3=TOMM20, col 4=G3BP1); mCherry is the pAL17 viral sensor in every
+  well. Per-reporter embeddings are produced by subsetting wells (fit_include_wells) on
+  the GFP channel. Row A=uninfected, row B=ZIKV (MOI 5, 3 hpp).
+  Prepared zarr on VAST with normalization + focus_slice. No annotations."
+datasets_root: /hpc/projects/organelle_phenotyping/datasets
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "SEARCH(\"2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV\", {dataset})"
+  created_by: "eduardo.hirata"
+
+experiments:
+  - name: 2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV
+    data_path: ${datasets_root}/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/tracking.zarr
+    # Per-reporter embeddings (bag-of-channels, in_channels=1): one channel entry
+    # per reporter. The GFP reporter varies by plate column, so the same zarr
+    # channel appears once per organelle with its own `wells` (biologically valid
+    # wells; empty = all wells). `dynaclr predict-triplet` runs predict once per
+    # entry, restricting to `wells` via fit_include_wells, writing
+    # embeddings/{dataset}_{marker}.zarr. Start_hpi 3.0 (3 hpp).
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+        wells: [A/2, B/2]
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+        wells: [A/3, B/3]
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+        wells: [A/4, B/4]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+        wells: [A/2, A/3, A/4, B/2, B/3, B/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [A/2, A/3, A/4, B/2, B/3, B/4]
+    perturbation_wells:
+      uninfected:
+        - A/2
+        - A/3
+        - A/4
+      ZIKV:
+        - B/2
+        - B/3
+        - B/4
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995

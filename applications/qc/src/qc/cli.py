@@ -4,7 +4,7 @@ import click
 
 from qc.annotation import write_annotation_metadata
 from qc.config import QCConfig
-from qc.focus import FocusSliceMetric
+from qc.focus import FocusSliceMetric, audit_focus_slice
 from qc.qc_metrics import generate_qc_metadata
 from viscy_utils.cli_utils import load_config
 
@@ -61,6 +61,37 @@ def run(config_path: str):
             num_workers=cfg.num_workers,
         )
         click.echo("QC metrics complete.")
+
+
+@qc.command("audit-focus")
+@click.option(
+    "-d",
+    "--data-path",
+    required=True,
+    type=click.Path(exists=True),
+    help="OME-Zarr plate whose written focus_slice metadata to audit.",
+)
+@click.option("--channel", required=True, help="Channel whose focus indices to audit (e.g. Phase3D).")
+def audit_focus(data_path: str, channel: str):
+    """Report suspect focus_slice detections (edge z-index) across a plate.
+
+    Z-depth-aware: a 2D acquisition (Z == 1) trivially focuses at slice 0, so it is
+    reported as 2D with no flags; for 3D stacks, focus indices at a stack edge
+    (0 or Z-1) are flagged as failed detections.
+    """
+    summary = audit_focus_slice(data_path, channel)
+    click.echo(f"## Focus-slice audit — `{channel}`")
+    click.echo(f"- Z depth: {summary['z_depth']}" + (" (2D — focus check N/A)" if summary["is_2d"] else ""))
+    click.echo(f"- FOVs audited: {summary['n_fovs']}")
+    click.echo(f"- Timepoints audited: {summary['n_timepoints_total']}")
+    click.echo(f"- Suspect (edge) indices: {summary['n_suspect']}")
+    if summary["fovs_affected"]:
+        click.echo(f"- FOVs affected: {len(summary['fovs_affected'])}")
+        for name, count in sorted(summary["fovs_affected"].items(), key=lambda kv: -kv[1]):
+            click.echo(f"    - {name}: {count} suspect timepoint(s)")
+    if summary["valid_focus"] is not None:
+        vf = summary["valid_focus"]
+        click.echo(f"- Valid focus z: min={vf['min']} max={vf['max']} mean={vf['mean']:.1f} median={vf['median']:.0f}")
 
 
 def main():

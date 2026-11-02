@@ -147,6 +147,7 @@ class CellIndex(TypedDict, total=False):
     z: OneOrSeq[float]
     y: OneOrSeq[float]
     x: OneOrSeq[float]
+    is_blank: OneOrSeq[bool]
 
 
 class SampleMeta(TypedDict, total=False):

@@ -11,7 +11,9 @@ applications/dynaclr/nextflow/
 ├── main.nf                            # thin router — -entry <name>
 ├── nextflow.config                    # shared params + SLURM resource labels
 ├── workflows/
-│   ├── evaluation.nf                  # workflow EVALUATION { take: ... }
+│   ├── evaluation.nf                  # workflow EVALUATION { take: ... }  (predict→split→DOWNSTREAM)
+│   ├── eval_from_embeddings.nf        # workflow EVAL_FROM_EMBEDDINGS { take: ... }  (glob→DOWNSTREAM)
+│   ├── _downstream.nf                 # shared DOWNSTREAM sub-workflow (reduce/mmd/lc/append/plot)
 │   └── training_preprocessing.nf      # workflow TRAINING_PREPROCESSING { take: ... }
 └── modules/
     ├── evaluation/                    # processes used only by evaluation
@@ -36,6 +38,13 @@ nextflow run applications/dynaclr/nextflow/main.nf -entry evaluation \
     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
     -resume
 
+# Eval from pre-computed embeddings (decoupled: no predict/split, reads the frozen tree)
+nextflow run applications/dynaclr/nextflow/main.nf -entry eval_from_embeddings \
+    --eval_config applications/dynaclr/configs/evaluation/<config>.yaml \
+    --embeddings_glob '/hpc/projects/intracellular_dashboard/organelle_dynamics/*/2-phenotyping/predictions/<MODEL>/<RUN>/<CKPT>/*.zarr' \
+    --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+    -resume
+
 # Training preprocessing (collection YAML → training-ready parquet)
 nextflow run applications/dynaclr/nextflow/main.nf -entry training_preprocessing \
     --collection_yaml applications/dynaclr/configs/collections/<name>.yml \
@@ -49,14 +58,67 @@ nextflow run applications/dynaclr/nextflow/main.nf -entry training_preprocessing
 
 Running `main.nf` without `-entry` fails loudly with the list of valid entries.
 
-## Predict-only runs
+## Inference and evaluation are decoupled
 
-Use the `evaluation` entry with `steps: [predict, split]` in your eval config
-to run inference on a new dataset without any downstream evals. Rerun with
-more steps later using `-resume` — predict/split are skipped because
-`embeddings.zarr` and `{exp}.zarr` already exist on disk. See
-[docs/DAGs/evaluation.md](../docs/DAGs/evaluation.md#predict-only-runs-inference-without-downstream-evals)
-for the full pattern.
+Embeddings are written **once** into the dataset-centric tree
+`<dataset>/2-phenotyping/predictions/{model_family}/{run}/{ckpt_name}/{marker}.zarr`
+(by `dynaclr predict-triplet`, or by the parquet spine via
+`dynaclr split-embeddings --route-by-dataset`). Evaluation reads those **frozen**
+embeddings — no GPU, no re-prediction — so you can iterate classifiers and
+downstream tasks freely against a fixed set of embeddings.
+
+- **`-entry evaluation`** — the full spine: predict → split → downstream
+  (reduce/smoothness/mmd/classifiers/plots). Use for the parquet spine or a
+  one-shot run.
+- **`-entry eval_from_embeddings`** — skips predict/split; sources per-experiment
+  zarrs from `--embeddings_glob` and runs the same shared `DOWNSTREAM` DAG.
+
+Both call the same `DOWNSTREAM` sub-workflow (`workflows/_downstream.nf`), so the
+per-experiment-zarr write-order barriers live in one place.
+
+### Selecting which datasets to evaluate
+
+The **glob is the cohort selector** — the `*` in the dataset slot picks which
+datasets; the tail pins model/run/ckpt/marker. No manifest to maintain:
+
+```bash
+# every dataset for this model/run/ckpt (progressive default)
+--embeddings_glob '.../organelle_dynamics/*/2-phenotyping/predictions/M/R/C/*.zarr'
+# one dataset
+--embeddings_glob '.../organelle_dynamics/<ds>/2-phenotyping/predictions/M/R/C/*.zarr'
+# a subset (brace expansion)
+--embeddings_glob '.../organelle_dynamics/{ds_a,ds_b}/.../M/R/C/*.zarr'
+# one marker across all datasets
+--embeddings_glob '.../organelle_dynamics/*/.../M/R/C/SEC61B.zarr'
+```
+
+Add a dataset → predict it (writes into the tree) → re-run the same glob; the
+cohort grows implicitly. The eval config YAML is the orthogonal lever: the glob
+says *which datasets*, the config says *what to compute*.
+
+### One-command launcher
+
+`dynaclr eval` turns a `(model_family, run, ckpt_name)` identity into the glob
+and launches the `eval_from_embeddings` entry:
+
+```bash
+uv run dynaclr eval \
+    --eval-config applications/dynaclr/configs/evaluation/<config>.yaml \
+    --model-family DynaCLR-2D-MIP-BagOfChannels \
+    --run 2d-mip-fix-shuffler --ckpt-name epoch105-step84800 \
+    [--marker SEC61B] [--datasets ds_a ds_b] [--print-cmd]
+```
+
+To run **many models** through train → predict → eval in parallel (chained per model
+via SLURM `afterok`), use the model matrix — see
+[`../tools/README.md`](../tools/README.md) (`dynaclr run-matrix` + a matrix YAML).
+
+### Predict-only runs
+
+To run inference without downstream evals, use the `evaluation` entry with
+`steps: [predict, split]`; rerun with more steps later via `-resume` (predict/
+split are skipped because the zarrs already exist on disk). See
+[docs/DAGs/evaluation.md](../docs/DAGs/evaluation.md#predict-only-runs-inference-without-downstream-evals).
 
 ## Adding a new workflow
 

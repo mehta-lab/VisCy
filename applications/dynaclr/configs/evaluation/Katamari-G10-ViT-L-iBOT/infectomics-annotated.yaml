@@ -1,0 +1,24 @@
+# Evaluation config for the single-channel Katamari G10 ViT-L iBOT baseline.
+# Raw 1024-dimensional embeddings are produced per marker by the matrix predict
+# stage; the matrix normalization stage writes the shared control-MAD/PCA80
+# representation before evaluation.
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/evaluation/Katamari-G10-ViT-L-iBOT/training_config_katamari_g10_vitl_ibot.yaml
+ckpt_path: null
+output_dir: /hpc/projects/organelle_phenotyping/models/Katamari-G10-ViT-L-iBOT/evaluations/infectomics-annotated/
+
+predict:
+  batch_size: 16
+  num_workers: 0
+  precision: 32-true
+  devices: 1
+
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/Katamari-G10-ViT-L-iBOT/infectomics/

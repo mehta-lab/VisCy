@@ -237,6 +237,10 @@ class EmbeddingWriter(BasePredictionWriter):
         Keyword arguments passed to PCA, by default None.
     overwrite : bool, optional
         Whether to overwrite existing output, by default False.
+    uns_metadata : dict, optional
+        Extra provenance stored in ``adata.uns``, merged with the auto-collected
+        data/tracks paths. Use to stamp model/run/checkpoint/collection identity
+        so a moved zarr stays self-describing. By default None.
     """
 
     def __init__(
@@ -248,6 +252,7 @@ class EmbeddingWriter(BasePredictionWriter):
         phate_kwargs: dict | None = None,
         pca_kwargs: dict | None = None,
         overwrite: bool = False,
+        uns_metadata: dict | None = None,
     ):
         super().__init__(write_interval)
         self.output_path = Path(output_path)
@@ -256,6 +261,7 @@ class EmbeddingWriter(BasePredictionWriter):
         self.phate_kwargs = phate_kwargs
         self.pca_kwargs = pca_kwargs
         self.overwrite = overwrite
+        self.uns_metadata = uns_metadata
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Check output path before prediction starts."""
@@ -275,6 +281,10 @@ class EmbeddingWriter(BasePredictionWriter):
         projections = _move_and_stack_embeddings(predictions, "projections")
         ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions])
 
+        uns_metadata = collect_data_provenance(trainer)
+        if self.uns_metadata:
+            uns_metadata.update(self.uns_metadata)
+
         write_embedding_dataset(
             output_path=self.output_path,
             features=features,
@@ -285,5 +295,5 @@ class EmbeddingWriter(BasePredictionWriter):
             phate_kwargs=self.phate_kwargs,
             pca_kwargs=self.pca_kwargs,
             overwrite=self.overwrite,
-            uns_metadata=collect_data_provenance(trainer),
+            uns_metadata=uns_metadata,
         )

@@ -20,6 +20,8 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv-phenotyping/
+.phenotyping-batch/
 venv/
 ENV/
 
@@ -73,6 +75,3 @@ lightning_logs/
 checkpoints/
 
 plot_related/
-
-# Local-only planning docs (not for upstream)
-applications/dynaclr/docs/DAGs/evaluation_matrix.md

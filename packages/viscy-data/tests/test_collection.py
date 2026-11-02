@@ -449,3 +449,46 @@ class TestDatasetsRoot:
         with open(out_path) as f:
             on_disk = yaml.safe_load(f)
         assert on_disk["experiments"][0]["data_path"] == "/absolute/data/exp1.zarr"
+
+
+class TestSharedChannelWells:
+    """Box plates: a shared physical channel used for several markers by well."""
+
+    _GFP = "raw GFP EX488 EM525-45"
+
+    def test_box_plate_valid_disjoint_wells(self):
+        # Same GFP channel → 3 markers, each pinned to disjoint wells: OK.
+        _make_experiment(
+            channels=[
+                ChannelEntry(name=self._GFP, marker="SEC61B", wells=["A/2", "B/2"]),
+                ChannelEntry(name=self._GFP, marker="TOMM20", wells=["A/3", "B/3"]),
+                ChannelEntry(name=self._GFP, marker="G3BP1", wells=["A/4", "B/4"]),
+            ],
+        )
+
+    def test_shared_channel_missing_wells_raises(self):
+        with pytest.raises(ValueError, match="ambiguous"):
+            _make_experiment(
+                channels=[
+                    ChannelEntry(name=self._GFP, marker="SEC61B", wells=["A/2"]),
+                    ChannelEntry(name=self._GFP, marker="TOMM20"),  # no wells = all → ambiguous
+                ],
+            )
+
+    def test_shared_channel_overlapping_wells_raises(self):
+        with pytest.raises(ValueError, match="ambiguous"):
+            _make_experiment(
+                channels=[
+                    ChannelEntry(name=self._GFP, marker="SEC61B", wells=["A/2", "A/3"]),
+                    ChannelEntry(name=self._GFP, marker="TOMM20", wells=["A/3"]),  # A/3 overlaps
+                ],
+            )
+
+    def test_single_use_channel_empty_wells_ok(self):
+        # One marker per channel, empty wells (= all) is fine — the common case.
+        _make_experiment(
+            channels=[
+                ChannelEntry(name="Phase3D", marker="Phase3D"),
+                ChannelEntry(name=self._GFP, marker="SEC61B"),
+            ],
+        )

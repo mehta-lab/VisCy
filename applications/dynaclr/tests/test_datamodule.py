@@ -128,6 +128,7 @@ class TestInitExposesAllHyperparameters:
             channel_dropout_channels=[0, 1],
             channel_dropout_prob=0.8,
             cache_pool_bytes=1024,
+            reference_pixel_size_z_um=0.174,
             seed=42,
         )
 
@@ -145,6 +146,7 @@ class TestInitExposesAllHyperparameters:
         assert dm.channel_dropout_channels == [0, 1]
         assert dm.channel_dropout_prob == 0.8
         assert dm.cache_pool_bytes == 1024
+        assert dm.reference_pixel_size_z_um == 0.174
         assert dm.seed == 42
 
 
