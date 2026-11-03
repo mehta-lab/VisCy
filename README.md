@@ -27,6 +27,9 @@
 
 VisCy (blend of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
+> **Project status:** Active development. VisCy is beta software, and its APIs
+> may change between releases.
+
 ## Packages
 
 VisCy is organized as a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) monorepo:
@@ -69,6 +72,17 @@ Full documentation is hosted at <https://mehta-lab.github.io/VisCy/stable/>.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and guidelines.
 
+## Community
+
+Read the [contributing guide](CONTRIBUTING.md) before proposing a change.
+Participation in VisCy is governed by the
+[Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Do not report security vulnerabilities in public issues. Follow our
+[security policy](SECURITY.md) to report them privately.
+
 ## License
 
-[BSD-3-Clause](./LICENSE)
+[BSD-3-Clause](./LICENSE.md)
