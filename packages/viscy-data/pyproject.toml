@@ -38,7 +38,7 @@ dependencies = [
   "pandas",
   "pyarrow",
   "pydantic>=2",
-  "torch>=2.10",
+  "torch>=2.13",
   "tqdm",
   "zarr",
 ]

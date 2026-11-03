@@ -35,7 +35,7 @@ dependencies = [
   "numpy>=2.4.1",
   "pytorch-metric-learning",
   "timm>=1.0.15",
-  "torch>=2.10",
+  "torch>=2.13",
   "transformers>=4.40",
 ]
 
