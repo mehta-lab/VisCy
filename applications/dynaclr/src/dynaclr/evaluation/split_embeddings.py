@@ -39,11 +39,10 @@ def split_embeddings(input_path: Path, output_dir: Path) -> list[Path]:
     """
     import anndata as ad
 
+    from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
+
     if hasattr(ad, "settings") and hasattr(ad.settings, "allow_write_nullable_strings"):
         ad.settings.allow_write_nullable_strings = True
-    import pandas as pd
-
-    pd.options.future.infer_string = False
 
     click.echo(f"Loading embeddings from {input_path}")
     adata = ad.read_zarr(input_path)
@@ -66,7 +65,7 @@ def split_embeddings(input_path: Path, output_dir: Path) -> list[Path]:
         adata_exp = adata[mask].copy()
         out_path = output_dir / f"{exp}.zarr"
         click.echo(f"  Writing {exp}: {adata_exp.n_obs} cells → {out_path}")
-        adata_exp.write_zarr(out_path)
+        write_anndata_zarr(adata_exp, out_path)
         written.append(out_path)
 
     click.echo(f"\nRemoving combined zarr: {input_path}")

@@ -153,12 +153,14 @@ class EmbeddingSnapshotCallback(Callback):
         if self.store_images and self._images is not None:
             import anndata as ad
 
+            from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
+
             adata = ad.read_zarr(output_path)
             b = self._images.shape[0]
             adata.obsm["X_images"] = self._images.reshape(b, -1)
             # Mid-Z extraction produces (C, Y, X) per sample
             adata.uns["image_shape_cyx"] = list(self._images.shape[1:])
-            adata.write_zarr(output_path)
+            write_anndata_zarr(adata, output_path)
 
         _logger.info(f"Embedding snapshot saved: {output_path} ({features_np.shape[0]} samples)")
         self._reset()
