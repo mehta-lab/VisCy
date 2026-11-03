@@ -251,6 +251,40 @@ def test_partial_mask_ignores_placeholder_channel_in_dice():
     assert loss.item() > 0
 
 
+def test_return_components_matches_default_with_precomputed_mask():
+    """return_components=True: total is bit-identical to the default call,
+    and the components recombine to the total under lambda_mse."""
+    torch.manual_seed(0)
+    pred = torch.randn(2, 1, 4, 8, 8, requires_grad=True)
+    target = torch.randn(2, 1, 4, 8, 8).abs()
+    fg_mask = (target > target.median()).float()
+    lambda_mse = 0.5
+    loss_fn = SpotlightLoss(lambda_mse=lambda_mse, sigmoid_k=-0.95)
+
+    total_default = loss_fn(pred, target, fg_mask=fg_mask)
+    total, components = loss_fn(pred, target, fg_mask=fg_mask, return_components=True)
+
+    assert torch.equal(total, total_default)
+    recombined = lambda_mse * components["masked_mse"] + (1 - lambda_mse) * components["dice"]
+    assert torch.equal(recombined, total)
+
+
+def test_return_components_matches_default_with_otsu_mask():
+    """Same guarantee on the runtime-Otsu branch (no fg_mask passed)."""
+    torch.manual_seed(1)
+    pred = torch.randn(2, 1, 4, 8, 8, requires_grad=True)
+    target = torch.randn(2, 1, 4, 8, 8).abs()
+    lambda_mse = 0.3
+    loss_fn = SpotlightLoss(lambda_mse=lambda_mse, sigmoid_k=-0.95, fg_threshold=None)
+
+    total_default = loss_fn(pred, target)
+    total, components = loss_fn(pred, target, return_components=True)
+
+    assert torch.equal(total, total_default)
+    recombined = lambda_mse * components["masked_mse"] + (1 - lambda_mse) * components["dice"]
+    assert torch.equal(recombined, total)
+
+
 def test_otsu_per_channel():
     """Otsu computes per-(sample, channel) thresholds."""
     from viscy_utils.losses.spotlight import _otsu_threshold_batch

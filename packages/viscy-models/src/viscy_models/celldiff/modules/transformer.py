@@ -1,9 +1,13 @@
 """Transformer blocks and output layers for CellDiff models."""
 
+from collections.abc import Sequence
+
 import torch
 import torch.nn as nn
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_processor import Attention
+
+from viscy_models.celldiff.modules.patch_embed_3d import normalize_patch_size
 
 
 def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
@@ -151,35 +155,35 @@ def unpatchify(
     x: torch.Tensor,
     out_channels: int,
     latent_grid_size: list[int],
-    patch_size: int,
+    patch_size: int | Sequence[int],
 ) -> torch.Tensor:
     """Reconstruct a 3D volume from patch tokens.
 
     Parameters
     ----------
     x : torch.Tensor
-        Patch tokens of shape ``(N, T, patch_size**3 * out_channels)``.
+        Patch tokens of shape ``(N, T, prod(patch_size) * out_channels)``.
     out_channels : int
         Number of output channels.
     latent_grid_size : list[int]
         Latent grid dimensions ``[D, H, W]`` such that ``D*H*W == T``.
-    patch_size : int
-        Cubic patch side length.
+    patch_size : int | Sequence[int]
+        Cubic patch side length, or per-axis ``(D, H, W)`` extents.
 
     Returns
     -------
     torch.Tensor
-        Reconstructed volume of shape ``(N, out_channels, D*p, H*p, W*p)``.
+        Reconstructed volume of shape ``(N, out_channels, D*pd, H*ph, W*pw)``.
     """
     c = out_channels
-    p = patch_size
+    pd, ph, pw = normalize_patch_size(patch_size)
     d, h, w = latent_grid_size
     if d * h * w != x.shape[1]:
         raise ValueError(f"Expected {d * h * w} tokens (grid {d}x{h}x{w}), got {x.shape[1]}")
 
-    x = x.reshape(x.shape[0], d, h, w, p, p, p, c)
+    x = x.reshape(x.shape[0], d, h, w, pd, ph, pw, c)
     x = x.permute(0, 7, 1, 4, 2, 5, 3, 6)
-    imgs = x.reshape(x.shape[0], c, d * p, h * p, w * p)
+    imgs = x.reshape(x.shape[0], c, d * pd, h * ph, w * pw)
     return imgs
 
 
@@ -190,8 +194,9 @@ class FinalLayer(nn.Module):
     ----------
     hidden_size : int
         Transformer hidden dimension.
-    patch_size : int
-        Cubic patch size (output is ``patch_size**3 * out_channels`` per token).
+    patch_size : int | Sequence[int]
+        Cubic patch size, or per-axis ``(D, H, W)`` extents (output is
+        ``prod(patch_size) * out_channels`` per token).
     out_channels : int
         Number of output channels after unpatchifying.
     time_embed_dim : int | None
@@ -202,13 +207,14 @@ class FinalLayer(nn.Module):
     def __init__(
         self,
         hidden_size: int,
-        patch_size: int,
+        patch_size: int | Sequence[int],
         out_channels: int,
         time_embed_dim: int | None = None,
     ) -> None:
         super().__init__()
+        pd, ph, pw = normalize_patch_size(patch_size)
         self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.linear = nn.Linear(hidden_size, patch_size * patch_size * patch_size * out_channels, bias=True)
+        self.linear = nn.Linear(hidden_size, pd * ph * pw * out_channels, bias=True)
         if time_embed_dim is not None:
             self.adaLN = nn.Sequential(
                 nn.SiLU(),

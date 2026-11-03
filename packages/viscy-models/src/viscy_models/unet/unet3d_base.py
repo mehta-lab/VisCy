@@ -93,6 +93,27 @@ class UNet3DBase(nn.Module):
             self._cond_inconv = nn.Conv3d(cond_channels, dims[0], kernel_size=3, stride=1, padding=1)
 
         # ── Stride configuration ────────────────────────────────────────
+        # KNOWN ARTIFACT: kernel 3 with stride 2 is the checkerboard condition
+        # (Odena et al., "Deconvolution and Checkerboard Artifacts", 2016).
+        # 3 is not divisible by 2, so kernel placements overlap unevenly and
+        # each ConvTranspose imprints a 2-periodic modulation; three stacked
+        # upsamples put energy at 2, 4 and 8 px. It is present IN distribution,
+        # not only out of it: on an iPSC-trained membrane prediction of an iPSC
+        # FOV the period-2 component measured 216x its ground-truth amplitude
+        # and period-4 67x. Out of distribution it grows further -- on an
+        # A549-trained ER prediction of an iPSC FOV the 4 px peak reached 16x
+        # its spectral background. It is visible in every
+        # model built on this base (UNetViT3D and FNet3D alike), which is how
+        # it was traced here -- a shared artifact across two otherwise
+        # unrelated architectures.
+        #
+        # The clean fix is kernel_size 4 with output_padding 0 (kernel
+        # divisible by stride -> uniform overlap), or nearest-neighbour
+        # Upsample + Conv3d. Both change weight shapes and so invalidate every
+        # existing checkpoint, which is why this is documented rather than
+        # changed: the published benchmark numbers are tied to these weights.
+        # For inference-time suppression on existing checkpoints see
+        # ``dynacell.engine._phase_shift_average``.
         if downsample_z:
             down_stride = (2, 2, 2)
             up_kwargs = dict(kernel_size=3, stride=(2, 2, 2), padding=1, output_padding=1)
@@ -158,7 +179,15 @@ class UNet3DBase(nn.Module):
         -------
         Tensor
             Output tensor of shape ``(B, out_channels, D, H, W)``.
+
+        Raises
+        ------
+        ValueError
+            If ``x`` is not a 5D tensor, or a downsampled spatial dimension is
+            not divisible by ``2**num_blocks``.
         """
+        if x.ndim != 5:
+            raise ValueError(f"Expected 5D input (B, C, D, H, W), got {x.ndim}D.")
         for dim_name, size in zip(("D", "H", "W"), x.shape[2:]):
             if self.downsamples_z or dim_name != "D":
                 if size % self._divisor != 0:

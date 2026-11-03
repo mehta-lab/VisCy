@@ -20,10 +20,17 @@ _logger = logging.getLogger(__name__)
 
 
 class _PaddedRandomAffine3D(RandomAffine3D):
-    """RandomAffine3D with configurable padding_mode.
+    """RandomAffine3D with configurable padding_mode and depth-1 safety.
 
     Kornia 0.8.x hard-codes ``padding_mode='zeros'`` in apply_transform.
-    This subclass overrides that call to forward the user-specified mode.
+    This subclass overrides that call to forward the user-specified mode,
+    and forces the matrix row of any singleton spatial axis to identity.
+
+    Note the neutralized row is applied to a copy, so
+    ``self._transform_matrix`` (and therefore
+    :meth:`RandomAffine3D.inverse`) still records the un-neutralized matrix
+    on a singleton axis. Nothing in VisCy reads those, but do not rely on
+    them for such inputs without re-applying the same neutralization.
     """
 
     def __init__(self, *args: object, padding_mode: str = "zeros", **kwargs: object) -> None:
@@ -37,9 +44,29 @@ class _PaddedRandomAffine3D(RandomAffine3D):
         flags: dict,
         transform: Tensor | None = None,
     ) -> Tensor:
+        # clone() is load-bearing: transform[:, :3] is a VIEW into the same
+        # tensor kornia stores as self._transform_matrix right after this
+        # returns, so mutating it in place would corrupt the recorded
+        # transform (and hence RandomAffine3D.inverse()). It is not about
+        # contiguity -- warp_affine3d accepts the non-contiguous view -- and
+        # not about the source/target pairing, which kornia rebuilds per key.
+        matrix = transform[:, :3].clone()
+        # Kornia normalizes pixel coordinates with a 2 / (size - 1) scale and
+        # guards a singleton axis by dividing by eps=1e-14 instead, so that
+        # axis' scale blows up to ~2e14. Any non-identity entry in the
+        # corresponding matrix row then pushes every sampled coordinate out of
+        # bounds and padding_mode="zeros" blanks the volume. A singleton axis
+        # has no extent to rotate, shear, scale or translate along, so identity
+        # is the correct row. Other rows are left alone and still warp
+        # normally; their terms for this axis are divided by the same 2e14 and
+        # vanish. Rows are ordered (x, y, z), i.e. (W, H, D).
+        for row, size in enumerate((input.shape[-1], input.shape[-2], input.shape[-3])):
+            if size == 1:
+                matrix[:, row] = 0.0
+                matrix[:, row, row] = 1.0
         return warp_affine3d(
             input,
-            transform[:, :3, :],
+            matrix,
             (input.shape[-3], input.shape[-2], input.shape[-1]),
             flags["resample"].name.lower(),
             padding_mode=self._padding_mode,
@@ -289,6 +316,12 @@ class BatchedRandAffined(MapTransform):
         produces ~64x more displacement than the same angle across Z=8.
         This method reduces Z-related facets so the pixel displacement
         in Z is proportional to the Z depth.
+
+        This is augmentation *policy* and is opt-out via ``scale_z_shear``.
+        Depth-1 safety is a correctness invariant handled separately, in
+        ``_PaddedRandomAffine3D.apply_transform`` — do not add depth-1
+        handling here, where it would cover shear only and could be
+        switched off.
         """
         z_depth = shape[2]
         yx_size = max(shape[3], shape[4])

@@ -10,6 +10,7 @@ import pytest
 from dynaclr.evaluation.mmd.compute_mmd import run_mmd_analysis, run_mmd_pooled
 from dynaclr.evaluation.mmd.config import ComparisonSpec, MMDEvalConfig, MMDPooledConfig, MMDSettings
 from viscy_utils.evaluation.mmd import compute_mmd_unbiased, median_heuristic, mmd_permutation_test
+from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -424,7 +425,7 @@ def _save_adata_zarr(adata: ad.AnnData, path: str) -> None:
 
     if os.path.exists(path):
         shutil.rmtree(path)
-    adata.write_zarr(path)
+    write_anndata_zarr(adata, path)
 
 
 def test_run_mmd_pooled_columns(tmp_path):

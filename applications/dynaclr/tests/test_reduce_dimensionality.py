@@ -18,6 +18,7 @@ from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import (
     _run_phate,
     _run_umap,
 )
+from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ def synthetic_zarr(tmp_path):
     adata = ad.AnnData(X=X)
     zarr_path = tmp_path / "embeddings.zarr"
     ad.settings.allow_write_nullable_strings = True
-    adata.write_zarr(zarr_path)
+    write_anndata_zarr(adata, zarr_path)
     return str(zarr_path)
 
 
@@ -183,7 +184,7 @@ class TestCLIIntegration:
         # Pre-populate X_pca
         adata = ad.read_zarr(synthetic_zarr)
         adata.obsm["X_pca"] = np.zeros((100, 5))
-        adata.write_zarr(synthetic_zarr)
+        write_anndata_zarr(adata, synthetic_zarr)
 
         config_content = f"input_path: {synthetic_zarr}\npca:\n  n_components: 10\n"
         config_path = tmp_path / "test_config.yaml"
@@ -204,7 +205,7 @@ class TestCLIIntegration:
         # Pre-populate X_pca
         adata = ad.read_zarr(synthetic_zarr)
         adata.obsm["X_pca"] = np.zeros((100, 5))
-        adata.write_zarr(synthetic_zarr)
+        write_anndata_zarr(adata, synthetic_zarr)
 
         config_content = f"input_path: {synthetic_zarr}\noverwrite_keys: true\npca:\n  n_components: 10\n"
         config_path = tmp_path / "test_config.yaml"
@@ -249,7 +250,7 @@ class TestAppendToAnndataZarrUns:
         adata.uns["existing_list"] = ["a", "b"]
         zarr_path = tmp_path / "test.zarr"
         ad.settings.allow_write_nullable_strings = True
-        adata.write_zarr(zarr_path)
+        write_anndata_zarr(adata, zarr_path)
 
         append_to_anndata_zarr(zarr_path, uns={"new_key": ["path1", "path2"]})
 
@@ -267,7 +268,7 @@ class TestAppendToAnndataZarrUns:
         adata.uns["other_key"] = "untouched"
         zarr_path = tmp_path / "test.zarr"
         ad.settings.allow_write_nullable_strings = True
-        adata.write_zarr(zarr_path)
+        write_anndata_zarr(adata, zarr_path)
 
         append_to_anndata_zarr(zarr_path, uns={"my_key": "new_value"})
 
@@ -317,7 +318,7 @@ class TestCombinedReduction:
             adata.uns["classifier_version"] = f"v{i}"
             adata.uns["predicted_classes"] = ["alive", "dead"]
             zarr_path = tmp_path / f"store_{i}.zarr"
-            adata.write_zarr(zarr_path)
+            write_anndata_zarr(adata, zarr_path)
             paths.append(str(zarr_path))
         return paths
 
