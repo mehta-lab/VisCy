@@ -8596,6 +8596,26 @@ Test stage uses all plate positions.</p>
                   <code>None</code>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>predict_z_planes</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> or <span title="pathlib.Path">Path</span> or None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Plane file (see :func:<code>viscy_data.sliding_window.read_z_planes</code>) that
+restricts predict to the listed Z planes per position and timepoint, e.g.
+the in-focus slab of a 2D model. Requires <code>z_window_size == 1</code>. The
+prediction writer allocates the full source shape and records the planes
+on each position. Default None predicts every plane. Predict only.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -11117,6 +11137,52 @@ preloaded data. Default None reads from zarr.</p>
             </td>
             <td>
                   <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>z_planes</code>
+            </td>
+            <td>
+                  <code><span title="collections.abc.Mapping">Mapping</span>[<span title="str">str</span>, <span title="collections.abc.Sequence">Sequence</span>[<span title="collections.abc.Sequence">Sequence</span>[<span title="int">int</span>]]] or None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Restrict the windows to these Z planes: plate-relative position name
+(<code>"A/1/0"</code>) to one plane list per timepoint (see :func:<code>read_z_planes</code>).
+Requires <code>z_window_size == 1</code>; every position needs an entry with one list
+per timepoint. Windows stay in increasing <code>z</code> order within a timepoint.
+Default None takes every plane.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>cache_volume</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Read each (position, timepoint) volume from zarr once and cut its windows
+from that copy, instead of re-reading every window. Stride-1 depth windows
+otherwise read each plane once per window covering it. Pays off when the
+windows of a volume are requested consecutively (the sequential predict
+loader); random access (training) would read a whole volume per window.
+Each DataLoader worker would keep its own copy and read the whole volume,
+so :class:<code>HCSDataModule</code> enables it only with <code>num_workers == 0</code>. Not
+combinable with <code>fg_mask_key</code> or <code>min_nonzero_fraction</code>. When every
+transform is <code>pointwise</code> (each voxel mapped through precomputed
+statistics alone, e.g. <code>NormalizeSampled</code>), the cached volume is
+transformed once instead of every window. Default False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
             </td>
           </tr>
       </tbody>

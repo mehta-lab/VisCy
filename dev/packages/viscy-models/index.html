@@ -669,6 +669,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        MorphEmModel
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MorphEmModel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel.forward" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        forward
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel.preprocess_2d" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        preprocess_2d
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel.train" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        train
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#viscy_models.NTXentHCL" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1266,6 +1316,56 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         forward
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        MorphEmModel
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MorphEmModel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel.forward" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        forward
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel.preprocess_2d" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        preprocess_2d
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viscy_models.MorphEmModel.train" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        train
       </span>
     </span>
   </a>
@@ -3018,6 +3118,325 @@ Only used when <code>num_classes</code> is set.</p>
 
 
 
+<h2 id="viscy_models.MorphEmModel" class="doc doc-heading">
+            <code>MorphEmModel</code>
+
+
+<a href="#viscy_models.MorphEmModel" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="torch.nn.Module">Module</span></code></p>
+
+
+
+        <p>Wrap CaicedoLab/MorphEm (DINO-pretrained ViT-S/16 on microscopy).</p>
+<p>MorphEm is a single-channel ViT: each microscopy channel is encoded
+independently and the CLS tokens are reduced to a fixed embedding.
+:meth:<code>preprocess_2d</code> handles Z-squeeze, resize to 224, and per-image
+per-channel spatial z-score (the published <code>PerImageNormalize</code> recipe).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>model_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>HuggingFace id (<code>"CaicedoLab/MorphEm"</code>) or a local snapshot dir.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>revision</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Hub commit SHA (or tag) to load. MorphEm ships its ViT as
+<code>trust_remote_code</code> Python, so an unpinned id would execute
+whatever is at the repository head on a cache miss. Ignored for a
+local snapshot dir.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>img_size</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Spatial size inputs are resized to, by default 224.</p>
+              </div>
+            </td>
+            <td>
+                  <code>224</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>freeze</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If <code>True</code> (default), backbone params are frozen and kept in eval mode.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>projection</code>
+            </td>
+            <td>
+                  <code><span title="torch.nn.Module">Module</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional projection head applied to the pooled embedding.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="viscy_models.MorphEmModel.forward" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">forward</span><span class="p">(</span><span class="n">x</span><span class="p">)</span></code>
+
+<a href="#viscy_models.MorphEmModel.forward" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Encode a (preprocessed) image batch to a channel-mean CLS embedding.</p>
+<p>Each channel is encoded independently (MorphEm is single-channel),
+and the CLS tokens are mean-pooled over channels to a fixed <code>(B, D)</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>x</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(B, C, H, W)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="torch.Tensor">Tensor</span>, <span title="torch.Tensor">Tensor</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(features, projection(features) or features)</code>, each <code>(B, D)</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="viscy_models.MorphEmModel.preprocess_2d" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">preprocess_2d</span><span class="p">(</span><span class="n">x</span><span class="p">)</span></code>
+
+<a href="#viscy_models.MorphEmModel.preprocess_2d" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Convert a raw dataloader tensor to MorphEm input.</p>
+<p>Squeezes a singleton Z (middle slice if Z&gt;1), applies per-image
+per-channel spatial z-score (zero mean, unit std), THEN resizes to
+<code>target_size</code> — matching the published recipe ordering
+<code>Compose([PerImageNormalize(), Resize(224)])</code> (normalize before
+resize; reversing the order shifts the post-interp mean/scale).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>x</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(B, C, D, H, W)</code> or <code>(B, C, H, W)</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>(B, C, target, target)</code> float ready for :meth:<code>forward</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="viscy_models.MorphEmModel.train" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">train</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+<a href="#viscy_models.MorphEmModel.train" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Keep the backbone in eval when frozen.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h2 id="viscy_models.NTXentHCL" class="doc doc-heading">
             <code>NTXentHCL</code>
 
@@ -4554,8 +4973,9 @@ non-sequential model types and dynamic layer numbers.</p>
         <p>3D U-Net following Ounkomol et al. 2018 (F-Net).</p>
 <p>FNet-configured preset of the unified 3D U-Net base with BatchNorm,
 ReLU activations, non-residual double-conv blocks, and a convolutional
-bottleneck.  Downsamples all three spatial dimensions.</p>
-<p>All spatial dimensions (Z, Y, X) must be divisible by <code>2**depth</code>.</p>
+bottleneck.  Downsamples Y and X, and (when <code>downsample_z=True</code>) Z.</p>
+<p>Each downsampled spatial dimension must be divisible by <code>2**depth</code>: Y and
+X always, and Z only when <code>downsample_z=True</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4644,12 +5064,32 @@ bottleneck.  Downsamples all three spatial dimensions.</p>
               <div class="doc-md-description">
                 <p>Z-window size. Stored for engine compatibility
 (<code>example_input_array</code>, <code>DivisiblePad</code>, sliding window prediction).
-The model itself handles arbitrary Z as long as it is divisible
-by <code>2**depth</code>.</p>
+The model itself handles arbitrary Z; when <code>downsample_z=True</code> the Z
+size must be divisible by <code>2**depth</code> (no constraint when <code>False</code>).</p>
               </div>
             </td>
             <td>
                   <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>downsample_z</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether to downsample the Z axis in the encoder (<code>True</code> preserves the
+FNet3D behavior). Set <code>False</code> for a Z-preserving 2D-style network
+(stride <code>(1, 2, 2)</code>, <code>ConvTranspose3d</code> kernel <code>(1, 3, 3)</code>), which
+is required to run at <code>Z=1</code> without tripping the base
+<code>D % 2**depth</code> divisibility check.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
             </td>
           </tr>
       </tbody>
