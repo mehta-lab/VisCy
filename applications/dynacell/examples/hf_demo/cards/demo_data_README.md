@@ -39,7 +39,7 @@ Each store is a crop of `fov0006` from the DynaCell v1 **test** split,
 (5–21 hpi), the central 32 of 48 Z slices, and the central 512×512 of the 640×960 field
 of view. The crop is recorded in each position's `dynacell_demo` attributes and is
 rebuilt by `build_demo_data.py` in
-[VisCy](https://github.com/mehta-lab/VisCy/tree/dynacell-models/applications/dynacell/examples/hf_demo).
+[VisCy](https://github.com/mehta-lab/VisCy/tree/main/applications/dynacell/examples/hf_demo).
 ER and mitochondria targets are raw (not deconvolved) fluorescence, as used for
 training and evaluation.
 
