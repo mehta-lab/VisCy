@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy_data._typing import TripletSample
 from viscy_data.collection import Collection, ExperimentEntry, save_collection
+from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
 
 # ---------------------------------------------------------------------------
 # HPC / GPU skip markers
@@ -329,15 +330,6 @@ class SyntheticLabeledTripletDataModule(LightningDataModule):
 # ---------------------------------------------------------------------------
 
 
-def pytest_configure(config):
-    # anndata zarr writer does not support pandas ArrowStringArray (default in
-    # pandas 2.x when PyArrow is installed). Verified still broken in
-    # anndata==0.12.6 + zarr==3.x: IORegistryError on write_zarr with an
-    # ArrowStringArray index. Remove when anndata fixes zarr 3 support.
-    # See: https://github.com/scverse/anndata/issues/1510
-    pd.options.future.infer_string = False
-
-
 def pytest_collection_modifyitems(config, items):
     """Auto-skip tests marked ``hpc_integration`` when HPC paths or GPU are unavailable."""
     if _HPC_PATHS_AVAILABLE and _GPU_AVAILABLE:
@@ -386,7 +378,7 @@ def annotated_adata() -> ad.AnnData:
 def annotated_adata_zarr(annotated_adata, tmp_path) -> dict:
     """Write annotated_adata to zarr + CSV and return dataset dict."""
     zarr_path = tmp_path / "emb.zarr"
-    annotated_adata.write_zarr(zarr_path)
+    write_anndata_zarr(annotated_adata, zarr_path)
 
     csv_path = tmp_path / "ann.csv"
     annotated_adata.obs[["fov_name", "id", "cell_death_state"]].to_csv(csv_path, index=False)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Codemod: bake each predict leaf's best-by-monitor checkpoint into ``ckpt_path``.
 
-After the canonical-path migration + ``restandardize_config_paths`` codemod, predict
+After the canonical-path migration and its config-leaf path rewrite, predict
 leaves point at a checkpoint DIRECTORY that is canonical but may carry a stale FILENAME
 (the path codemod preserves the tail): the retrained ER/mito A549/joint leaves still
 name a pre-flip ``epoch=NNN`` file that no longer exists. This pass rewrites

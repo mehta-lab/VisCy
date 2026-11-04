@@ -17,6 +17,7 @@ from viscy_utils.evaluation.linear_classifier_config import (
     LinearClassifierInferenceConfig,
     LinearClassifierTrainConfig,
 )
+from viscy_utils.evaluation.zarr_utils import write_anndata_zarr
 
 
 @pytest.fixture
@@ -228,7 +229,7 @@ class TestLoadAndCombineDatasets:
         adata = ad.AnnData(X=X, obs=obs)
 
         zarr_path = tmp_path / "emb.zarr"
-        adata.write_zarr(zarr_path)
+        write_anndata_zarr(adata, zarr_path)
 
         csv_path = tmp_path / "ann.csv"
         ann_df = pd.DataFrame({"fov_name": ["A/1/0"] * n, "id": range(n), "cell_death_state": labels})
@@ -249,7 +250,7 @@ class TestLoadAndCombineDatasets:
         adata = ad.AnnData(X=X, obs=obs)
 
         zarr_path = tmp_path / "emb.zarr"
-        adata.write_zarr(zarr_path)
+        write_anndata_zarr(adata, zarr_path)
 
         csv_path = tmp_path / "ann.csv"
         ann_df = pd.DataFrame({"fov_name": ["A/1/0"] * n, "id": range(n), "cell_death_state": labels})
@@ -269,7 +270,7 @@ class TestLoadAndCombineDatasets:
         adata = ad.AnnData(X=X, obs=obs)
 
         zarr_path = tmp_path / "emb.zarr"
-        adata.write_zarr(zarr_path)
+        write_anndata_zarr(adata, zarr_path)
 
         csv_path = tmp_path / "ann.csv"
         ann_df = pd.DataFrame(
@@ -296,7 +297,7 @@ class TestLoadAndCombineDatasets:
         adata = ad.AnnData(X=X, obs=obs)
 
         zarr_path = tmp_path / "emb2.zarr"
-        adata.write_zarr(zarr_path)
+        write_anndata_zarr(adata, zarr_path)
 
         csv_path = tmp_path / "ann2.csv"
         ann_df = pd.DataFrame({"fov_name": ["B/1/0"] * n, "id": range(n), "cell_death_state": labels})

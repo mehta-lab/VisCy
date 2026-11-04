@@ -22,7 +22,6 @@ builders. Not part of the installable package — run with `uv run python applic
   (bucketed by organelle × train_set); has a colocated `_test.py`.
 - `generate_instance_ap_eval_configs.py` — emit the `_internal/leaf/instance_ap/` 2D instance-AP eval leaves
   (`_test.py` alongside).
-- `add_instance_ap_to_ablation_leaves.py` — fold instance-AP config into existing ablation eval leaves.
 
 ## Data / artifact builders
 
@@ -36,10 +35,7 @@ builders. Not part of the installable package — run with `uv run python applic
 
 ## Diagnostics / tests
 
-- `smoke_joint_leaf.py` — smoke a joint (multi-dataset) training leaf.
 - `nccl_smoke_test.py` — probe multi-GPU NCCL connectivity before a DDP fit.
-- `scan_nan_microssim_caches.py` — read-only: list eval caches stamped with a cubic version (default 0.9.0a1)
-  whose MicroMS3IM is entirely NaN, i.e. caches a cubic-equivalence reuse would carry a NaN forward in.
 - `*_test.py` — pytest for the generators (`generate_grouped_eval_configs_test.py`,
   `generate_instance_ap_eval_configs_test.py`); further tool tests live in [`../tests/`](../tests/README.md).
 - `slurm_logs/` — captured job logs (runtime output, not source).
