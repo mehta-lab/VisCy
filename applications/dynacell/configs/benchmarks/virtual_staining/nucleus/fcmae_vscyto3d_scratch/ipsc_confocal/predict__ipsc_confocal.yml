@@ -28,7 +28,7 @@ model:
     # unless explicitly ablating against the scratch baseline.
     # Hardlink alias at run_root; underlying epoch=80-step=25272.ckpt also
     # preserved in checkpoints_frozen_ep80_<ts>/.
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_scratch/best_ep80_val0.39342.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fcmae_vscyto3d_scratch/checkpoints/epoch=80-step=25272.ckpt
 
 data:
   init_args:
@@ -45,8 +45,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fcmae_vscyto3d_scratch.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/ipsc/ipsc/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Scratch_PRED_NUCL
-  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/ipsc/ipsc

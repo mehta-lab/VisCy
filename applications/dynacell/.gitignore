@@ -1,3 +1,6 @@
 lightning_logs/
 outputs/
 __pycache__/
+
+# Investigations, ablations and checks: one dated directory each, never tracked
+experiments/

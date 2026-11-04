@@ -1,0 +1,45 @@
+# A549 mantis platemap — 2024_10_31_A549_SEC61_ZIKV_DENV
+#
+# Cross-referenced from preprocessing/dynacell-a549/2024_10_31_A549_SEC61_ZIKV_DENV_platemap.csv
+# and the dynacell zarr under run_20260327_141259.
+#
+# CSV plate plan:
+#   B/1, B/2 (SEC61B-GFP wildtype mock + DENV)
+#   C/2     (SEC61B-GFP wildtype ZIKV)
+#   B/3, C/3 (SEC61B-GFP pAL17 viral-sensor variants — mock + ZIKV)
+#   B/4, C/4 (SEC61B-GFP pAL40 viral-sensor variants — mock + DENV)
+# The dynacell zarr only carries C/2, C/3, C/4 — every B-row well failed
+# biology QC at the Airtable stage and was not preserved in the dynacell
+# preprocessing run. The earlier Airtable-only sync also omitted C/3
+# (biology-QC failed); it is re-included here for the train pool. pAL17
+# and pAL40 both image SEC61B on the same GFP cube as wildtype; the
+# unused mCherry sensor channel is dropped at assembly time via
+# gene_channel_map, so these FOVs are bytewise indistinguishable from
+# wildtype FOVs at the model's input.
+#
+# Target: SEC61B (ER) on GFP cube.
+
+experiment: 2024_10_31_A549_SEC61_ZIKV_DENV
+run_dir: run_20260327_141259
+zarr_filename: 2024_10_31_A549_SEC61_ZIKV_DENV.zarr
+
+native_delta_t_min: 30
+hpi_start: 4.0
+native_t: 24
+
+wells:
+  C/2:
+    condition: ZIKV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
+  C/3:
+    condition: ZIKV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
+  C/4:
+    condition: DENV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b

@@ -1,8 +1,8 @@
 # FCMAE_VSCyto3D_Pretrained (VSCyto3D) predict: membrane trained on a549_mantis (caax),
 # predicting against a549-mantis-caax-mock test.
-# Best val-loss checkpoint from run 20260522-120713 (epoch 154, loss/validate=0.26533).
-# Training reached max_epochs=200; epoch 154 is the global-best val loss (epochs
-# 155-199 plateaued higher), so save_top_k kept it as the newest checkpoint.
+# Best val-loss checkpoint from run 20260522-120713: epoch 121, loss/validate=0.2651,
+# as recorded in last.ckpt's ModelCheckpoint state (monitor loss/validate, mode min)
+# and returned by submit_benchmark_job.resolve_best_ckpt. last.ckpt itself is epoch 154.
 # A549 manifest keys membrane by gene (`caax`); override the iPSC-side `membrane`
 # target_id from targets/membrane.yml so the resolver finds the caax target on
 # a549-mantis-caax-mock.
@@ -27,7 +27,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints/epoch=154-step=33635.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/membrane/fcmae_vscyto3d_pretrained/checkpoints/epoch=121-step=26474.ckpt
 
 data:
   init_args:
@@ -44,8 +44,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_a549trained_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/a549/a549__mock/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Pretrained_PRED_MEMB_A549TR_MOCK
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/a549/a549__mock

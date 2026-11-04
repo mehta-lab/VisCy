@@ -1,0 +1,77 @@
+# @package _global_
+# Focused sibling of grouped/er_ipsc_trained__2d: ONLY the sample-matched
+# UNeXt2-2D ablation arm (fcmae_vscyto2d_scratch_samplematched: the 3D fit's
+# optimizer budget, 128 samples/step, warmup 8500, 3D cosine horizon)
+# x {ipsc, a549 mock/denv/zikv} = 4.
+# Condition blocks come from generate_grouped_eval_configs.py's own parse_zarr_name +
+# build_leaf_yaml, fed the output_store of each predict leaf in
+# er/fcmae_vscyto2d_scratch_samplematched/ipsc_confocal/ (built by
+# experiments/2026-09-29_unext2-2d-samplematched/build_eval_buckets.py).
+#
+# Top-level settings, including force_recompute, are copied from the __2d sibling so
+# the arm is scored exactly as its fcmae_vscyto2d_scratch baseline was. Compare on
+# the focus-restricted metrics only; the full-3D columns are diagnostics (see the
+# __2d leaf header).
+#
+# GATE before running: pred_path.is_dir() passes on a half-written store. Require
+# sacct COMPLETED 0:0 on all predicts AND per-array chunk counts equal to
+# prod(ceil(shape / chunks)) AND the position set equal to the baseline store's.
+target_name: er
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+  pred_masks: true
+  pred_cp: true
+  pred_dinov3: true
+  pred_dynaclr: true
+  pred_celldino: true
+  pred_morphem: true
+  pred_instances: true
+conditions:
+- name: unext2_2d_samplematched__ipsc_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-denv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__denv
+- name: unext2_2d_samplematched__ipsc_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-mock
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__mock
+- name: unext2_2d_samplematched__ipsc_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-zikv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__zikv
+- name: unext2_2d_samplematched__ipsc_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/er/fcmae_vscyto2d_scratch_samplematched/ipsc/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch_samplematched/ipsc/ipsc

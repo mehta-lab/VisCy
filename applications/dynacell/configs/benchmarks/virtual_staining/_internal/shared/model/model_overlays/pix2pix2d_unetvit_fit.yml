@@ -1,0 +1,92 @@
+# pix2pix2d_unetvit fit overlay — model + trainer only — for the in-focus 2D
+# benchmark track. HCS data hparams live in
+# data_overlays/pix2pix2d_unetvit_fit.yml; single-store train leaves compose
+# both, joint (BatchedConcatDataModule) leaves compose only this one and
+# author data: themselves.
+#
+# Binds the pix2pix2d_unetvit recipe (generator input_spatial_size
+# [1,512,512] + patch_size [1,4,4], discriminator preserve_z: true) and
+# mirrors the "Run D" recipe that actually produced the published
+# pix2pix3d_unetvit rows, so 2D-vs-3D isolates geometry.
+#
+# ⚠ Run D, NOT the LSGAN baseline in pix2pix3d_unetvit_fit.yml. That file is
+# what the stale `train.yml` leaves compose, but it is NOT what trained the
+# benchmarked weights: the 12 `train_4gpu_modernized.yml` leaves are, and the
+# checkpoints prove it. Read out of
+# a549/nucleus/pix2pix3d_unetvit/checkpoints/epoch=39-step=86400.ckpt
+# `hyper_parameters` (same on ipsc and joint):
+#     loss_type='nonsat'  lr_g=2e-4  lr_d=2e-4  r1_gamma=10.0
+#     ema_kimg=10.0  lecam_gamma=0.3  lambda_l1=10.0
+#     use_ema_at_predict=True   + 201 generator_ema.* tensors, epoch=39
+# Mirroring the LSGAN overlay instead would have pitted a 2D LSGAN arm against
+# a 3D Run-D arm and confounded geometry with the training recipe. Check the
+# checkpoint's own hparams before assuming a leaf's overlay is what ran.
+#
+# The three Run-D deltas over the modernized overlay (lambda_l1: 10.0,
+# lecam_gamma: 0.3, max_epochs: 40) are baked here rather than left to each
+# leaf, unlike the 3D leaves which repeat them 12 times.
+#
+# warmup_steps: 8500 is inherited from the 3D overlay deliberately — steps per
+# epoch differ at z_window_size=1, so this is a fraction-of-run knob tuned for
+# the 3D leaf, not a "~1 epoch" target. Same open question flagged in
+# model_overlays/celldiff_2d_fit.yml and fcmae_vscyto2d_fit.yml; left aligned
+# with 3D rather than silently re-tuned.
+#
+# TOPOLOGY: 4-GPU DDP, same as 3D, because the global batch has to be held at
+# 16 samples/step. The 3D arm ran 4 ranks x batch_size 4; a GAN cannot absorb a
+# batch change quietly, since DynacellGAN derives the G-EMA decay per-step from
+# the global batch size, so halving it would silently retune `ema_kimg` as well
+# as steps/epoch. Collapsing to one rank was measured and rejected: on an A40
+# (44.7 GiB) at [1,512,512] with bf16 autocast + two AdamW states, peak is
+# 13.3 GiB at bs=4 (30%) and 25.0 GiB at bs=8 (56%), and bs=16 **OOMs**. So a
+# single rank cannot carry the 3D global batch on a 48 GB card; 4 x bs=4 can,
+# with 3x headroom per rank.
+#
+# `ddp_4gpu_gan.yml` (not `ddp_4gpu.yml`) is required: manual optimization
+# toggles requires_grad per sub-step, so DDP needs find_unused_parameters=True.
+# Confirmed separately that `bottleneck.img_pos_embed` receives no gradient —
+# in the 3D generator too, so it is pre-existing, not a 2D artifact, and it is
+# a second reason the GAN topology is the right one here.
+#
+# Leaves override the hardware profile's `constraint: h100|h200` down to the
+# 48 GB cards. That profile reserves Hopper for FCMAE/UNeXt2 ranks needing
+# 30-50 GB; 13.3 GiB per rank does not qualify, and the profile documents the
+# opt-out explicitly. Leaves also cut `mem: 512G` to 128G — the focus stores are
+# 5-plane, so the 512G ceiling is inherited 3D scale. Both go in the LEAF BODY,
+# never here: launcher_profiles compose *after* model overlays and would win.
+#
+# bf16-mixed carries no GradScaler, so a NaN gradient surfaces as a
+# non-finite loss instead of a silently skipped step — the failure mode that
+# froze the first 24 FCMAE-2D fits at initialization. Do NOT switch to
+# 16-mixed.
+#
+# seed_everything is deliberately left at the trainer recipe's 42, which is
+# what the 3D pix2pix leaves also inherit. fnet2d_fit.yml and
+# celldiff_2d_fit.yml pin 0 while their 3D counterparts inherit 42 — an
+# existing inconsistency in the 2D track. Matching this family's own 3D arm
+# matters more here, because the comparison being drawn is pix2pix2d vs
+# pix2pix3d.
+base:
+  - ../../../../../../recipes/models/pix2pix2d_unetvit.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/ddp_4gpu_gan.yml
+model:
+  init_args:
+    loss_type: nonsat
+    lambda_adv: 1.0
+    r1_gamma: 10.0
+    r2_gamma: 0.0
+    r1_every: 16
+    ema_kimg: 10.0
+    lecam_gamma: 0.3
+    lecam_decay: 0.9
+    lambda_l1: 10.0
+    use_ema_at_predict: true
+    lr_g: 2.0e-4
+    lr_d: 2.0e-4
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+trainer:
+  precision: bf16-mixed
+  max_epochs: 40

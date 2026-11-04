@@ -1,0 +1,26 @@
+# FNet2D predict overlay for the in-focus 2D benchmark track. Binds the
+# fnet2d model recipe + predict trainer recipe, then layers predict-time
+# model hparams and data-loader settings. Predict-time normalizations and
+# data_path are leaf-owned (leaf overrides target-inherited values to
+# match each organelle's test_cropped store).
+#
+# CRITICAL: predict rebuilds the model from the fnet2d recipe's
+# model_config (in_stack_depth=1, downsample_z=false) and then loads the
+# trained weights (engine.py:308); data.z_window_size MUST be 1 so the
+# datamodule emits one window per z-plane of the full-Z 3D test store,
+# matching the Z-preserving 2D checkpoint. A z_window_size mismatch would
+# feed a multi-plane window into a Z=1 network and error.
+base:
+  - ../../../../../../recipes/models/fnet2d.yml
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    predict_method: full_image
+    predict_overlap: [4, 256, 256]
+data:
+  init_args:
+    z_window_size: 1
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]

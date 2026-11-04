@@ -1,0 +1,911 @@
+name: tomm20_joint_all_v1
+description: Joint frozen benchmark collection for target 'tomm20' across 6 source
+  datasets. Channels and FOV membership captured from the live train/test zarr stores
+  at freeze time.
+provenance:
+  airtable_base_id: null
+  airtable_query: null
+  record_ids: []
+  created_at: '2026-04-24T19:29:30.139703+00:00'
+  created_by: Alex Kalinin <alex.kalinin@czbiohub.org>
+experiments:
+- name: tomm20_hipsc_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/TOMM20.zarr
+  channels:
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Nuclei
+    marker: Nuclei
+    wells: []
+  - name: Membrane
+    marker: Membrane
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.108
+  pixel_size_z_um: 0.29
+  exclude_fovs: []
+- name: tomm20_hipsc_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20.zarr
+  channels:
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Nuclei
+    marker: Nuclei
+    wells: []
+  - name: Membrane
+    marker: Membrane
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.108
+  pixel_size_z_um: 0.29
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2024_10_29_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_10_29_A549_TOMM20_ZIKV_DENV/train/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2024_11_05_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_05_A549_TOMM20_ZIKV_DENV/train/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2024_11_05_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_05_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2024_11_21_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_21_A549_TOMM20_DENV/train/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2024_11_21_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_21_A549_TOMM20_DENV/test/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2025_07_24_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/train/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2025_07_24_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/test/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2025_08_26_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: tomm20_a549_mantis_2025_08_26_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/TOMM20.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: TOMM20
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: TOMM20
+  organelle: mitochondria
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+train_fovs:
+- tomm20_hipsc_train/4/10614/1356
+- tomm20_hipsc_train/4/10624/1295
+- tomm20_hipsc_train/4/10624/1300
+- tomm20_hipsc_train/4/10624/1321
+- tomm20_hipsc_train/4/10625/1325
+- tomm20_hipsc_train/4/10625/1335
+- tomm20_hipsc_train/4/10900/1369
+- tomm20_hipsc_train/4/10900/1438
+- tomm20_hipsc_train/4/10901/1379
+- tomm20_hipsc_train/4/10901/1382
+- tomm20_hipsc_train/4/10903/1364
+- tomm20_hipsc_train/4/10903/1425
+- tomm20_hipsc_train/4/10904/1420
+- tomm20_hipsc_train/4/10904/1436
+- tomm20_hipsc_train/4/10915/1446
+- tomm20_hipsc_train/4/11380/1447
+- tomm20_hipsc_train/4/11396/1426
+- tomm20_hipsc_train/4/11396/1435
+- tomm20_hipsc_train/4/11396/1440
+- tomm20_hipsc_train/4/11478/1465
+- tomm20_hipsc_train/4/11488/1455
+- tomm20_hipsc_train/4/11489/1464
+- tomm20_hipsc_train/4/11489/1477
+- tomm20_hipsc_train/4/11490/1491
+- tomm20_hipsc_train/4/11492/1467
+- tomm20_hipsc_train/4/11572/1387
+- tomm20_hipsc_train/4/11572/1413
+- tomm20_hipsc_train/4/11573/1389
+- tomm20_hipsc_train/4/11574/1391
+- tomm20_hipsc_train/4/11575/1411
+- tomm20_hipsc_train/4/11575/1421
+- tomm20_hipsc_train/4/11669/1643
+- tomm20_hipsc_train/4/11670/1513
+- tomm20_hipsc_train/4/11672/1610
+- tomm20_hipsc_train/4/11681/1655
+- tomm20_hipsc_train/4/11682/1514
+- tomm20_hipsc_train/4/11682/1515
+- tomm20_hipsc_train/4/11682/1653
+- tomm20_hipsc_train/4/11683/1676
+- tomm20_hipsc_train/4/11684/1498
+- tomm20_hipsc_train/4/136707/16640
+- tomm20_hipsc_train/4/136707/16795
+- tomm20_hipsc_train/4/136708/16427
+- tomm20_hipsc_train/4/136710/15363
+- tomm20_hipsc_train/4/136710/15740
+- tomm20_hipsc_train/4/136710/16002
+- tomm20_hipsc_train/4/136710/16572
+- tomm20_hipsc_train/4/136712/15798
+- tomm20_hipsc_train/4/136712/17080
+- tomm20_hipsc_train/4/136712/17179
+- tomm20_hipsc_train/4/136714/15190
+- tomm20_hipsc_train/4/136717/16904
+- tomm20_hipsc_train/4/136719/15840
+- tomm20_hipsc_train/4/136719/16707
+- tomm20_hipsc_train/4/136721/15487
+- tomm20_hipsc_train/4/136721/15588
+- tomm20_hipsc_train/4/136721/15624
+- tomm20_hipsc_train/4/136721/16107
+- tomm20_hipsc_train/4/136723/16663
+- tomm20_hipsc_train/4/136723/16687
+- tomm20_hipsc_train/4/136723/16763
+- tomm20_hipsc_train/4/136725/16272
+- tomm20_hipsc_train/4/136736/15292
+- tomm20_hipsc_train/4/136736/16364
+- tomm20_hipsc_train/4/136738/14381
+- tomm20_hipsc_train/4/136738/16770
+- tomm20_hipsc_train/4/22132/2808
+- tomm20_hipsc_train/4/22132/2820
+- tomm20_hipsc_train/4/22133/2782
+- tomm20_hipsc_train/4/22133/2830
+- tomm20_hipsc_train/4/22134/2802
+- tomm20_hipsc_train/4/22135/2819
+- tomm20_hipsc_train/4/22135/2821
+- tomm20_hipsc_train/4/22325/3154
+- tomm20_hipsc_train/4/22326/3079
+- tomm20_hipsc_train/4/22326/3121
+- tomm20_hipsc_train/4/22326/3139
+- tomm20_hipsc_train/4/22327/3081
+- tomm20_hipsc_train/4/22327/3087
+- tomm20_hipsc_train/4/22327/3117
+- tomm20_hipsc_train/4/22327/3120
+- tomm20_hipsc_train/4/22327/3126
+- tomm20_hipsc_train/4/22327/3144
+- tomm20_hipsc_train/4/22327/3153
+- tomm20_hipsc_train/4/22328/3077
+- tomm20_hipsc_train/4/22328/3099
+- tomm20_hipsc_train/4/22328/3125
+- tomm20_hipsc_train/4/22328/3135
+- tomm20_hipsc_train/4/22339/3095
+- tomm20_hipsc_train/4/22339/3105
+- tomm20_hipsc_train/4/22339/3116
+- tomm20_hipsc_train/4/22339/3129
+- tomm20_hipsc_train/4/22339/3150
+- tomm20_hipsc_train/4/22340/3071
+- tomm20_hipsc_train/4/22612/2918
+- tomm20_hipsc_train/4/22612/2992
+- tomm20_hipsc_train/4/22613/2897
+- tomm20_hipsc_train/4/22614/2972
+- tomm20_hipsc_train/4/22615/2913
+- tomm20_hipsc_train/4/22615/2970
+- tomm20_hipsc_train/4/22624/2899
+- tomm20_hipsc_train/4/22624/2911
+- tomm20_hipsc_train/4/22624/2920
+- tomm20_hipsc_train/4/22625/2914
+- tomm20_hipsc_train/4/22709/3112
+- tomm20_hipsc_train/4/22711/3072
+- tomm20_hipsc_train/4/22720/3100
+- tomm20_hipsc_train/4/22720/3110
+- tomm20_hipsc_train/4/22721/3062
+- tomm20_hipsc_train/4/22721/3067
+- tomm20_hipsc_train/4/22900/3316
+- tomm20_hipsc_train/4/22901/3283
+- tomm20_hipsc_train/4/22901/3285
+- tomm20_hipsc_train/4/22902/3279
+- tomm20_hipsc_train/4/22915/3292
+- tomm20_hipsc_train/4/22916/3312
+- tomm20_hipsc_train/4/23284/3464
+- tomm20_hipsc_train/4/23284/3468
+- tomm20_hipsc_train/4/23284/3487
+- tomm20_hipsc_train/4/23284/3499
+- tomm20_hipsc_train/4/23285/3466
+- tomm20_hipsc_train/4/23285/3509
+- tomm20_hipsc_train/4/23286/3454
+- tomm20_hipsc_train/4/23286/3515
+- tomm20_hipsc_train/4/23287/3465
+- tomm20_hipsc_train/4/23287/3484
+- tomm20_hipsc_train/4/23383/3173
+- tomm20_hipsc_train/4/23383/3255
+- tomm20_hipsc_train/4/23384/3187
+- tomm20_hipsc_train/4/23384/3201
+- tomm20_hipsc_train/4/23392/3239
+- tomm20_hipsc_train/4/23393/3259
+- tomm20_hipsc_train/4/23394/3192
+- tomm20_hipsc_train/4/23394/3251
+- tomm20_hipsc_train/4/23476/3329
+- tomm20_hipsc_train/4/23478/3324
+- tomm20_hipsc_train/4/23478/3328
+- tomm20_hipsc_train/4/23478/3363
+- tomm20_hipsc_train/4/23479/3347
+- tomm20_hipsc_train/4/23572/3536
+- tomm20_hipsc_train/4/23573/3513
+- tomm20_hipsc_train/4/23573/3519
+- tomm20_hipsc_train/4/23573/3527
+- tomm20_hipsc_train/4/23573/3538
+- tomm20_hipsc_train/4/23574/3492
+- tomm20_hipsc_train/4/23574/3504
+- tomm20_hipsc_train/4/23585/3498
+- tomm20_hipsc_train/4/23764/3403
+- tomm20_hipsc_train/4/23766/3411
+- tomm20_hipsc_train/4/23767/3421
+- tomm20_hipsc_train/4/23767/3425
+- tomm20_hipsc_train/4/23778/3408
+- tomm20_hipsc_train/4/24148/3551
+- tomm20_hipsc_train/4/24148/3554
+- tomm20_hipsc_train/4/24148/3572
+- tomm20_hipsc_train/4/24149/3555
+- tomm20_hipsc_train/4/24149/3568
+- tomm20_hipsc_train/4/24150/3550
+- tomm20_hipsc_train/4/24150/3562
+- tomm20_hipsc_train/4/24151/3508
+- tomm20_hipsc_train/4/24151/3532
+- tomm20_hipsc_train/4/24151/3547
+- tomm20_hipsc_train/4/24151/3563
+- tomm20_hipsc_train/4/24152/3526
+- tomm20_hipsc_train/4/24152/3545
+- tomm20_hipsc_train/4/24152/3573
+- tomm20_hipsc_train/4/24160/3478
+- tomm20_hipsc_train/4/24160/3564
+- tomm20_hipsc_train/4/24724/3641
+- tomm20_hipsc_train/4/24724/3661
+- tomm20_hipsc_train/4/24724/3688
+- tomm20_hipsc_train/4/24727/3648
+- tomm20_hipsc_train/4/24727/3651
+- tomm20_hipsc_train/4/24727/3659
+- tomm20_hipsc_train/4/24727/3660
+- tomm20_hipsc_train/4/24728/3655
+- tomm20_hipsc_train/4/24728/3678
+- tomm20_hipsc_train/4/24739/3638
+- tomm20_hipsc_train/4/24739/3644
+- tomm20_hipsc_train/4/24739/3647
+- tomm20_hipsc_train/4/24739/3681
+- tomm20_hipsc_train/4/24739/3683
+- tomm20_hipsc_train/4/24739/3703
+- tomm20_hipsc_train/4/24740/3657
+- tomm20_hipsc_train/4/24740/3701
+- tomm20_hipsc_train/4/24820/14
+- tomm20_hipsc_train/4/24820/15
+- tomm20_hipsc_train/4/24820/18
+- tomm20_hipsc_train/4/24820/3
+- tomm20_hipsc_train/4/24821/11
+- tomm20_hipsc_train/4/24822/1
+- tomm20_hipsc_train/4/24833/2
+- tomm20_hipsc_train/4/24833/27
+- tomm20_hipsc_train/4/24834/23
+- tomm20_hipsc_train/4/24928/3614
+- tomm20_hipsc_train/4/24929/3580
+- tomm20_hipsc_train/4/24929/3600
+- tomm20_hipsc_train/4/24929/3603
+- tomm20_hipsc_train/4/24929/3608
+- tomm20_hipsc_train/4/24930/3583
+- tomm20_hipsc_train/4/24930/3617
+- tomm20_hipsc_train/4/24931/3581
+- tomm20_hipsc_train/4/24931/3606
+- tomm20_hipsc_train/4/24932/3598
+- tomm20_hipsc_train/4/25204/3792
+- tomm20_hipsc_train/4/25205/3812
+- tomm20_hipsc_train/4/25206/3806
+- tomm20_hipsc_train/4/25208/3798
+- tomm20_hipsc_train/4/25208/3815
+- tomm20_hipsc_train/4/25208/3821
+- tomm20_hipsc_train/4/25216/3794
+- tomm20_hipsc_train/4/25781/3833
+- tomm20_hipsc_train/4/25781/3843
+- tomm20_hipsc_train/4/25781/3854
+- tomm20_hipsc_train/4/25781/3858
+- tomm20_hipsc_train/4/25782/3855
+- tomm20_hipsc_train/4/25783/3849
+- tomm20_hipsc_train/4/25783/3857
+- tomm20_hipsc_train/4/25784/3852
+- tomm20_hipsc_train/4/27798/2892
+- tomm20_hipsc_train/4/27799/2871
+- tomm20_hipsc_train/4/27799/2884
+- tomm20_hipsc_train/4/27800/2875
+- tomm20_hipsc_train/4/27808/2862
+- tomm20_hipsc_train/4/27808/2876
+- tomm20_hipsc_train/4/27809/2886
+- tomm20_hipsc_train/4/27892/2930
+- tomm20_hipsc_train/4/27893/2938
+- tomm20_hipsc_train/4/27893/2950
+- tomm20_hipsc_train/4/27894/2945
+- tomm20_hipsc_train/4/27896/2943
+- tomm20_hipsc_train/4/27904/2979
+- tomm20_hipsc_train/4/27906/2983
+- tomm20_hipsc_train/4/27988/3025
+- tomm20_hipsc_train/4/27990/3026
+- tomm20_hipsc_train/4/27992/3014
+- tomm20_hipsc_train/4/28000/3038
+- tomm20_hipsc_train/4/28001/3005
+- tomm20_hipsc_train/4/28001/3027
+- tomm20_hipsc_train/4/28001/3031
+- tomm20_hipsc_train/4/28002/3007
+- tomm20_hipsc_train/4/28002/3022
+- tomm20_hipsc_train/4/28002/3036
+- tomm20_hipsc_train/4/28084/3232
+- tomm20_hipsc_train/4/28084/3254
+- tomm20_hipsc_train/4/28085/3213
+- tomm20_hipsc_train/4/28085/3258
+- tomm20_hipsc_train/4/28086/3211
+- tomm20_hipsc_train/4/28086/3236
+- tomm20_hipsc_train/4/28087/3240
+- tomm20_hipsc_train/4/28087/3242
+- tomm20_hipsc_train/4/28087/3266
+- tomm20_hipsc_train/4/28088/3205
+- tomm20_hipsc_train/4/28088/3238
+- tomm20_hipsc_train/4/28088/3268
+- tomm20_hipsc_train/4/28756/3366
+- tomm20_hipsc_train/4/28758/3397
+- tomm20_hipsc_train/4/28759/3399
+- tomm20_hipsc_train/4/28760/3388
+- tomm20_hipsc_train/4/28760/3402
+- tomm20_hipsc_train/4/28769/3372
+- tomm20_hipsc_train/4/28770/3377
+- tomm20_hipsc_train/4/29045/3774
+- tomm20_hipsc_train/4/29045/3779
+- tomm20_hipsc_train/4/29045/3782
+- tomm20_hipsc_train/4/29046/3750
+- tomm20_hipsc_train/4/29046/3762
+- tomm20_hipsc_train/4/29047/3766
+- tomm20_hipsc_train/4/29058/3772
+- tomm20_hipsc_train/4/29059/3758
+- tomm20_hipsc_train/4/29059/3765
+- tomm20_hipsc_train/4/29060/3753
+- tomm20_hipsc_train/4/29140/3684
+- tomm20_hipsc_train/4/29140/3716
+- tomm20_hipsc_train/4/29140/3726
+- tomm20_hipsc_train/4/29141/3709
+- tomm20_hipsc_train/4/29141/3719
+- tomm20_hipsc_train/4/29141/3728
+- tomm20_hipsc_train/4/29141/3742
+- tomm20_hipsc_train/4/29142/3695
+- tomm20_hipsc_train/4/29142/3739
+- tomm20_hipsc_train/4/29143/3680
+- tomm20_hipsc_train/4/29152/3708
+- tomm20_hipsc_train/4/29152/3712
+- tomm20_hipsc_train/4/29152/3723
+- tomm20_hipsc_train/4/29153/3725
+- tomm20_hipsc_train/4/29155/3689
+- tomm20_hipsc_train/4/29155/3714
+- tomm20_hipsc_train/4/29332/3865
+- tomm20_hipsc_train/4/29333/3868
+- tomm20_hipsc_train/4/29333/3908
+- tomm20_hipsc_train/4/29334/3889
+- tomm20_hipsc_train/4/29334/3890
+- tomm20_hipsc_train/4/29334/3892
+- tomm20_hipsc_train/4/29335/3867
+- tomm20_hipsc_train/4/29335/3879
+- tomm20_hipsc_train/4/29335/3900
+- tomm20_hipsc_train/4/30292/3893
+- tomm20_hipsc_train/4/30292/3913
+- tomm20_hipsc_train/4/30293/3905
+- tomm20_hipsc_train/4/30294/15038
+- tomm20_hipsc_train/4/30294/16432
+- tomm20_hipsc_train/4/30294/3906
+- tomm20_hipsc_train/4/30294/3912
+- tomm20_hipsc_train/4/30304/3866
+- tomm20_hipsc_train/4/30308/3869
+- tomm20_hipsc_train/4/30308/3871
+- tomm20_hipsc_train/4/30389/16772
+- tomm20_hipsc_train/4/30392/16282
+- tomm20_hipsc_train/4/30677/15449
+- tomm20_hipsc_train/4/30677/16684
+- tomm20_hipsc_train/4/30677/16969
+- tomm20_hipsc_train/4/30679/15295
+- tomm20_hipsc_train/4/30679/15878
+- tomm20_hipsc_train/4/30680/17051
+- tomm20_hipsc_train/4/30688/15165
+- tomm20_hipsc_train/4/30689/15310
+- tomm20_hipsc_train/4/5140/925
+- tomm20_hipsc_train/4/5140/933
+- tomm20_hipsc_train/4/5140/950
+- tomm20_hipsc_train/4/5141/928
+- tomm20_hipsc_train/4/5141/940
+- tomm20_hipsc_train/4/5143/954
+- tomm20_hipsc_train/4/5144/943
+- tomm20_hipsc_train/4/5236/869
+- tomm20_hipsc_train/4/5236/913
+- tomm20_hipsc_train/4/5237/858
+- tomm20_hipsc_train/4/5238/1043
+- tomm20_hipsc_train/4/5238/815
+- tomm20_hipsc_train/4/5238/867
+- tomm20_hipsc_train/4/5238/873
+- tomm20_hipsc_train/4/5238/938
+- tomm20_hipsc_train/4/5239/888
+- tomm20_hipsc_train/4/5248/1038
+- tomm20_hipsc_train/4/5248/910
+- tomm20_hipsc_train/4/5250/902
+- tomm20_hipsc_train/4/5910/824
+- tomm20_hipsc_train/4/5912/841
+- tomm20_hipsc_train/4/5920/843
+- tomm20_hipsc_train/4/5921/828
+- tomm20_hipsc_train/4/5923/837
+- tomm20_hipsc_train/4/5923/853
+- tomm20_hipsc_train/4/5923/855
+- tomm20_hipsc_train/4/5924/819
+- tomm20_hipsc_train/4/6485/1007
+- tomm20_hipsc_train/4/6485/1011
+- tomm20_hipsc_train/4/6485/978
+- tomm20_hipsc_train/4/6485/980
+- tomm20_hipsc_train/4/6485/997
+- tomm20_hipsc_train/4/6486/1002
+- tomm20_hipsc_train/4/6486/1006
+- tomm20_hipsc_train/4/6486/1012
+- tomm20_hipsc_train/4/6486/1022
+- tomm20_hipsc_train/4/6486/965
+- tomm20_hipsc_train/4/6486/968
+- tomm20_hipsc_train/4/6486/981
+- tomm20_hipsc_train/4/6487/1015
+- tomm20_hipsc_train/4/6487/1020
+- tomm20_hipsc_train/4/6487/993
+- tomm20_hipsc_train/4/6497/1014
+- tomm20_hipsc_train/4/6497/1017
+- tomm20_hipsc_train/4/6497/1025
+- tomm20_hipsc_train/4/6497/976
+- tomm20_hipsc_train/4/6774/1134
+- tomm20_hipsc_train/4/6774/1218
+- tomm20_hipsc_train/4/6775/1100
+- tomm20_hipsc_train/4/6775/1176
+- tomm20_hipsc_train/4/6775/1187
+- tomm20_hipsc_train/4/6775/1191
+- tomm20_hipsc_train/4/6775/1193
+- tomm20_hipsc_train/4/6775/1195
+- tomm20_hipsc_train/4/6775/1228
+- tomm20_hipsc_train/4/6775/1232
+- tomm20_hipsc_train/4/6775/1236
+- tomm20_hipsc_train/4/6775/1240
+- tomm20_hipsc_train/4/6775/1248
+- tomm20_hipsc_train/4/6776/1153
+- tomm20_hipsc_train/4/6776/1185
+- tomm20_hipsc_train/4/6776/1199
+- tomm20_hipsc_train/4/7156/1104
+- tomm20_hipsc_train/4/7157/1102
+- tomm20_hipsc_train/4/7158/1105
+- tomm20_hipsc_train/4/7158/1119
+- tomm20_hipsc_train/4/7158/1123
+- tomm20_hipsc_train/4/7348/1326
+- tomm20_hipsc_train/4/7349/1348
+- tomm20_hipsc_train/4/7349/1352
+- tomm20_hipsc_train/4/7636/1269
+- tomm20_hipsc_train/4/7636/1272
+- tomm20_hipsc_train/4/7636/1287
+- tomm20_hipsc_train/4/7637/1270
+- tomm20_hipsc_train/4/7637/1293
+- tomm20_hipsc_train/4/7638/1279
+- tomm20_hipsc_train/4/7650/1252
+- tomm20_hipsc_train/4/7650/1278
+- tomm20_hipsc_train/4/7650/1288
+- tomm20_hipsc_train/4/8214/897
+- tomm20_hipsc_train/4/8214/903
+- tomm20_hipsc_train/4/8214/907
+- tomm20_hipsc_train/4/8225/899
+- tomm20_hipsc_train/4/8225/904
+- tomm20_hipsc_train/4/8309/1032
+- tomm20_hipsc_train/4/8310/1091
+- tomm20_hipsc_train/4/8311/1074
+- tomm20_hipsc_train/4/8692/1096
+- tomm20_hipsc_train/4/8692/1114
+- tomm20_hipsc_train/4/8692/1227
+- tomm20_hipsc_train/4/8695/1082
+- tomm20_hipsc_train/4/8695/1198
+- tomm20_hipsc_train/4/8695/1211
+- tomm20_hipsc_train/4/8695/1215
+- tomm20_hipsc_train/4/8696/1079
+- tomm20_hipsc_train/4/8705/1221
+- tomm20_hipsc_train/4/8706/1072
+- tomm20_hipsc_train/4/8707/1219
+- tomm20_hipsc_train/4/8708/1127
+- tomm20_hipsc_train/4/8708/1173
+- tomm20_hipsc_train/4/8708/1213
+- tomm20_hipsc_train/4/8708/1233
+- tomm20_hipsc_train/4/8980/1167
+- tomm20_hipsc_train/4/8980/1168
+- tomm20_hipsc_train/4/8980/1175
+- tomm20_hipsc_train/4/8980/1181
+- tomm20_hipsc_train/4/8981/1143
+- tomm20_hipsc_train/4/8981/1155
+- tomm20_hipsc_train/4/8982/1150
+- tomm20_hipsc_train/4/8982/1163
+- tomm20_hipsc_train/4/9748/15080
+- tomm20_hipsc_train/4/9748/15365
+- tomm20_hipsc_train/4/9748/15563
+- tomm20_hipsc_train/4/9748/15711
+- tomm20_hipsc_train/4/9748/15871
+- tomm20_hipsc_train/4/9748/16327
+- tomm20_hipsc_train/4/9748/16440
+- tomm20_hipsc_train/4/9748/16524
+- tomm20_hipsc_train/4/9748/16929
+- tomm20_hipsc_train/4/9748/17154
+- tomm20_hipsc_train/42/135521/14270
+- tomm20_hipsc_train/42/135523/14265
+- tomm20_hipsc_train/42/135524/14251
+- tomm20_hipsc_train/42/135525/14254
+- tomm20_hipsc_train/42/135525/15339
+- tomm20_hipsc_train/42/135526/14250
+- tomm20_hipsc_train/42/135526/14256
+- tomm20_hipsc_train/42/135526/14257
+- tomm20_hipsc_train/42/135614/14199
+- tomm20_hipsc_train/42/135614/14210
+- tomm20_hipsc_train/42/135615/14176
+- tomm20_hipsc_train/42/135615/14194
+- tomm20_hipsc_train/42/135615/14209
+- tomm20_hipsc_train/42/135616/14159
+- tomm20_hipsc_train/42/135616/14160
+- tomm20_hipsc_train/42/135616/14180
+- tomm20_hipsc_train/42/135616/14191
+- tomm20_hipsc_train/42/135617/14162
+- tomm20_hipsc_train/42/135617/14200
+- tomm20_hipsc_train/42/135617/14213
+- tomm20_hipsc_train/42/135617/14218
+- tomm20_hipsc_train/42/135618/14161
+- tomm20_hipsc_train/42/135618/14170
+- tomm20_hipsc_train/42/135618/14177
+- tomm20_hipsc_train/42/135618/14203
+- tomm20_hipsc_train/42/135619/14174
+- tomm20_hipsc_train/42/135619/14208
+- tomm20_hipsc_train/42/135620/14192
+- tomm20_hipsc_train/42/135620/14202
+- tomm20_hipsc_train/42/135622/14167
+- tomm20_hipsc_train/42/135622/14181
+- tomm20_hipsc_train/42/135622/14197
+- tomm20_hipsc_train/42/135622/14217
+- tomm20_hipsc_train/42/136130/14294
+- tomm20_hipsc_train/42/136130/14297
+- tomm20_hipsc_train/42/136130/14305
+- tomm20_hipsc_train/42/136131/14307
+- tomm20_hipsc_train/42/136131/14315
+- tomm20_hipsc_train/42/136131/14319
+- tomm20_hipsc_train/42/136131/14335
+- tomm20_hipsc_train/42/136132/14322
+- tomm20_hipsc_train/42/136132/14326
+- tomm20_hipsc_train/42/136132/14332
+- tomm20_hipsc_train/42/136133/14283
+- tomm20_hipsc_train/42/136133/14285
+- tomm20_hipsc_train/42/136134/14291
+- tomm20_hipsc_train/42/136134/14328
+- tomm20_hipsc_train/42/136135/14316
+- tomm20_hipsc_train/42/136135/14321
+- tomm20_hipsc_train/42/136136/14279
+- tomm20_hipsc_train/42/137952/15541
+- tomm20_hipsc_train/42/137952/16945
+- tomm20_hipsc_train/42/137952/17148
+- tomm20_hipsc_train/42/137953/16951
+- tomm20_hipsc_train/42/137954/15782
+- tomm20_hipsc_train/42/137954/16856
+- tomm20_hipsc_train/42/137954/16893
+- tomm20_hipsc_train/42/137955/15694
+- tomm20_hipsc_train/42/137955/15892
+- tomm20_hipsc_train/42/137955/16043
+- tomm20_hipsc_train/42/137956/16613
+- tomm20_hipsc_train/42/137956/17196
+- tomm20_hipsc_train/42/137956/17233
+- tomm20_a549_mantis_2024_10_29_train/B/4/000000
+- tomm20_a549_mantis_2024_10_29_train/B/4/000001
+- tomm20_a549_mantis_2024_10_29_train/B/4/001000
+- tomm20_a549_mantis_2024_10_29_train/B/4/001001
+- tomm20_a549_mantis_2024_10_29_train/B/4/002001
+- tomm20_a549_mantis_2024_10_29_train/C/4/000000
+- tomm20_a549_mantis_2024_10_29_train/C/4/000001
+- tomm20_a549_mantis_2024_10_29_train/C/4/001000
+- tomm20_a549_mantis_2024_10_29_train/C/4/002000
+- tomm20_a549_mantis_2024_10_29_train/C/4/002001
+- tomm20_a549_mantis_2024_11_05_train/B/4/001001
+- tomm20_a549_mantis_2024_11_05_train/B/4/002000
+- tomm20_a549_mantis_2024_11_05_train/B/4/002001
+- tomm20_a549_mantis_2024_11_21_train/B/1/001001
+- tomm20_a549_mantis_2024_11_21_train/B/3/000000
+- tomm20_a549_mantis_2024_11_21_train/B/3/000001
+- tomm20_a549_mantis_2024_11_21_train/B/3/001000
+- tomm20_a549_mantis_2024_11_21_train/B/3/001001
+- tomm20_a549_mantis_2025_07_24_train/B/1/001001
+- tomm20_a549_mantis_2025_07_24_train/B/1/002000
+- tomm20_a549_mantis_2025_07_24_train/B/1/002001
+- tomm20_a549_mantis_2025_08_26_train/A/2/001000
+- tomm20_a549_mantis_2025_08_26_train/A/2/001001
+- tomm20_a549_mantis_2025_08_26_train/A/2/001002
+- tomm20_a549_mantis_2025_08_26_train/A/2/002000
+- tomm20_a549_mantis_2025_08_26_train/A/2/002001
+- tomm20_a549_mantis_2025_08_26_train/A/2/002002
+- tomm20_a549_mantis_2025_08_26_train/B/2/002000
+- tomm20_a549_mantis_2025_08_26_train/B/2/002001
+- tomm20_a549_mantis_2025_08_26_train/B/2/002002
+test_fovs:
+- tomm20_hipsc_test/4/10612/1362
+- tomm20_hipsc_test/4/10624/1349
+- tomm20_hipsc_test/4/11380/1459
+- tomm20_hipsc_test/4/11380/1471
+- tomm20_hipsc_test/4/11384/1404
+- tomm20_hipsc_test/4/11476/16725
+- tomm20_hipsc_test/4/11477/1493
+- tomm20_hipsc_test/4/11492/1472
+- tomm20_hipsc_test/4/11575/1394
+- tomm20_hipsc_test/4/11670/1462
+- tomm20_hipsc_test/4/11680/1686
+- tomm20_hipsc_test/4/11682/1660
+- tomm20_hipsc_test/4/136707/16604
+- tomm20_hipsc_test/4/22132/2823
+- tomm20_hipsc_test/4/22133/2798
+- tomm20_hipsc_test/4/22135/2792
+- tomm20_hipsc_test/4/22135/2822
+- tomm20_hipsc_test/4/22325/3131
+- tomm20_hipsc_test/4/22326/3141
+- tomm20_hipsc_test/4/22327/3137
+- tomm20_hipsc_test/4/22340/3097
+- tomm20_hipsc_test/4/22612/2958
+- tomm20_hipsc_test/4/22612/2986
+- tomm20_hipsc_test/4/23285/3452
+- tomm20_hipsc_test/4/23286/3512
+- tomm20_hipsc_test/4/23381/3195
+- tomm20_hipsc_test/4/23382/3245
+- tomm20_hipsc_test/4/23384/3170
+- tomm20_hipsc_test/4/23384/3253
+- tomm20_hipsc_test/4/23394/3196
+- tomm20_hipsc_test/4/23572/3529
+- tomm20_hipsc_test/4/23768/3424
+- tomm20_hipsc_test/4/23777/3418
+- tomm20_hipsc_test/4/24149/3481
+- tomm20_hipsc_test/4/24150/3537
+- tomm20_hipsc_test/4/24724/3645
+- tomm20_hipsc_test/4/24724/3649
+- tomm20_hipsc_test/4/24834/13
+- tomm20_hipsc_test/4/24930/3599
+- tomm20_hipsc_test/4/24931/3592
+- tomm20_hipsc_test/4/24932/3588
+- tomm20_hipsc_test/4/25207/3818
+- tomm20_hipsc_test/4/25207/3824
+- tomm20_hipsc_test/4/27798/2891
+- tomm20_hipsc_test/4/27892/2961
+- tomm20_hipsc_test/4/27990/3010
+- tomm20_hipsc_test/4/27990/3012
+- tomm20_hipsc_test/4/27991/3009
+- tomm20_hipsc_test/4/27991/3028
+- tomm20_hipsc_test/4/28001/3016
+- tomm20_hipsc_test/4/28084/3200
+- tomm20_hipsc_test/4/28084/3214
+- tomm20_hipsc_test/4/28086/3250
+- tomm20_hipsc_test/4/28087/3224
+- tomm20_hipsc_test/4/28756/3370
+- tomm20_hipsc_test/4/28760/3390
+- tomm20_hipsc_test/4/29142/3718
+- tomm20_hipsc_test/4/29142/3720
+- tomm20_hipsc_test/4/29143/3679
+- tomm20_hipsc_test/4/29152/3740
+- tomm20_hipsc_test/4/29332/3860
+- tomm20_hipsc_test/4/29336/3885
+- tomm20_hipsc_test/4/29336/3896
+- tomm20_hipsc_test/4/30292/3909
+- tomm20_hipsc_test/4/30294/3901
+- tomm20_hipsc_test/4/30391/15032
+- tomm20_hipsc_test/4/30679/3933
+- tomm20_hipsc_test/4/5141/926
+- tomm20_hipsc_test/4/5143/953
+- tomm20_hipsc_test/4/5240/1073
+- tomm20_hipsc_test/4/5912/823
+- tomm20_hipsc_test/4/6485/990
+- tomm20_hipsc_test/4/6486/989
+- tomm20_hipsc_test/4/6486/991
+- tomm20_hipsc_test/4/6497/1009
+- tomm20_hipsc_test/4/6776/1122
+- tomm20_hipsc_test/4/7349/1359
+- tomm20_hipsc_test/4/7638/1280
+- tomm20_hipsc_test/4/7639/1264
+- tomm20_hipsc_test/4/7650/1285
+- tomm20_hipsc_test/4/8228/886
+- tomm20_hipsc_test/4/8228/893
+- tomm20_hipsc_test/4/8228/906
+- tomm20_hipsc_test/4/8692/1235
+- tomm20_hipsc_test/4/8705/1209
+- tomm20_hipsc_test/4/8705/1225
+- tomm20_hipsc_test/4/8982/1147
+- tomm20_hipsc_test/4/9748/16392
+- tomm20_hipsc_test/4/9748/16574
+- tomm20_hipsc_test/4/9748/16977
+- tomm20_hipsc_test/4/9749/16734
+- tomm20_hipsc_test/42/135525/16168
+- tomm20_hipsc_test/42/135615/14189
+- tomm20_hipsc_test/42/135621/14220
+- tomm20_hipsc_test/42/136130/14325
+- tomm20_hipsc_test/42/136133/14302
+- tomm20_hipsc_test/42/136134/14300
+- tomm20_hipsc_test/42/136136/14317
+- tomm20_hipsc_test/42/136136/14320
+- tomm20_hipsc_test/42/137953/15532
+- tomm20_a549_mantis_2024_11_05_test/B/4/000000
+- tomm20_a549_mantis_2024_11_05_test/B/4/000001
+- tomm20_a549_mantis_2024_11_05_test/B/4/001000
+- tomm20_a549_mantis_2024_11_05_test/C/4/001000
+- tomm20_a549_mantis_2024_11_05_test/C/4/001001
+- tomm20_a549_mantis_2024_11_05_test/C/4/002000
+- tomm20_a549_mantis_2024_11_05_test/C/4/002001
+- tomm20_a549_mantis_2024_11_21_test/B/1/000000
+- tomm20_a549_mantis_2024_11_21_test/B/1/000001
+- tomm20_a549_mantis_2024_11_21_test/B/1/001000
+- tomm20_a549_mantis_2024_11_21_test/B/2/000000
+- tomm20_a549_mantis_2024_11_21_test/B/2/000001
+- tomm20_a549_mantis_2024_11_21_test/B/2/001000
+- tomm20_a549_mantis_2024_11_21_test/B/2/001001
+- tomm20_a549_mantis_2024_11_21_test/C/2/000000
+- tomm20_a549_mantis_2024_11_21_test/C/2/000001
+- tomm20_a549_mantis_2024_11_21_test/C/2/001000
+- tomm20_a549_mantis_2024_11_21_test/C/2/001001
+- tomm20_a549_mantis_2025_07_24_test/B/1/000000
+- tomm20_a549_mantis_2025_07_24_test/B/1/000001
+- tomm20_a549_mantis_2025_07_24_test/B/1/001000
+- tomm20_a549_mantis_2025_07_24_test/B/2/000000
+- tomm20_a549_mantis_2025_07_24_test/B/2/000001
+- tomm20_a549_mantis_2025_07_24_test/B/2/001000
+- tomm20_a549_mantis_2025_07_24_test/B/2/001001
+- tomm20_a549_mantis_2025_07_24_test/B/2/002000
+- tomm20_a549_mantis_2025_07_24_test/B/2/002001
+- tomm20_a549_mantis_2025_08_26_test/A/2/000000
+- tomm20_a549_mantis_2025_08_26_test/A/2/000001
+- tomm20_a549_mantis_2025_08_26_test/A/2/000002
+- tomm20_a549_mantis_2025_08_26_test/B/2/000000
+- tomm20_a549_mantis_2025_08_26_test/B/2/000001
+- tomm20_a549_mantis_2025_08_26_test/B/2/000002
+- tomm20_a549_mantis_2025_08_26_test/B/2/001000
+- tomm20_a549_mantis_2025_08_26_test/B/2/001001
+- tomm20_a549_mantis_2025_08_26_test/B/2/001002

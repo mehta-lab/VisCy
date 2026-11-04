@@ -1,0 +1,26 @@
+# OZX packaging reference defaults for `dynacell distribute pack` / `sample`.
+#
+# The CLI does not load this file: every value is passed as a flag. The
+# equivalent invocations are
+#   dynacell distribute pack   <dataset> --output-root <output_root> [--overwrite]
+#   dynacell distribute sample <dataset> --output-root <output_root> \
+#       --max-fovs <sample.fov_limit> --max-t <sample.t_limit>
+# with <dataset> a registered name (e.g. a549-mantis-2024_11_07). Keep the
+# values below in sync with what was actually run so the release layout stays
+# reproducible.
+#
+# Output layout:
+#   <output_root>/<dataset>/<split>/<store-name>.ozx
+#   <output_root>/<dataset>/MANIFEST.json
+#
+# Sample mode packs the reviewer subset (NeurIPS <4 GB requirement).
+
+output_root: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1_ozx
+
+# Refuse to overwrite existing OZX archives by default; pass --overwrite
+# on the CLI to replace them after a re-assembly.
+overwrite: false
+
+sample:
+  fov_limit: 5
+  t_limit: 1

@@ -8,6 +8,11 @@ from pathlib import Path
 import numpy as np
 from omegaconf import OmegaConf
 
+from dynacell.evaluation.cache import prediction_sources, prediction_sources_sha256_12
+from dynacell.evaluation.provenance import write_metrics_provenance
+
+from ._eval_fixtures import make_hcs_plate
+
 
 def _write_metrics(path: Path, payload: list[dict[str, str]]) -> None:
     """Write an object-array metrics cache file."""
@@ -24,11 +29,20 @@ def _import_pipeline_with_stubs(monkeypatch):
 
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")
     metrics_module.ascupy = None
+    metrics_module.FOREGROUND_COLUMNS = ()
+    metrics_module.FOREGROUND_SIGMAS_UM = {}
+    metrics_module.FOREGROUND_METRICS_VERSION = 0
+    metrics_module.FOREGROUND_SOURCES = ()
+    metrics_module.CP_FEATURE_VERSION = "v2_dist_texture"
+    metrics_module.CP_FEATURE_NAMES_BY_VERSION = {"v2_dist_texture": ()}
     metrics_module.fit_microssim = lambda *args, **kwargs: None
     metrics_module.score_microssim = lambda *args, **kwargs: []
     metrics_module.compute_pixel_metrics = lambda *args, **kwargs: {}
     metrics_module.evaluate_segmentations = lambda *args, **kwargs: {}
     metrics_module.cp_regionprops = lambda *args, **kwargs: None
+    metrics_module.active_cp_feature_names = lambda *args, **kwargs: ()
+    metrics_module.round_device_dependent_cp_columns = lambda features, feature_names: features
+    metrics_module.per_cell_similarity = lambda *args, **kwargs: []
     metrics_module.deep_features = lambda *args, **kwargs: None
     metrics_module.build_crops = lambda *args, **kwargs: []
     metrics_module.features_from_crops = lambda *args, **kwargs: np.empty((0, 0), dtype=np.float32)
@@ -39,11 +53,8 @@ def _import_pipeline_with_stubs(monkeypatch):
     feature_metrics_module.compute_feature_similarity_pairwise = lambda *args, **kwargs: {}
 
     feature_select_module = types.ModuleType("dynacell.evaluation.feature_select")
-    feature_select_module.select_features = lambda gt, pred, **kw: (
-        gt,
-        pred,
-        np.ones(gt.shape[1] if gt is not None and gt.ndim >= 2 else 0, dtype=bool),
-    )
+    # ``cp_reference`` imports ``select_gt_features``; not exercised by these cache-reuse tests.
+    feature_select_module.select_gt_features = lambda gt, **kw: np.ones(gt.shape[1], dtype=bool)
     feature_select_module.DEFAULT_FREQ_CUT = 0.05
     feature_select_module.DEFAULT_UNIQUE_CUT = 0.01
     feature_select_module.DEFAULT_CORR_THRESHOLD = 0.9
@@ -53,9 +64,14 @@ def _import_pipeline_with_stubs(monkeypatch):
     linear_probe_module.fov_stratified_auroc = lambda *a, **kw: _nan_auroc
     linear_probe_module.paired_auroc = lambda *a, **kw: _nan_auroc
     linear_probe_module.indistinguishability = lambda auroc: float("nan")
+    # ``pipeline`` imports ``cross_condition_probe`` at module top, which imports
+    # ``MADScaler`` from ``linear_probe`` — stub the name so the import resolves
+    # (the cross-condition probe is not exercised by these cache-reuse tests).
+    linear_probe_module.MADScaler = object
 
     segmentation_module = types.ModuleType("dynacell.evaluation.segmentation")
     segmentation_module.segment = lambda *args, **kwargs: None
+    segmentation_module.require_cubic_workflows = lambda *args, **kwargs: None
     segmentation_module.prepare_segmentation_model = lambda *args, **kwargs: None
 
     # Stub hydra if not installed
@@ -82,9 +98,13 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
 ) -> None:
     """Reuse pixel and mask caches when feature metrics are disabled."""
     pipeline = _import_pipeline_with_stubs(monkeypatch)
+    pred_path = tmp_path / "pred.zarr"
+    make_hcs_plate(pred_path, "prediction", seed=0)
     config = OmegaConf.create(
         {
+            "target_name": "nucleus",
             "compute_feature_metrics": False,
+            "io": {"pred_path": str(pred_path), "pred_channel_name": "prediction"},
             "force_recompute": {
                 "all": False,
                 "gt_masks": False,
@@ -101,10 +121,21 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
             },
         }
     )
-    expected_pixel_metrics = [{"metric": "pixel"}]
+    # The pixel row must carry both scalings: _final_metrics_cache_valid rejects a
+    # cache holding only one, since between the scale-invariant switch and the
+    # dual-reporting change the bare names held scale-INVARIANT values.
+    expected_pixel_metrics = [{"metric": "pixel", "SI_PSNR": 1.0, "SI_SSIM": 1.0, "SI_NRMSE": 1.0}]
     expected_mask_metrics = [{"metric": "mask"}]
     _write_metrics(tmp_path / config.save.pixel_metrics_filename, expected_pixel_metrics)
     _write_metrics(tmp_path / config.save.mask_metrics_filename, expected_mask_metrics)
+    # A reusable cache is one this code could have written, which includes the
+    # numeric-provenance stamp save_metrics emits.
+    write_metrics_provenance(
+        tmp_path,
+        cp_reference_sha256=None,
+        cp_space_sha256=None,
+        prediction_digest=prediction_sources_sha256_12(prediction_sources(pred_path, "prediction")),
+    )
 
     def fail_if_recomputed(_config):
         raise AssertionError("evaluate_predictions should not run when cache is valid")

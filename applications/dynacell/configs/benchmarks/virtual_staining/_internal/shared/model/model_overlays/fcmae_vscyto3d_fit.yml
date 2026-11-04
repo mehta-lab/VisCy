@@ -39,9 +39,25 @@ trainer:
   # only receive gradients on some forward paths; default ddp with
   # find_unused_parameters=False errors at step 1. Matches the canonical
   # vs_test/finetune_3d.py:215 recipe.
-  strategy: ddp_find_unused_parameters_true
+  #
+  # Explicit DDPStrategy with a 3 h process-group timeout (default is 30 min):
+  # on a contended shared FS, epoch-boundary checkpoint writes (386 MB/ckpt x
+  # many concurrent DDP jobs) can stall one rank past 30 min, tripping the NCCL
+  # watchdog on the tiny epoch-end metric ALLREDUCE and aborting the run
+  # (observed on 34683418/34683421). A longer timeout tolerates transient I/O
+  # stalls while still failing a genuinely hung rank.
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      find_unused_parameters: true
+      timeout: "3:00:00"  # h:m:s (jsonargparse parses timedelta from this string form)
   precision: 16-mixed
   max_epochs: 200
+  # cudnn.benchmark: 0.900 vs 4.322 s/step on one H200; train-loss gap 1.25x the replicate
+  # floor over 400 warm-up steps, one pair (weak; speedup RECOMMENDATIONS.md s7).
+  # No compile_model: slower under DDP.
+  # Fit-only by decision: predicts keep the defaults their stores were made with.
+  benchmark: true
 # HCS data hparams (bs=32, z=20, yx=384, augs) live in
 # data_overlays/fcmae_vscyto3d_fit.yml; single-store train leaves compose
 # both, joint (BatchedConcatDataModule) leaves compose only this one and

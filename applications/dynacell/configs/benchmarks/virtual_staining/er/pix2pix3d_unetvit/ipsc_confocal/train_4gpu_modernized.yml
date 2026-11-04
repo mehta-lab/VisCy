@@ -41,6 +41,8 @@ trainer:
         # the inference path (predict_step uses _inference_generator which
         # prefers EMA when available).
         monitor: loss/validate_ema
+        filename: "epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 4
         save_last: true

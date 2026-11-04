@@ -1,0 +1,8 @@
+# MorphEm DINO ViT-S/16 microscopy embedder. Hub id resolves from the shared
+# HF_HUB_CACHE (warmed once per team); offline nodes read it from there.
+pretrained_model_name: CaicedoLab/MorphEm
+# The model ships as trust_remote_code Python, so pin the audited Hub commit:
+# an unpinned id would execute whatever is at the repository head on a cache
+# miss and later runs would not be reproducible. This is the snapshot every
+# cached MorphEm feature was extracted with (hub head as of 2026-09-10).
+revision: 0e8d58787421f83f975634d72420d85c5dfc9c2c

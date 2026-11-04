@@ -1,0 +1,21 @@
+# @package _global_
+# Phase baseline (no model): the raw Phase3D input scored as the "prediction"
+# against the A549 mock ER (sec61b) GT. io.pred_is_source reads Phase3D and
+# defaults io.pred_path to the GT store, so positions match by construction.
+# Diffuse organelle: supermodel semantic + manifest cell_segmentation_path
+# (no cpdino backend / instance AP, unlike the nucleus/membrane phase leaves).
+defaults:
+  - override /target: er_sec61b
+  - override /predict_set: a549_mantis_sec61b_mock
+
+benchmark:
+  dataset_ref:
+    target: sec61b
+
+io:
+  pred_is_source: true
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_phase_er_mock

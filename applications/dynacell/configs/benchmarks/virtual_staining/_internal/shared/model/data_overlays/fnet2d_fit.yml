@@ -1,0 +1,58 @@
+# FNet2D fit-time HCS data hparams for the in-focus 2D benchmark track.
+# Split out from model_overlays/fnet2d_fit.yml so the model+trainer half
+# there stays composable by joint-dataset (BatchedConcatDataModule)
+# leaves that author their own data: block.
+#
+# Mirrors data_overlays/fnet3d_paper_fit.yml (including the mean/std
+# Structure normalization and the 8-crops-per-FOV sampling that diverge
+# from the CellDiff/UNetViT conventions) but flattens Z to the in-focus
+# `_focus.zarr` 5-plane slab stores (z_window_size=1, each window one
+# plane):
+#   - z_window_size: 32 -> 1
+#   - RandWeightedCropd spatial_size [32,64,64] -> [1,64,64]
+#   - CenterSpatialCropd (val) roi_size [32,64,64] -> [1,64,64]
+# The YX flips are unchanged (spatial_axes 1=Y, 2=X are valid at Z=1).
+data:
+  init_args:
+    z_window_size: 1
+    batch_size: 48
+    num_workers: 8
+    yx_patch_size: [64, 64]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      # CPU: 8 patches per FOV (amortizes zarr decompression).
+      # batch_size=48 -> DataLoader loads 6 FOVs, each yields 8 patches = 48.
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [1, 64, 64]
+          num_samples: 8
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [source, target]
+          spatial_axes: [1]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [source, target]
+          spatial_axes: [2]
+          prob: 0.5
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          roi_size: [1, 64, 64]

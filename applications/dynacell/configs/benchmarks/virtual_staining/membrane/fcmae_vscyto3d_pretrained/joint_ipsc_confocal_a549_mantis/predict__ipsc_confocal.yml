@@ -21,7 +21,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints/epoch=111-step=59360.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/fcmae_vscyto3d_pretrained/checkpoints/epoch=148-step=78970-loss=0.374.ckpt
 
 data:
   init_args:
@@ -38,8 +38,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_pretrained_jointtrained.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/ipsc/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Pretrained_PRED_MEMB_JOINTTR_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/ipsc

@@ -1,0 +1,29 @@
+# Train set: AICS iPSC confocal, BRIGHTFIELD input (ablation).
+#
+# Identical to ipsc_confocal.yml except the model input channel: dataset_ref
+# carries source_channel: Brightfield, so the resolver splices `Brightfield`
+# instead of the manifest's declared `channels.source: Phase3D`. Same dataset,
+# same stores, same targets, same splits — only the input volume changes.
+#
+# `Phase3D` in these stores is RECONSTRUCTED FROM `Brightfield` by waveorder, so
+# this arm measures whether that reconstruction buys anything the network cannot
+# learn itself. Brightfield is a genuine z-stack (verified: per-plane std sweeps
+# 1043 -> 1471 through the 44 planes of train/SEC61B.zarr, zero identical planes),
+# carrying ~1.9e4 counts of DC offset that both models' normalizations absorb.
+#
+# The canonical train_set token is `ipsc__bf` (paths.py `_TRAIN_ALIAS`); it is a
+# distinct on-disk identity from plain `ipsc`, so brightfield and phase artifacts
+# never share a checkpoint, prediction or eval directory.
+benchmark:
+  train_set: ipsc_confocal_brightfield
+  dataset_group: aics-hipsc
+  dataset_ref:
+    dataset: aics-hipsc
+    source_channel: Brightfield
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    split_ratio: 0.8
+    mmap_preload: true
+    scratch_dir: /dev/shm
+    persistent_workers: true

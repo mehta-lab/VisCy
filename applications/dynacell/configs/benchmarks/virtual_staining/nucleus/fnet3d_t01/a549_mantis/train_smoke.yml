@@ -1,0 +1,70 @@
+# Smoke sibling of nucleus/fnet3d_t01/a549_mantis/train.yml.
+# Proves the derived timepoint-subset store is trainable before four 1.6-day fits
+# launch on it: that H2B_t01.zarr's `fov_statistics` normalization metadata survived
+# the subset copy, that mmap_preload stages a 2-frame-per-position store (the arm's
+# whole point, and the code path the real fit uses), that RandWeightedCropd finds
+# foreground in only 2 frames per FOV, and that train + val forward/backward give
+# finite MSE. Deliberately keeps mmap_preload ON — a lazy-read smoke would skip the
+# one staging path this store has never exercised.
+# Scratch run_root, no logger, no checkpoints (so no junk last.ckpt can shadow the
+# real run), 30 steps, bounded 40-min wall.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: a549_mantis
+  model_name: fnet3d_t01
+  experiment_id: nucleus__a549_mantis__fnet3d_t01__smoke
+
+trainer:
+  max_steps: 30
+  limit_val_batches: 2
+  logger: false
+  callbacks: []
+
+data:
+  init_args:
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_t01.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          roi_size: [32, 64, 64]
+
+launcher:
+  job_name: FNet3DT01_NUCL_SMOKE
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/_smoke/fnet3d_t01_a549_nucleus
+  sbatch:
+    constraint: "a6000|a40|l40s"
+    cpus_per_task: 16
+    mem: "96G"
+    time: "00:40:00"

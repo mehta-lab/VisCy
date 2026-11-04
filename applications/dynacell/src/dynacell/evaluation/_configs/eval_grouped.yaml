@@ -32,3 +32,6 @@ defaults:
 #     io: { ... }
 #     save: { save_dir: /path/to/eval_out/a549_zikv }
 conditions: []
+# Names of the conditions to evaluate; null evaluates all of them. Lets one leaf
+# score a single condition, e.g. ``only_conditions=[fnet3d__ipsc_trained__a549_mock]``.
+only_conditions: null

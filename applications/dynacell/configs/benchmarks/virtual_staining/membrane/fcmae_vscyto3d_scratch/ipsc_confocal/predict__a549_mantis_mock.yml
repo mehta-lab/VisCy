@@ -34,7 +34,7 @@ model:
     # by 4.3%; prefer the pretrained predict configs for downstream eval.
     # Hardlink alias at run_root; underlying epoch=136-step=42744.ckpt also
     # preserved in checkpoints_frozen_ep136_20260501_005505/.
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fcmae_vscyto3d_scratch/best_ep136_val0.39590.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fcmae_vscyto3d_scratch/checkpoints/epoch=136-step=42744.ckpt
 
 data:
   init_args:
@@ -51,8 +51,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_scratch_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/ipsc/a549__mock/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Scratch_PRED_MEMB_ON_A549_MOCK
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_scratch/ipsc/a549__mock

@@ -7,7 +7,7 @@ model:
       out_channels: 1
       depth: 4
       mult_chan: 32
-      in_stack_depth: 16
+      in_stack_depth: 32
     predict_method: full_image
     predict_overlap: [4, 256, 256]
     ckpt_path: {ckpt_path}
@@ -18,7 +18,7 @@ data:
     data_path: {data_path}
     source_channel: Phase3D
     target_channel: {target_channel}
-    z_window_size: 16
+    z_window_size: 32
     batch_size: 1
     num_workers: 0
     yx_patch_size: [512, 512]
@@ -37,6 +37,7 @@ trainer:
   devices: 1
   num_nodes: 1
   precision: 32-true
+  logger: false
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:

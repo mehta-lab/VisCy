@@ -1,0 +1,107 @@
+# FNet3D temporal-sampling ablation, Arm B "spread" (Phase 17).
+#
+# Identical to nucleus/fnet3d_paper/a549_mantis/train.yml except `data_path`: this
+# arm reads H2B_tspread.zarr, which holds 2 timepoints per position spread over that
+# position's own range (plate ordinal i takes t = i % 10 and (i % 10 + 5) % 10 — a
+# 10-hour separation on the store's 2 h grid, with every hpi used by exactly 6 of
+# the 60 frames). Its partner `fnet3d_t01` reads the SAME number of frames from a
+# two-hour early window (hpi 5 and 7), so the pair isolates temporal diversity at a
+# fixed frame budget. The full-time-course fnet3d_paper fit is the third rung.
+#
+# Built by tools/build_temporal_subset_zarr.py --mode spread --n-timepoints 2.
+# 30 positions x 2 frames -> 24 train / 6 val positions (split_ratio 0.8), 48 train
+# and 12 val (position, timepoint) pairs. Because HCSDataModule splits by POSITION
+# under seed_everything: 0, both arms draw the identical permutation and therefore
+# the identical train/val positions.
+#
+# The overlay's norm/aug/val_aug are keyed on Structure (the SEC61B/TOMM20 target
+# channel). Nucleus target_channel is Nuclei, so we list-replace those three lists
+# here to re-key them.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: a549_mantis
+  model_name: fnet3d_tspread
+  experiment_id: nucleus__a549_mantis__fnet3d_tspread
+
+data:
+  init_args:
+    # A549 pooled store + target_channel — no resolver in this train_set.
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_tspread.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          roi_size: [32, 64, 64]
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_A549_NUCL_tspread
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fnet3d_tspread
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        # 1/5 the frames means 1/5 the steps per epoch: 816 windows / 6 windows
+        # per step = 136 steps/epoch, so max_steps 200000 is ~1470 epochs. At
+        # every_n_epochs 1 that is ~1470 write-then-delete cycles of a 424 MB
+        # checkpoint, and long fnet/fcmae runs have silently stopped writing
+        # checkpoints three times now. 147 monitor events is ample selection
+        # granularity; validation still runs every epoch.
+        every_n_epochs: 10
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fnet3d_tspread/checkpoints
+
+launcher:
+  job_name: FNet3DTSpread_A549_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fnet3d_tspread
+  sbatch:
+    # The fnet3d_paper a549 leaf asks for 512G because staging the FULL pooled
+    # store peaks ~75 GB; this arm stages 60 frames x 2 channels (~14 GB), so 96G
+    # is generous. 16 CPUs likewise covers num_workers 8 with persistent workers.
+    # Both cuts matter for scheduling, not for results.
+    #
+    # Constrained OFF the >=80 GB pool (a100_80/h100_80/h200) on purpose: the
+    # concurrent re-eval campaign needs those cards for cold deep-feature
+    # extraction, and this fit does not — the paper baseline trained the same
+    # patch/batch/precision on an A6000.
+    constraint: "a6000|a40|l40s"
+    cpus_per_task: 16
+    mem: "96G"

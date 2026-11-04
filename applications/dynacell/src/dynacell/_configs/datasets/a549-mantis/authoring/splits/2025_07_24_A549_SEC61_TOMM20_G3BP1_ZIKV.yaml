@@ -1,0 +1,40 @@
+# A549 mantis splits — 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV
+#
+# Plan: SEC61B 4 mock + 6 ZIKV test; TOMM20 3 mock + 6 ZIKV test.
+# G3BP1 wells (C/1, C/2) are omitted from the platemap and therefore absent
+# from splits entirely.
+#
+# Available per target (Airtable ∩ zarr, full 6 FOV coverage each well):
+#   SEC61B: A/1 (mock, 6), A/2 (ZIKV, 6) → all 6 ZIKV to test, first 4 mock to test.
+#   TOMM20: B/1 (mock, 6), B/2 (ZIKV, 6) → all 6 ZIKV to test, first 3 mock to test.
+
+experiment: 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV
+targets:
+  sec61b:
+    train:
+    - A/1/002000
+    - A/1/002001
+    test:
+    - A/1/000000
+    - A/1/000001
+    - A/1/001000
+    - A/1/001001
+    - A/2/000000
+    - A/2/000001
+    - A/2/001000
+    - A/2/001001
+    - A/2/002000
+    - A/2/002001
+  tomm20:
+    train:
+    - B/1/001001
+    test:
+    - B/1/000000
+    - B/1/000001
+    - B/1/001000
+    - B/2/000000
+    - B/2/000001
+    - B/2/001000
+    - B/2/001001
+    - B/2/002000
+    - B/2/002001

@@ -27,7 +27,7 @@ model:
     # ckpt lives under the _ws8500 training-output subdir; config namespace
     # uses fcmae_vscyto3d_pretrained (no _ws8500 suffix) for consistency with
     # iPSC + a549 single-set predict configs.
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fcmae_vscyto3d_pretrained_ws8500/checkpoints/epoch=111-step=48496.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fcmae_vscyto3d_pretrained/checkpoints/epoch=162-step=70579-loss=0.411.ckpt
 
 data:
   init_args:
@@ -44,8 +44,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_fcmae_vscyto3d_pretrained_jointtrained.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_pretrained/joint/ipsc/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Pretrained_PRED_SEC61B_JOINTTR_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_pretrained/joint/ipsc

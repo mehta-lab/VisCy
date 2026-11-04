@@ -1,0 +1,207 @@
+# pix2pix2d `wmatch` arm (fit) of membrane/pix2pix2d_unetvit/joint_ipsc_confocal_a549_mantis/train.yml.
+# Recipe delta: warmup_steps 8500 -> 1269. Run-D's 8500-batch warmup is
+# 7.9 % of the matching 3D fit (107200 batches); this 2D fit runs 16000, so
+# round(8500 * 16000 / 107200) keeps the same schedule shape. The baseline's absolute 8500
+# left 5 of 12 2D fits still warming up at their last step (wandb lr-AdamW, 2026-10-22).
+# Everything else, and the rationale for it, is the baseline leaf's.
+# Written by applications/dynacell/experiments/2026-10-22_2d-benchmark-paper-appendix/make_wmatch_fit_leaves.py.
+base:
+- ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_fit.yml
+- ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+- ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+- ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  gene: Membrane
+  target: membrane
+  target_id: membrane
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: pix2pix2d_unetvit_wmatch
+  experiment_id: membrane__joint_ipsc_confocal_a549_mantis__pix2pix2d_unetvit_wmatch
+trainer:
+  logger:
+    init_args:
+      name: pix2pix2d_unetvit_wmatch_JOINT_MEMB
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/pix2pix2d_unetvit_wmatch
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: step
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: loss/validate_ema
+      filename: epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}
+      auto_insert_metric_name: false
+      every_n_epochs: 1
+      save_top_k: 4
+      save_last: true
+      dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/pix2pix2d_unetvit_wmatch/checkpoints
+_hcs_init_args:
+  source_channel: Phase3D
+  target_channel: Membrane
+  z_window_size: 1
+  batch_size: 2
+  num_workers: 4
+  yx_patch_size: &id001
+  - 512
+  - 512
+  split_ratio: 0.8
+  mmap_preload: true
+  scratch_dir: /dev/shm
+  persistent_workers: true
+  normalizations: &id002
+  - class_path: viscy_transforms.NormalizeSampled
+    init_args:
+      keys:
+      - Phase3D
+      level: fov_statistics
+      subtrahend: mean
+      divisor: std
+  - class_path: viscy_transforms.NormalizeSampled
+    init_args:
+      keys:
+      - Membrane
+      level: fov_statistics
+      subtrahend: median
+      divisor: iqr
+  augmentations: &id003
+  - class_path: viscy_transforms.RandWeightedCropd
+    init_args:
+      keys:
+      - Phase3D
+      - Membrane
+      w_key: Membrane
+      spatial_size:
+      - 1
+      - 624
+      - 624
+      num_samples: 2
+  gpu_augmentations: &id004
+  - class_path: viscy_transforms.BatchedRandAffined
+    init_args:
+      keys:
+      - source
+      - target
+      prob: 0.8
+      rotate_range:
+      - 0
+      - 0
+      - 0
+      shear_range:
+      - 0.0
+      - 0.05
+      - 0.05
+      scale_range:
+      - - 1
+        - 1
+      - - 0.5
+        - 1.5
+      - - 0.5
+        - 1.5
+      safe_crop_size:
+      - 1
+      - 512
+      - 512
+      safe_crop_coverage: 0.9
+  - class_path: viscy_transforms.BatchedCenterSpatialCropd
+    init_args:
+      keys:
+      - source
+      - target
+      roi_size:
+      - 1
+      - 512
+      - 512
+  - class_path: viscy_transforms.BatchedRandAdjustContrastd
+    init_args:
+      keys:
+      - source
+      prob: 0.5
+      gamma:
+      - 0.8
+      - 1.2
+  - class_path: viscy_transforms.BatchedRandScaleIntensityd
+    init_args:
+      keys:
+      - source
+      prob: 0.5
+      factors: 0.5
+  - class_path: viscy_transforms.BatchedRandGaussianNoised
+    init_args:
+      keys:
+      - source
+      prob: 0.5
+      mean: 0.0
+      std: 0.3
+  - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+    init_args:
+      keys:
+      - source
+      prob: 0.5
+      sigma_x:
+      - 0.25
+      - 0.75
+      sigma_y:
+      - 0.25
+      - 0.75
+      sigma_z:
+      - 0
+      - 0
+  val_gpu_augmentations: &id005
+  - class_path: viscy_transforms.BatchedCenterSpatialCropd
+    init_args:
+      keys:
+      - source
+      - target
+      roi_size:
+      - 1
+      - 512
+      - 512
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+    - class_path: viscy_data.hcs.HCSDataModule
+      init_args:
+        source_channel: Phase3D
+        target_channel: Membrane
+        z_window_size: 1
+        batch_size: 2
+        num_workers: 4
+        yx_patch_size: *id001
+        split_ratio: 0.8
+        mmap_preload: true
+        scratch_dir: /dev/shm
+        persistent_workers: true
+        normalizations: *id002
+        augmentations: *id003
+        gpu_augmentations: *id004
+        val_gpu_augmentations: *id005
+        data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell_focus.zarr
+    - class_path: viscy_data.hcs.HCSDataModule
+      init_args:
+        source_channel: Phase3D
+        target_channel: Membrane
+        z_window_size: 1
+        batch_size: 2
+        num_workers: 4
+        yx_patch_size: *id001
+        split_ratio: 0.8
+        mmap_preload: true
+        scratch_dir: /dev/shm
+        persistent_workers: true
+        normalizations: *id002
+        augmentations: *id003
+        gpu_augmentations: *id004
+        val_gpu_augmentations: *id005
+        data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/dual_nucl_memb_all_focus.zarr
+launcher:
+  job_name: pix2pix2d_unetvit_wmatch_JOINT_MEMB
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/pix2pix2d_unetvit_wmatch
+  sbatch:
+    constraint: a40|a6000|l40s|h100|h200
+    mem: 128G
+model:
+  init_args:
+    warmup_steps: 1269

@@ -20,6 +20,16 @@
 # the unused-param scan and is strictly faster for fully-active graphs.
 trainer:
   accelerator: gpu
-  strategy: ddp_find_unused_parameters_true
+  # Explicit DDPStrategy(find_unused_parameters=True) + a 3 h process-group
+  # timeout (default 30 min): on a contended shared FS, epoch-boundary
+  # checkpoint writes across many concurrent DDP jobs can stall one rank past
+  # 30 min, tripping the NCCL watchdog on the epoch-end metric ALLREDUCE and
+  # aborting the run. A longer timeout tolerates transient I/O stalls (same fix
+  # as model_overlays/fcmae_vscyto3d_fit.yml).
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      find_unused_parameters: true
+      timeout: "3:00:00"  # h:m:s (jsonargparse parses timedelta from this string form)
   devices: 4
   num_nodes: 1

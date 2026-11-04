@@ -1,0 +1,30 @@
+# A549 mantis splits — 2024_11_07_A549_SEC61_DENV
+#
+# Positions listed here passed biological QC (Airtable ∩ dynacell zarr).
+# Any FOV not in this file is excluded from both train and test.
+#
+# Per A549_MANTIS_PLAN.md test-set proposal:
+#   SEC61B mock: 4 test FOVs from 11_07 (of 8 mock available)
+#   SEC61B DENV: 8 test FOVs from 11_07 (all 8 DENV available)
+
+experiment: 2024_11_07_A549_SEC61_DENV
+targets:
+  sec61b:
+    train:
+    - B/1/001000
+    - B/1/001001
+    - B/3/001000
+    - B/3/001001
+    test:
+    - B/1/000000
+    - B/1/000001
+    - B/3/000000
+    - B/3/000001
+    - B/2/000000
+    - B/2/000001
+    - B/2/001000
+    - B/2/001001
+    - C/2/000000
+    - C/2/000001
+    - C/2/001000
+    - C/2/001001

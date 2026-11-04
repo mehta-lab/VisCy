@@ -34,7 +34,7 @@ trainer:
   logger:
     init_args:
       name: FNet3D_JOINT_SEC61B_paper
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fnet3d_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fnet3d_paper
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -42,10 +42,12 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fnet3d_paper/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fnet3d_paper/checkpoints
 
 _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
@@ -111,11 +113,11 @@ data:
       - class_path: viscy_data.hcs.HCSDataModule
         init_args:
           <<: *hcs_init_args
-          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_all.zarr
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/SEC61B_all.zarr
 
 launcher:
   job_name: FNet3DPaper_JOINT_SEC61B
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fnet3d_paper
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fnet3d_paper
   # Joint preloads two stores (iPSC + A549 pool) into /dev/shm; the default
   # 256G cap is too tight (256G iPSC mem + ~50G A549 + worker peak OOMs).
   # 512G is the smallest tier that fits joint preload + worker overhead.

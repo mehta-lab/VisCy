@@ -23,7 +23,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb/unetvit3d/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/unetvit3d/checkpoints/epoch=18-step=121600.ckpt
 
 data:
   init_args:
@@ -42,8 +42,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_unetvit3d_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/unetvit3d/ipsc/a549__mock/prediction.zarr
 
 launcher:
   job_name: UNetViT3D_PRED_MEMB_ON_A549_MOCK
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/unetvit3d/ipsc/a549__mock

@@ -12,7 +12,9 @@ Three stacked sections, each with its own Timepoint + Z-slice sliders:
    noise → prediction, with that step's Spectral PCC.
 
 Inference runs on the single selected timepoint only. Data comes from the demo
-dataset repo (no user upload).
+dataset repo (no user upload): one held-out A549 test FOV per marker, cropped from
+the release by `build_demo_data.py` (5 timepoints, 32 Z, 512x512). Checkpoints are
+the released A549-trained models (`s3://dynacell/v1/models/a549/`).
 
 ## Layout
 
@@ -25,9 +27,10 @@ hf_demo/
     README.md               # Space card
     config_templates/       # per-model predict YAMLs (celldiff/fnet3d/vscyto3d)
   cards/                    # README cards for the model + dataset repos
-  upload_checkpoints.py     # publish checkpoints (run on HPC)
+  build_demo_data.py        # build the demo-data zips from the release (run on HPC)
+  upload_demo_data.py       # publish the demo-data zips + card
+  upload_checkpoints.py     # publish the release checkpoints (run on HPC)
   upload_hf_space.py        # push hf_space/ to the Space
-  mirror_to_biohub.py       # one-time mirror from dihan-zheng/*
 ```
 
 Hosting, access model, ZeroGPU configuration, and the deploy/smoke-test

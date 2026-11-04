@@ -52,6 +52,11 @@ FLUOR_CH = 2  # channel index for fluorescence in the input zarr
 SPACING = [0.174, 0.1494, 0.1494]
 SPECTRAL_KWARGS = dict(bin_delta=1.0, tail_fraction=0.2, apodization="tukey", nbins_low=3)
 
+# CELL-Diff trajectory sampler: fixed-step midpoint on a Beta(0.4, 0.3) time grid, the
+# DynaCell-lite recipe (#520). 8 time points = 14 network evaluations, vs ~80-100 for the
+# adaptive dopri5 default, with the same image (relL2 0.03-0.06 to dopri5 on the demo data).
+TRAJ_SAMPLER = dict(sampling_method="midpoint", time_schedule=(0.4, 0.3))
+
 # Cache downloaded checkpoints in /tmp so the Space doesn't re-download each run
 _ckpt_cache: dict[str, str] = {}
 
@@ -167,7 +172,7 @@ def compute_trajectory(
     organelle: str,
     data_path: str,
     timepoint: int = 0,
-    num_steps: int = 50,
+    num_steps: int = 8,
     progress=None,
 ) -> dict:
     """Run the CELL-Diff ODE; save trajectory to /tmp as .npy; return metadata dict.
@@ -217,11 +222,12 @@ def compute_trajectory(
     gt_crop = fluor_raw[z_start : z_start + patch_d, :patch_h, :patch_w].astype(np.float32)
 
     if progress is not None:
-        progress(0.35, desc=f"Generating {num_steps}-step ODE trajectory...")
+        progress(0.35, desc=f"Generating {num_steps}-point ODE trajectory...")
     phase_tensor = torch.from_numpy(phase_crop).float().unsqueeze(0).unsqueeze(0).to(device)
-    with torch.no_grad():
-        trajectory = model.model.generate_trajectory(phase_tensor, num_steps=num_steps)
-    traj_np = trajectory[:, 0].cpu().numpy().astype(np.float32)  # (num_steps, 1, D, H, W)
+    # bf16 autocast: same lite-benchmark ordering as fp32; GroupNorm stays fp32 in the net.
+    with torch.no_grad(), torch.autocast(device, dtype=torch.bfloat16, enabled=device == "cuda"):
+        trajectory = model.model.generate_trajectory(phase_tensor, num_steps=num_steps, **TRAJ_SAMPLER)
+    traj_np = trajectory[:, 0].float().cpu().numpy()  # (num_steps, 1, D, H, W)
 
     if progress is not None:
         progress(0.90, desc="Saving trajectory to disk...")

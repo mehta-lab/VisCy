@@ -1,0 +1,85 @@
+# FNet3D paper-baseline fit on nucleus — A549 mantis-lightsheet pooled, BRIGHTFIELD input.
+#
+# Brightfield-input ablation arm of nucleus/fnet3d_paper/a549_mantis/train.yml. Every
+# hyperparameter is identical to that baseline; the only change is the model input
+# channel (Brightfield instead of the Phase3D volume reconstructed from it), which
+# enters via train_sets/a549_mantis_brightfield.yml's source_channel.
+#
+# The three transform lists are re-authored because they name channels explicitly;
+# values are copied from the COMPOSED baseline (32x64x64 crops, num_samples 8,
+# Nuclei mean/std), not from the target fragment, which the fnet3d data overlay
+# replaces wholesale.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis_brightfield.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: a549_mantis_brightfield
+  model_name: fnet3d_paper
+  experiment_id: nucleus__a549_mantis_brightfield__fnet3d_paper
+
+data:
+  init_args:
+    # A549 pooled store + target_channel — no resolver in this train_set.
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_all.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Brightfield]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          roi_size: [32, 64, 64]
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_A549bf_NUCL_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549__bf/nucleus/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549__bf/nucleus/fnet3d_paper/checkpoints
+
+launcher:
+  job_name: FNet3DPaperBF_A549_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549__bf/nucleus/fnet3d_paper
+  # 512G to match the shared headroom convention across the fnet3d
+  # leaves on a549/joint workloads (mmap_preload peaks at ~75 GB for
+  # H2B_all alone); carried over from the phase baseline unchanged.
+  sbatch:
+    mem: "512G"

@@ -1,0 +1,32 @@
+# Model recipe: CellDiff-2D — the CELLDiffNet flow-matching backbone run
+# Z-preserving at Z=1 for the in-focus 2D benchmark track.
+#
+# Mirrors recipes/models/celldiff_fm.yml but:
+#   - input_spatial_size: [8, 512, 512] -> [1, 512, 512]
+#   - patch_size: 4 -> [1, 4, 4]
+# The encoder already strides (1, 2, 2) (Z-preserving, celldiff_net.py), so
+# only the ViT bottleneck needed changing: its PatchEmbed3D was a *cubic*
+# Conv3d(kernel=patch, stride=patch), which cannot consume a size-1 Z axis.
+# patch_size now accepts per-axis (D, H, W) extents; a cubic patch at D=1
+# still raises rather than silently reshaping (see celldiff_2d_test.py).
+#
+# The architecture is unchanged otherwise — CellDiff-2D is CELLDiffNet with
+# the Z axis frozen, not a distinct network. Dropping the Z patch axis costs
+# ~12.7M of the 3D model's 93.4M parameters (the patch-embed and final-layer
+# projections shrink by 4x); everything else is identical.
+model:
+  class_path: dynacell.engine.DynacellFlowMatching
+  init_args:
+    net_config:
+      input_spatial_size: [1, 512, 512]
+      in_channels: 1
+      dims: [64, 128, 256, 256]
+      num_res_block: [2, 2, 2]
+      hidden_size: 512
+      num_heads: 8
+      dim_head: 64
+      num_hidden_layers: 8
+      patch_size: [1, 4, 4]
+    transport_config:
+      path_type: Linear
+      prediction: velocity

@@ -1,0 +1,42 @@
+# Hardware profile: one H200, for predict mode on the VSCyto3D-pretrained family.
+# Pair with recipes/topology/single_gpu.yml.
+#
+# Exists to decouple these predicts from hardware_h200_single.yml, which 48 FIT
+# leaves also compose (44 train.yml + 4 train_smoke.yml) and which therefore
+# cannot be re-tuned from predict data. Before this profile the 41 predict leaves
+# on it inherited the fit shape of 32 cores and 256G.
+#
+# Sized from measurement. Across every COMPLETED predict of these leaves that
+# sacct still retains (19 jobs, all fcmae_vscyto3d_pretrained): peak RSS was
+# 2.02 GiB and peak CPU was 2.92 cores (TotalCPU/Elapsed, job 34880997 =
+# 4628 s / 1586 s), with a median of 2.41 cores. These compose
+# `num_workers: 0` and `batch_size: 1`, so dataloading is in-process and cannot
+# use more. 16 cores and 64G match the other predict profiles and leave ~5x and
+# ~30x headroom over those peaks.
+#
+# `constraint: h200` is DELIBERATELY KEPT, and is not a measured requirement --
+# predict is `full_image` at 512x512x15 and fp32, which fits comfortably on
+# smaller cards, and a sibling leaf of this same model dir
+# (_dual_nucl_memb/.../predict__hek_mantis_kras_a549xy.yml, constraint
+# a40|l40s|a6000|a100|h100|h200) COMPLETED on gpu-f-5. The pin stays because GPU
+# type perturbs outputs in this tree -- cross-GPU segmentation mask floors and
+# reduction-order PCC differences are both documented -- so unpinning risks
+# moving published numbers on a re-predict. Relaxing it is a defensible separate
+# decision, not a side effect of fixing the CPU and memory request.
+#
+# `time` stays at the 4 days these leaves already had. 16 of the 41 leaves
+# (vscyto3d_cytolandft, vscyto3d_infectionft_dynacellft) still compose
+# `ckpt_path: REPLACE_ME_WITH_PRODUCTION_CHECKPOINT_PATH` and have never
+# completed a run, so their wall need is unmeasured; an unmeasured family
+# inherits a conservative cap rather than a speculative one. The 25 that do run
+# top out at 0.65 h. Tighten this once the other 16 produce a number.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 16
+    gpus: 1
+    mem: "64G"
+    constraint: "h200"
+    time: "4-00:00:00"

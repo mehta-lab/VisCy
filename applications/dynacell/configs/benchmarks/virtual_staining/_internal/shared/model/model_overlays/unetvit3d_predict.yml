@@ -9,8 +9,24 @@ base:
   - ../../../../../../recipes/topology/single_gpu.yml
 model:
   init_args:
-    predict_method: full_image
+    # ViT generator is fixed at 512x512; the A549 test set is 640x960, so tile
+    # into overlapping 512x512 windows (single tile on the 512x512 iPSC test).
+    predict_method: sliding_window
     predict_overlap: [4, 256, 256]
+    # predict_blend defaults to "cosine", which cross-fades the overlaps. The
+    # old plain-average behaviour ("uniform") left step discontinuities where
+    # the window count changes -- on a 640x960 FOV the y=128 edge measured 7.4x
+    # its local median step, vs 1.0x for ground truth. Predictions written
+    # before that default landed carry those seams.
+    #
+    # Not set here: predict_phase_shifts, which additionally suppresses the
+    # decoder's ConvTranspose checkerboard (2/4/8 px) and the ViT token lattice
+    # (32 px) at len(offsets)**2 the cost. Both are present IN distribution on
+    # every organelle -- the 32 px token grid is the block structure visible in
+    # figure panels. [0, 5, 11, 22] takes its modulation depth 0.99 -> 0.24
+    # in-domain (ground-truth floor 0.07). Do NOT swap in offsets that merely
+    # zero the period-32 phasor; they reinstate the short periods and measure
+    # worse. See engine._phase_shift_average.
 data:
   init_args:
     z_window_size: 8

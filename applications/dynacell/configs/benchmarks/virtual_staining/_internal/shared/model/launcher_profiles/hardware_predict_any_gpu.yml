@@ -8,16 +8,38 @@
 # used — A40 / A6000 / L40S / L4 all work and drain the queue faster than
 # pinning Hopper.
 #
-# Hardware-shape constants (gpus, cpus_per_task, mem) match hardware_h200_single
-# so resource accounting is identical; only the GPU vendor constraint is
-# relaxed.
+# Hardware-shape constants are sized from measurement, not copied from the fit
+# profile. Across every COMPLETED predict in Slurm's retention window
+# (2026-07-15 onward, ~1500 jobs over 46 job-name families) the peak RSS of any
+# family was 3.58 GiB and every family but one sat at or below 2.75 GiB, against
+# the 256G that used to be requested here. Peak CPU was 13.6 cores
+# (TotalCPU/Elapsed, fnet2d job 35038580: 6030 s / 443 s); family medians run
+# 1.0-4.1 cores, and every predict leaf in the tree composes `num_workers: 0`,
+# so dataloading is in-process by construction.
+#
+# 16 cores clears the observed maximum and 64G is ~18x the observed peak RSS.
+# The old 256G was the binding constraint on throughput, not the GPU: it caps a
+# 500G node at 2 concurrent predicts, so a 4-GPU node would strand two of its
+# GPUs. Same reasoning as hardware_predict_celldiff_lite.yml.
+#
+# This deliberately NO LONGER matches hardware_h200_single. That profile is
+# shared with 48 fit leaves, so it must not be re-tuned from predict data;
+# its predict leaves moved to hardware_predict_h200.yml for the same reason.
+#
+# `time` is sized from measurement, not habit: across every completed predict in
+# Slurm's retention window the longest single-pass run was 21.9 h (a pix2pix3d
+# sliding-window predict on an A6000), so 2 days is ~2.2x the observed maximum.
+# CELL-Diff is the one family that does not fit under this cap and has its own
+# profile -- see hardware_predict_celldiff.yml. Do NOT raise this back to 4 days
+# to accommodate a slow leaf; give that leaf a profile, or the cap stops meaning
+# anything.
 launcher:
   sbatch:
     partition: gpu
     nodes: 1
     ntasks_per_node: 1
-    cpus_per_task: 32
+    cpus_per_task: 16
     gpus: 1
-    mem: "256G"
+    mem: "64G"
     constraint: null
-    time: "4-00:00:00"
+    time: "2-00:00:00"

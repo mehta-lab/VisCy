@@ -21,7 +21,8 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_cuda_module.asnumpy = lambda x: x
 
     cubic_metrics_module = types.ModuleType("cubic.metrics")
-    cubic_metrics_module.fsc_resolution = lambda *args, **kwargs: {}
+    cubic_metrics_module.fsc_resolution = lambda *args, **kwargs: {"mean": 2.0}
+    cubic_metrics_module.frc_resolution = lambda *args, **kwargs: 3.0
     cubic_metrics_module.MicroMS3IM = object
 
     def _stub_pcc(a, b, mask=None):
@@ -31,16 +32,51 @@ def _import_metrics_with_stubs(monkeypatch):
 
     cubic_metrics_module.pcc = _stub_pcc
 
-    def _stub_nrmse(y_true, y_pred, normalization=None, normalize=None, data_range=None, mask=None):
-        a = y_true.numpy() if hasattr(y_true, "numpy") else np.asarray(y_true)
-        b = y_pred.numpy() if hasattr(y_pred, "numpy") else np.asarray(y_pred)
+    def _as_np(x):
+        return x.numpy() if hasattr(x, "numpy") else np.asarray(x)
+
+    def _scale_invariant_pair(y_true, y_pred):
+        """Mirror cubic's ``scale_invariant`` transform: z-score GT, LS-fit pred.
+
+        Kept in step with ``cubic.metrics.skimage_metrics.scale_invariant`` so the
+        stub tests the contract the production call relies on rather than an
+        invented one: the target is standardized, the prediction is centred and
+        rescaled by the least-squares gain, and ``data_range`` is derived from the
+        target alone.
+        """
+        a, b = _as_np(y_true).astype(np.float64), _as_np(y_pred).astype(np.float64)
+        gt_std = a.std()
+        gt_norm = (a - a.mean()) / gt_std
+        pred_zero = b - b.mean()
+        alpha = (gt_norm * pred_zero).sum() / (pred_zero * pred_zero).sum()
+        return gt_norm, pred_zero * alpha, float((a.max() - a.min()) / gt_std)
+
+    def _reject_conflict(scale_invariant, normalize, normalization=None):
+        # cubic raises when a normalization mode is combined with the
+        # scale-invariant path, because both choose the denominator. Mirroring it
+        # keeps a config that would fail in production from passing here.
+        if scale_invariant and (normalize is not None or normalization is not None):
+            raise ValueError("scale_invariant=True is incompatible with normalize/normalization")
+
+    def _stub_nrmse(
+        y_true, y_pred, normalization=None, normalize=None, data_range=None, mask=None, scale_invariant=False
+    ):
+        _reject_conflict(scale_invariant, normalize, normalization)
+        if scale_invariant:
+            a, b, _ = _scale_invariant_pair(y_true, y_pred)
+            return float(np.sqrt(np.mean((a - b) ** 2)) / np.sqrt(np.mean(a**2)))
+        a, b = _as_np(y_true), _as_np(y_pred)
         a = (a - a.min()) / max(float(a.max() - a.min()), 1e-8)
         b = (b - b.min()) / max(float(b.max() - b.min()), 1e-8)
         return float(np.sqrt(np.mean((a - b) ** 2)))
 
-    def _stub_psnr(y_true, y_pred, data_range=None, normalize=None, mask=None):
-        a = y_true.numpy() if hasattr(y_true, "numpy") else np.asarray(y_true)
-        b = y_pred.numpy() if hasattr(y_pred, "numpy") else np.asarray(y_pred)
+    def _stub_psnr(y_true, y_pred, data_range=None, normalize=None, mask=None, scale_invariant=False):
+        _reject_conflict(scale_invariant, normalize)
+        if scale_invariant:
+            a, b, rng = _scale_invariant_pair(y_true, y_pred)
+            mse = np.mean((a - b) ** 2)
+            return float("inf") if mse < 1e-12 else float(10 * np.log10(rng**2 / mse))
+        a, b = _as_np(y_true), _as_np(y_pred)
         a = (a - a.min()) / max(float(a.max() - a.min()), 1e-8)
         b = (b - b.min()) / max(float(b.max() - b.min()), 1e-8)
         mse = np.mean((a - b) ** 2)
@@ -49,7 +85,13 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_metrics_module.nrmse = _stub_nrmse
     cubic_metrics_module.psnr = _stub_psnr
 
-    def _stub_ssim(img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, **kwargs):
+    def _stub_ssim(
+        img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, scale_invariant=False, **kwargs
+    ):
+        _reject_conflict(scale_invariant, kwargs.get("normalize"))
+        if scale_invariant:
+            a, b, rng = _scale_invariant_pair(img1.squeeze(), img2.squeeze())
+            return float(structural_similarity(a, b, data_range=rng))
         a = img1.numpy().squeeze()
         b = img2.numpy().squeeze()
         return float(structural_similarity(a, b, data_range=float(data_range or 1.0)))
@@ -60,8 +102,20 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_bandlimited_module.spectral_pcc = lambda *args, **kwargs: 0.0
 
     cubic_feature_module = types.ModuleType("cubic.feature")
+    cubic_feature_module.glcm_features = lambda *args, **kwargs: {}
     cubic_feature_voxel_module = types.ModuleType("cubic.feature.voxel")
     cubic_feature_voxel_module.regionprops_table = lambda *args, **kwargs: {}
+
+    # cubic.scipy / cubic.skimage: the fake ``cubic`` module has no ``__path__``,
+    # so these submodule imports must be stubbed explicitly too.
+    cubic_scipy_module = types.ModuleType("cubic.scipy")
+    cubic_scipy_ndimage_module = types.ModuleType("cubic.scipy.ndimage")
+    cubic_scipy_ndimage_module.find_objects = lambda *args, **kwargs: []
+    cubic_scipy_module.ndimage = cubic_scipy_ndimage_module
+    cubic_skimage_module = types.ModuleType("cubic.skimage")
+    cubic_skimage_filters_module = types.ModuleType("cubic.skimage.filters")
+    cubic_skimage_filters_module.threshold_otsu = lambda *args, **kwargs: 0.0
+    cubic_skimage_module.filters = cubic_skimage_filters_module
 
     monkeypatch.setitem(sys.modules, "cubic", cubic_module)
     monkeypatch.setitem(sys.modules, "cubic.cuda", cubic_cuda_module)
@@ -69,29 +123,56 @@ def _import_metrics_with_stubs(monkeypatch):
     monkeypatch.setitem(sys.modules, "cubic.metrics.bandlimited", cubic_bandlimited_module)
     monkeypatch.setitem(sys.modules, "cubic.feature", cubic_feature_module)
     monkeypatch.setitem(sys.modules, "cubic.feature.voxel", cubic_feature_voxel_module)
+    monkeypatch.setitem(sys.modules, "cubic.scipy", cubic_scipy_module)
+    monkeypatch.setitem(sys.modules, "cubic.scipy.ndimage", cubic_scipy_ndimage_module)
+    monkeypatch.setitem(sys.modules, "cubic.skimage", cubic_skimage_module)
+    monkeypatch.setitem(sys.modules, "cubic.skimage.filters", cubic_skimage_filters_module)
     sys.modules.pop("dynacell.evaluation.metrics", None)
 
     return importlib.import_module("dynacell.evaluation.metrics")
 
 
-def test_per_input_normalization_absorbs_gain_and_offset(monkeypatch) -> None:
-    """cubic normalize='min_max' normalizes each input independently.
+def test_scale_invariant_absorbs_gain_and_offset(monkeypatch) -> None:
+    """An affine-transformed prediction must score as a perfect match.
 
-    Gain and offset errors disappear after per-input min-max normalization —
-    both target and prediction map to the same [0, 1] range.
+    This is the property ``scale_invariant=True`` guarantees, and the reason the
+    pipeline switched to it: the metric should report agreement with the target,
+    not the prediction's dynamic range. The previous per-input min-max recipe also
+    absorbed gain and offset, but it derived each array's scale from its own
+    extremes, so a single outlier voxel moved the denominator; the scale-invariant
+    form fits the prediction to the target by least squares instead.
     """
     metrics = _import_metrics_with_stubs(monkeypatch)
 
     target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
-    prediction = target * 2.0 + 0.25  # gain+offset — absorbed by per-input normalization
+    prediction = target * 2.0 + 0.25  # pure gain+offset — no information lost
 
-    assert metrics.nrmse(target, prediction) == pytest.approx(0.0, abs=1e-6)
-    assert metrics.psnr(target, prediction) == float("inf")
-    assert metrics.ssim(target, prediction) == pytest.approx(1.0, abs=5e-2)
+    assert metrics.nrmse(target, prediction, scale_invariant=True) == pytest.approx(0.0, abs=1e-6)
+    assert metrics.psnr(target, prediction, scale_invariant=True) == float("inf")
+    # metrics.ssim is the module's own wrapper, which already passes
+    # scale_invariant=True to cubic; it takes (H, W) / (D, H, W) input.
+    assert metrics.ssim(target.squeeze(0), prediction.squeeze(0)) == pytest.approx(1.0, abs=5e-2)
+
+
+def test_scale_invariant_rejects_a_normalization_mode(monkeypatch) -> None:
+    """Passing both a normalization mode and scale_invariant must raise.
+
+    Both pick the comparison's denominator, so combining them silently returned a
+    different number in cubic < 0.9.0a1 -- which is how ``normalize="min_max"``
+    went unnoticed on ``ssim`` (it vanished into ``**kwargs``) while quietly
+    corrupting psnr and nrmse. The pipeline must fail loudly instead.
+    """
+    metrics = _import_metrics_with_stubs(monkeypatch)
+
+    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
+    with pytest.raises(ValueError, match="incompatible"):
+        metrics.nrmse(target, target, normalize="min_max", scale_invariant=True)
+    with pytest.raises(ValueError, match="incompatible"):
+        metrics.psnr(target, target, normalize="min_max", scale_invariant=True)
 
 
 def test_identical_images_still_score_perfectly(monkeypatch) -> None:
-    """Per-input normalization should preserve perfect self-similarity."""
+    """Scale-invariant scoring should preserve perfect self-similarity."""
     metrics = _import_metrics_with_stubs(monkeypatch)
 
     target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
@@ -99,6 +180,110 @@ def test_identical_images_still_score_perfectly(monkeypatch) -> None:
     assert metrics.nrmse(target, target) == pytest.approx(0.0)
     assert metrics.psnr(target, target) == float("inf")
     assert metrics.ssim(target, target) == pytest.approx(1.0)
+
+
+# --- ssim / pixel-metric dimensionality (2D vs 3D) ---
+
+
+def test_ssim_accepts_2d_input_and_dispatches_spatial_dims_2(monkeypatch) -> None:
+    """A 2-D (H, W) input scores in-plane and passes spatial_dims=2 to cubic."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+
+    captured = {}
+
+    def _capture_ssim(img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, **kwargs):
+        captured["spatial_dims"] = spatial_dims
+        captured["ndim"] = img1.ndim
+        return float(structural_similarity(img1.numpy().squeeze(), img2.numpy().squeeze(), data_range=1.0))
+
+    monkeypatch.setattr(metrics, "cubic_ssim", _capture_ssim)
+
+    target = torch.rand(16, 16)  # 2-D (H, W)
+    assert metrics.ssim(target, target) == pytest.approx(1.0)
+    assert captured["spatial_dims"] == 2
+    assert captured["ndim"] == 4  # (1, 1, H, W)
+
+
+def test_ssim_dispatches_spatial_dims_3_for_3d(monkeypatch) -> None:
+    """A 3-D (D, H, W) input keeps volumetric SSIM (spatial_dims=3)."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+
+    captured = {}
+
+    def _capture_ssim(img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, **kwargs):
+        captured["spatial_dims"] = spatial_dims
+        captured["ndim"] = img1.ndim
+        return 1.0  # dispatch-only stub — skimage's 3D window doesn't fit a tiny volume
+
+    monkeypatch.setattr(metrics, "cubic_ssim", _capture_ssim)
+
+    target = torch.rand(4, 16, 16)  # 3-D (D, H, W)
+    assert metrics.ssim(target, target) == pytest.approx(1.0)
+    assert captured["spatial_dims"] == 3
+    assert captured["ndim"] == 5  # (1, 1, D, H, W)
+
+
+def test_ssim_rejects_non_2d_3d(monkeypatch) -> None:
+    """Ranks other than 2 or 3 raise a clear error."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    with pytest.raises(ValueError, match="2-D .* or 3-D"):
+        metrics.ssim(torch.rand(2, 4, 16, 16), torch.rand(2, 4, 16, 16))
+
+
+def test_compute_pixel_metrics_2d_uses_frc_not_fsc(monkeypatch) -> None:
+    """2-D inputs report FRC_Resolution (ring) and never FSC_Resolution (shell)."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+
+    pred = torch.rand(16, 16)
+    target = torch.rand(16, 16)
+    out = metrics.compute_pixel_metrics(
+        pred, target, spacing=(0.15, 0.15, 0.15), fsc_kwargs={"bin_delta": 5}, use_gpu=False
+    )
+    assert "FRC_Resolution" in out
+    assert not any(k.endswith("_FSC_Resolution") for k in out)
+
+
+def test_compute_pixel_metrics_3d_uses_fsc_not_frc(monkeypatch) -> None:
+    """3-D inputs keep FSC_Resolution (shell) and never emit FRC_Resolution."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+
+    pred = torch.rand(8, 16, 16)  # D=8 so the stub SSIM's 3D window fits
+    target = torch.rand(8, 16, 16)
+    out = metrics.compute_pixel_metrics(
+        pred, target, spacing=(0.5, 0.15, 0.15), fsc_kwargs={"bin_delta": 5}, use_gpu=False
+    )
+    assert any(k.endswith("_FSC_Resolution") for k in out)
+    assert "FRC_Resolution" not in out
+
+
+# --- real-cubic integration (skipped when cubic is not installed) ---
+
+
+def test_ssim_real_cubic_2d_and_3d_identical_scores_one() -> None:
+    """Real cubic SSIM accepts both a 2-D plane and a 3-D volume (no stubs)."""
+    from dynacell.evaluation import metrics as real_metrics
+
+    if real_metrics.cubic_ssim is None:
+        pytest.skip("cubic not installed")
+    img2d = torch.rand(32, 32)
+    img3d = torch.rand(8, 32, 32)
+    assert real_metrics.ssim(img2d, img2d) == pytest.approx(1.0, abs=1e-3)
+    assert real_metrics.ssim(img3d, img3d) == pytest.approx(1.0, abs=1e-3)
+
+
+def test_compute_pixel_metrics_real_cubic_2d_reports_frc() -> None:
+    """Real cubic: a 2-D input yields FRC_Resolution + SSIM and no FSC key."""
+    from dynacell.evaluation import metrics as real_metrics
+
+    if real_metrics.pcc is None:
+        pytest.skip("cubic not installed")
+    pred = torch.rand(64, 64)
+    target = torch.rand(64, 64)
+    out = real_metrics.compute_pixel_metrics(
+        pred, target, spacing=(0.15, 0.15, 0.15), fsc_kwargs={"bin_delta": 5}, use_gpu=False
+    )
+    assert "SSIM" in out and "FRC_Resolution" in out
+    assert not any(k.endswith("_FSC_Resolution") for k in out)
 
 
 # --- pcc tests ---
@@ -361,6 +546,39 @@ def test_deep_features_shape_mismatch_raises(monkeypatch) -> None:
     cell_seg = np.zeros((1, 4, 5), dtype=np.int32)
     with pytest.raises(ValueError, match="Shape mismatch"):
         metrics.deep_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
+
+
+def test_build_crops_robust_norm_survives_hot_pixel(monkeypatch) -> None:
+    """A lone hot pixel must not compress the in-cell crop toward black.
+
+    Regression for the raw-min-max recipe: a single saturated pixel
+    anywhere in the max-projection set the whole-FOV scale and flattened
+    every cell's real signal to ~0, and did so asymmetrically for GT
+    (hot-pixel-prone fluorescence) vs prediction (smooth) — a GT-vs-pred
+    intensity-range mismatch injected straight into the deep features.
+    Robust percentile normalization (``_robust_norm``, 1-99 clip) clips
+    the outlier so the cell crop keeps its contrast.
+    """
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    d, h, w = 1, 12, 12  # 144 px: p99 index lands on real signal, so a lone outlier is clipped
+    image = np.full((d, h, w), 5.0, dtype=np.float32)  # uniform real background
+    image[0, 2:5, 2:5] = np.arange(10, 100, 10, dtype=np.float32).reshape(3, 3)  # in-cell gradient
+    image[0, 10, 10] = 1.0e6  # hot pixel outside the cell
+    cell_seg = np.zeros((d, h, w), dtype=np.int32)
+    cell_seg[0, 2:5, 2:5] = 1
+
+    crops = metrics.build_crops(image, cell_seg, patch_size=4)
+
+    assert len(crops) == 1
+    # float32 (not float64): _robust_norm upcasts via np.percentile, but crops
+    # must match float32 model weights (DINOv3/DynaCLR feed them straight in).
+    assert crops[0].dtype == np.float32
+    foreground = crops[0][crops[0] > 0]
+    # Raw min-max would map the 10..90 signal to ~1e-5 (max == 1e6); robust
+    # norm clips the hot pixel so the in-cell values keep real spread.
+    assert foreground.size == 9
+    assert float(foreground.max()) > 0.5
+    assert float(foreground.std()) > 0.1
 
 
 class _BatchAwareExtractor:

@@ -21,7 +21,22 @@ _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
     "evaluate": ("dynacell.evaluation.pipeline", "evaluate_model", "eval"),
     "evaluate-grouped": ("dynacell.evaluation.pipeline", "evaluate_model_grouped", "eval"),
     "precompute-gt": ("dynacell.evaluation.precompute_cli", "precompute_gt", "eval"),
+    "backfill-pixel-scalings": (
+        "dynacell.evaluation.pixel_scaling_backfill",
+        "backfill_pixel_scalings",
+        "eval",
+    ),
     "report": ("dynacell.reporting.cli", "generate_report", "report"),
+}
+
+# Argparse (non-Hydra) subcommands. These were written against the
+# ``dynacell-paper`` top-level dispatcher, which Phase 13 retired when this
+# package took over the pipeline end to end; routing them here restores the
+# release workflow (`distribute pack` / `sync` / `verify-public`, `croissant
+# from-release`) without reviving a second console script.
+_ARGPARSE_COMMANDS: dict[str, tuple[str, str]] = {
+    "croissant": ("dynacell.croissant.cli", "croissant"),
+    "distribute": ("dynacell.distribution.cli", "distribution"),
 }
 
 # HPC-specific config groups (target, feature_extractor/dynaclr, benchmark eval
@@ -114,6 +129,19 @@ def main_cli():
     from dynacell.evaluation.runtime import early_apply_env_caps
 
     early_apply_env_caps()
+
+    if len(sys.argv) >= 2 and sys.argv[1] in _ARGPARSE_COMMANDS:
+        command = sys.argv[1]
+        module_path, extra = _ARGPARSE_COMMANDS[command]
+        # Each module's argparse reads sys.argv[1:], so strip our own token.
+        sys.argv = [f"{sys.argv[0]} {command}"] + sys.argv[2:]
+        try:
+            module = importlib.import_module(module_path)
+        except ModuleNotFoundError as e:
+            print(f"Missing dependencies for 'dynacell {command}': {e}\nInstall with: pip install 'dynacell[{extra}]'")
+            raise SystemExit(1) from e
+        module.main()
+        return
 
     if len(sys.argv) >= 2 and sys.argv[1] in _HYDRA_COMMANDS:
         command = sys.argv[1]
