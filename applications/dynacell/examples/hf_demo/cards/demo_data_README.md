@@ -64,7 +64,7 @@ zip_path = hf_hub_download(
 # unzip → open with iohub.ngff.open_ome_zarr
 ```
 
-Read the stores with [iohub](https://github.com/czbiohub-sf/iohub). The demo Space
+Read the stores with [iohub](https://github.com/Biohub/iohub). The demo Space
 loads these automatically via its "Load Demo Data" button.
 
 ## License
