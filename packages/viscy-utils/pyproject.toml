@@ -42,7 +42,7 @@ dependencies = [
   "scipy",
   "tensorboard",
   "tensorstore",
-  "torch>=2.10",
+  "torch>=2.13",
   "torchvision",
   "viscy-data",
   "wandb>=0.12.10",

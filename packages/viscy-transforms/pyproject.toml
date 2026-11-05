@@ -33,7 +33,7 @@ dependencies = [
   "kornia>=0.8.2",
   "monai>=1.5.2",
   "numpy>=2.4.1",
-  "torch>=2.10",
+  "torch>=2.13",
 ]
 
 optional-dependencies.notebook = [

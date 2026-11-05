@@ -4,6 +4,12 @@ Thanks for your interest in contributing to VisCy!
 
 Please see the following steps for our workflow.
 
+Participation in VisCy is governed by the
+[Contributor Covenant Code of Conduct](./CODE_OF_CONDUCT.md).
+
+Do not report security vulnerabilities in public issues. Follow our
+[security policy](./SECURITY.md) to report them privately.
+
 ## Getting started
 
 Please read the [README](./README.md) for an overview of the project

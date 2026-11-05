@@ -61,4 +61,4 @@ In the works!
 
 ## License
 
-BSD-3-Clause - see [LICENSE](../../LICENSE) in repository root.
+BSD-3-Clause - see [LICENSE](../../LICENSE.md) in repository root.
