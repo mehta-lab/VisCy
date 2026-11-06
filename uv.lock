@@ -1483,8 +1483,8 @@ requires-dist = [
     { name = "viscy-transforms", editable = "packages/viscy-transforms" },
     { name = "viscy-utils", editable = "packages/viscy-utils" },
     { name = "wandb", marker = "extra == 'wandb'" },
-    { name = "waveorder", marker = "extra == 'eval'", git = "https://github.com/mehta-lab/waveorder.git?branch=main" },
-    { name = "waveorder", marker = "extra == 'preprocess'", git = "https://github.com/mehta-lab/waveorder.git?branch=main" },
+    { name = "waveorder", marker = "extra == 'eval'", git = "https://github.com/Biohub/waveorder.git?branch=main" },
+    { name = "waveorder", marker = "extra == 'preprocess'", git = "https://github.com/Biohub/waveorder.git?branch=main" },
 ]
 provides-extras = ["croissant", "distribution", "eval", "eval-gpu", "preprocess", "report", "wandb"]
 
@@ -7169,7 +7169,7 @@ requires-dist = [
     { name = "click" },
     { name = "pydantic" },
     { name = "viscy-utils", editable = "packages/viscy-utils" },
-    { name = "waveorder", git = "https://github.com/mehta-lab/waveorder.git?branch=main" },
+    { name = "waveorder", git = "https://github.com/Biohub/waveorder.git?branch=main" },
 ]
 
 [package.metadata.requires-dev]
@@ -7412,7 +7412,7 @@ wheels = [
 [[package]]
 name = "waveorder"
 version = "3.0.5.dev3+22a0f72"
-source = { git = "https://github.com/mehta-lab/waveorder.git?branch=main#22a0f72e6cdf93001a94431f7260d39ef026a819" }
+source = { git = "https://github.com/Biohub/waveorder.git?branch=main#22a0f72e6cdf93001a94431f7260d39ef026a819" }
 dependencies = [
     { name = "click" },
     { name = "colorspacious" },

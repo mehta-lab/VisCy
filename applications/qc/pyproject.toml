@@ -49,7 +49,7 @@ source = "uv-dynamic-versioning"
 packages = [ "src/qc" ]
 
 [tool.uv.sources]
-waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
+waveorder = { git = "https://github.com/Biohub/waveorder.git", branch = "main" }
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

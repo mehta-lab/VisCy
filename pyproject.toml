@@ -63,7 +63,7 @@ cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 viscy-qc = { workspace = true }
 dynacell = { workspace = true }
-waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
+waveorder = { git = "https://github.com/Biohub/waveorder.git", branch = "main" }
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
 aicsmlsegment = { git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git", branch = "main" }
