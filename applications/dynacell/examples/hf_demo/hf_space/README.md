@@ -41,4 +41,4 @@ is one held-out test field of view per marker, cropped from the DynaCell v1 rele
 ([`biohub/dynacell-checkpoints`](https://huggingface.co/biohub/dynacell-checkpoints)) are the
 released A549-trained models (`s3://dynacell/v1/models/a549/`).
 
-Code: [VisCy `applications/dynacell`](https://github.com/mehta-lab/VisCy/tree/main/applications/dynacell).
+Code: [VisCy `applications/dynacell`](https://github.com/Biohub/VisCy/tree/main/applications/dynacell).
