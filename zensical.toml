@@ -28,7 +28,7 @@ site_author = "Biohub"
 # documentation you should set this. A trailing slash is required for `mike`
 # versioning (each version is served from a subdirectory).
 # Read more: https://zensical.org/docs/setup/basics/#site_url
-site_url = "https://mehta-lab.github.io/VisCy/"
+site_url = "https://biohub.github.io/VisCy/"
 
 # The copyright notice appears in the page footer and can contain an HTML
 # fragment.

@@ -35,7 +35,7 @@
     For development, clone the monorepo and sync the full workspace:
 
     ```sh
-    git clone https://github.com/mehta-lab/VisCy.git
+    git clone https://github.com/Biohub/VisCy.git
     cd VisCy
     uv venv -p 3.13            # (1)!
     uv sync --all-packages --all-extras   # (2)!

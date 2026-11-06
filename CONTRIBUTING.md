@@ -17,7 +17,7 @@ and how you can install and use the package.
 
 ## Issues
 
-We use [issues](https://github.com/mehta-lab/VisCy/issues) to track
+We use [issues](https://github.com/Biohub/VisCy/issues) to track
 bug reports, feature requests, and provide user support.
 
 Before opening a new issue, please first search existing issues (including closed ones)
@@ -26,7 +26,7 @@ to see if there is an existing discussion about it.
 ## Making changes
 
 Any change made to the `main` branch needs to be proposed in a
-[pull request](https://github.com/mehta-lab/VisCy/pulls) (PR).
+[pull request](https://github.com/Biohub/VisCy/pulls) (PR).
 
 If there is an issue that can be addressed by the PR, please reference it.
 If there is not a relevant issue, please either open an issue first,
@@ -50,11 +50,11 @@ See [uv installation docs](https://docs.astral.sh/uv/getting-started/installatio
 If you have push permission to the repository:
 
 ```sh
-git clone https://github.com/mehta-lab/VisCy.git
+git clone https://github.com/Biohub/VisCy.git
 ```
 
 Otherwise, you can follow [these instructions](https://docs.github.com/en/get-started/quickstart/fork-a-repo)
-to [fork](https://github.com/mehta-lab/VisCy/fork) the repository.
+to [fork](https://github.com/Biohub/VisCy/fork) the repository.
 
 #### Install dependencies
 

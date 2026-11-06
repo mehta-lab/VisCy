@@ -4,7 +4,7 @@ Robust virtual staining of landmark organelles from label-free microscopy.
 
 ![Cytoland virtual staining of nuclei and membrane from label-free phase contrast](./docs/asset/svideo_1.png)
 
-Part of the [VisCy](https://github.com/mehta-lab/VisCy) monorepo.
+Part of the [VisCy](https://github.com/Biohub/VisCy) monorepo.
 
 > **Paper:** [Robust virtual staining in Nature Machine Intelligence](https://www.nature.com/articles/s42256-025-01046-2)
 

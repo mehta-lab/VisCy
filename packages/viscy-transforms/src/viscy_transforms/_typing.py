@@ -4,7 +4,7 @@ This module provides type definitions extracted from viscy.data.typing
 for use in the standalone viscy-transforms package. These types define
 the data structures used by transform classes.
 
-Original source: https://github.com/mehta-lab/VisCy/blob/main/viscy/data/typing.py
+Original source: https://github.com/Biohub/VisCy/blob/main/viscy/data/typing.py
 """
 
 from typing import NamedTuple, Sequence, TypedDict, TypeVar

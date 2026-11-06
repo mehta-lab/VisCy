@@ -50,7 +50,7 @@ authors:
   - given-names: Shalin B.
     family-names: Mehta
     affiliation: Biohub, San Francisco
-repository-code: "https://github.com/mehta-lab/VisCy"
+repository-code: "https://github.com/Biohub/VisCy"
 license: BSD-3-Clause
 abstract: >-
   The DynaCell evaluation suite assesses 3D time-lapse virtual staining of live

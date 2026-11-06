@@ -31,8 +31,8 @@ authors:
     family-names: Mehta
     affiliation: Chan Zuckerberg Biohub San Francisco
     orcid: "https://orcid.org/0000-0002-2542-3582"
-repository-code: "https://github.com/mehta-lab/VisCy"
-url: "https://github.com/mehta-lab/VisCy"
+repository-code: "https://github.com/Biohub/VisCy"
+url: "https://github.com/Biohub/VisCy"
 abstract: computer vision models for single-cell phenotyping
 keywords:
   - machine-learning

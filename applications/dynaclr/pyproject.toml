@@ -73,9 +73,9 @@ optional-dependencies.viz = [
   "imageio-ffmpeg",
   "matplotlib",
 ]
-urls.Homepage = "https://github.com/mehta-lab/VisCy"
-urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
-urls.Repository = "https://github.com/mehta-lab/VisCy"
+urls.Homepage = "https://github.com/Biohub/VisCy"
+urls.Issues = "https://github.com/Biohub/VisCy/issues"
+urls.Repository = "https://github.com/Biohub/VisCy"
 scripts.dynaclr = "dynaclr.cli:main"
 
 [dependency-groups]

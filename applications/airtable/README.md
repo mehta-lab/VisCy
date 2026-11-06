@@ -2,7 +2,7 @@
 
 Interface to the **Computational Imaging Database** on Airtable, with utilities for syncing experiment metadata between Airtable and OME-Zarr datasets.
 
-Part of the [VisCy](https://github.com/mehta-lab/VisCy) monorepo.
+Part of the [VisCy](https://github.com/Biohub/VisCy) monorepo.
 
 ---
 

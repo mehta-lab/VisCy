@@ -382,7 +382,7 @@ def _a549_static_fields():
                     },
                     {
                         "@type": "prov:SoftwareAgent",
-                        "@id": "https://github.com/mehta-lab/waveorder",
+                        "@id": "https://github.com/Biohub/waveorder",
                         "prov:label": "waveorder",
                         "description": ("Open-source phase reconstruction pipeline."),
                     },
@@ -579,7 +579,7 @@ def _aics_hipsc_static_fields():
                     },
                     {
                         "@type": "prov:SoftwareAgent",
-                        "@id": "https://github.com/mehta-lab/waveorder",
+                        "@id": "https://github.com/Biohub/waveorder",
                         "prov:label": "waveorder",
                         "description": ("Open-source phase reconstruction pipeline."),
                     },

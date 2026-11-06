@@ -43,10 +43,10 @@ optional-dependencies.notebook = [
   "pooch>=1.9",
   "scikit-image>=0.26",
 ]
-urls.Homepage = "https://github.com/mehta-lab/VisCy"
-# Documentation = "https://mehta-lab.github.io/VisCy/" # TODO: add documentation site at the end of monorepo migration
-urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
-urls.Repository = "https://github.com/mehta-lab/VisCy"
+urls.Homepage = "https://github.com/Biohub/VisCy"
+# Documentation = "https://biohub.github.io/VisCy/" # TODO: add documentation site at the end of monorepo migration
+urls.Issues = "https://github.com/Biohub/VisCy/issues"
+urls.Repository = "https://github.com/Biohub/VisCy"
 
 [dependency-groups]
 dev = [ { include-group = "jupyter" }, { include-group = "test" } ]

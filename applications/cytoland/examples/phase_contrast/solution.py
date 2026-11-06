@@ -102,7 +102,7 @@ source_channel_name = "BF"
 For this example we will use the following parameters:
 ### For more information on the VSCyto3D model:
 See ``viscy.unet.networks.fcmae``
-([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/unext2.py#L252))
+([source code](https://github.com/Biohub/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/unext2.py#L252))
 for configuration details.
 """
 # %%
