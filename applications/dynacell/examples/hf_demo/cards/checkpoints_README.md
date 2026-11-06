@@ -16,7 +16,7 @@ tags:
 Model checkpoints for the **DynaCell** virtual-staining demo: predict fluorescence
 channels (membrane, nuclei, ER, mitochondria) from label-free **phase-contrast**
 3-D microscopy of live A549 cells. Trained and run with
-[VisCy](https://github.com/mehta-lab/VisCy).
+[VisCy](https://github.com/Biohub/VisCy/tree/main/applications/dynacell).
 
 Live demo: [`biohub/dynacell`](https://huggingface.co/spaces/biohub/dynacell)
 
@@ -66,7 +66,7 @@ ckpt = hf_hub_download("biohub/dynacell-checkpoints", "vscyto3d_caax.ckpt")
 
 Input data must be an OME-Zarr HCS store with `Phase3D` as the source channel.
 See the [demo Space](https://huggingface.co/spaces/biohub/dynacell) and
-[VisCy](https://github.com/mehta-lab/VisCy) for the full prediction config.
+[VisCy](https://github.com/Biohub/VisCy/tree/main/applications/dynacell) for the full prediction config.
 
 ## Training data
 

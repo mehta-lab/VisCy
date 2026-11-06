@@ -246,7 +246,7 @@ def build_croissant_from_release(
             "@id": "dynacell-code-repo",
             "name": "VisCy — DynaCell application code",
             "description": ("Training, prediction, evaluation, and reporting pipelines. BSD-3-Clause license."),
-            "contentUrl": "https://github.com/mehta-lab/VisCy/tree/modular-viscy-staging/applications/dynacell",
+            "contentUrl": "https://github.com/Biohub/VisCy/tree/main/applications/dynacell",
             "encodingFormat": "application/x-git",
             "license": "https://opensource.org/licenses/BSD-3-Clause",
             "sha256": "",
@@ -258,9 +258,9 @@ def build_croissant_from_release(
         {
             "@type": "cr:FileObject",
             "@id": "dynacell-demo-sample",
-            "name": "DynaCell reviewer-accessible sample",
+            "name": "DynaCell demo subsample",
             "description": (
-                "Reviewer-accessible sample (<4 GB) with a reduced number of "
+                "Demo subsample (<4 GB) with a reduced number of "
                 "FOVs and timepoints, intended for quick inspection without "
                 "downloading the full release."
             ),

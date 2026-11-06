@@ -56,7 +56,7 @@ must be installed with `uv`. Install uv first if you don't have it
 (`curl -LsSf https://astral.sh/uv/install.sh | sh`), then:
 
 ```bash
-git clone --branch dynacell-models https://github.com/mehta-lab/VisCy.git
+git clone https://github.com/Biohub/VisCy.git
 cd VisCy
 uv venv -p 3.13
 source .venv/bin/activate
@@ -216,7 +216,7 @@ a bare invocation writes **and** submits.
 
 ## Data and code availability
 
-- **Code** — BSD-3-Clause, [github.com/mehta-lab/VisCy](https://github.com/mehta-lab/VisCy/tree/dynacell-models).
+- **Code** — BSD-3-Clause, [github.com/Biohub/VisCy](https://github.com/Biohub/VisCy/tree/main/applications/dynacell).
 - **Data** — OME-Zarr stores hosted on AWS Open Data. The DynaCell A549 dataset
   is released under CC-BY-4.0; the reprocessed iPSC subset under the Allen
   Institute Terms of Use.
