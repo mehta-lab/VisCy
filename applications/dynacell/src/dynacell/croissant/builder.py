@@ -258,9 +258,9 @@ def build_croissant_from_release(
         {
             "@type": "cr:FileObject",
             "@id": "dynacell-demo-sample",
-            "name": "DynaCell reviewer-accessible sample",
+            "name": "DynaCell demo subsample",
             "description": (
-                "Reviewer-accessible sample (<4 GB) with a reduced number of "
+                "Demo subsample (<4 GB) with a reduced number of "
                 "FOVs and timepoints, intended for quick inspection without "
                 "downloading the full release."
             ),
