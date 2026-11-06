@@ -5,7 +5,7 @@ workflow — setup, code, tests, docs, and releases.[^repo]
 
 [^repo]:
     This mirrors the repo's
-    [`CONTRIBUTING.md`](https://github.com/mehta-lab/VisCy/blob/main/CONTRIBUTING.md);
+    [`CONTRIBUTING.md`](https://github.com/Biohub/VisCy/blob/main/CONTRIBUTING.md);
     edit both if you change the process.
 
 ## Set up your environment
@@ -29,12 +29,12 @@ VisCy uses [uv](https://docs.astral.sh/uv/) and is a
 === ":material-source-branch: Push access"
 
     ```sh
-    git clone https://github.com/mehta-lab/VisCy.git
+    git clone https://github.com/Biohub/VisCy.git
     ```
 
 === ":material-source-fork: Fork"
 
-    [Fork the repo](https://github.com/mehta-lab/VisCy/fork), then clone your fork.
+    [Fork the repo](https://github.com/Biohub/VisCy/fork), then clone your fork.
     See [forking a repo](https://docs.github.com/en/get-started/quickstart/fork-a-repo).
 
 **3. Create the environment and sync:**
@@ -51,13 +51,13 @@ uv sync --all-packages          # (2)!
 ## Report an issue
 
 We track bugs, feature requests, and support in
-[issues](https://github.com/mehta-lab/VisCy/issues). Search existing issues
+[issues](https://github.com/Biohub/VisCy/issues). Search existing issues
 (including closed ones) before opening a new one.
 
 ## Make changes
 
 Every change to `main` goes through a
-[pull request](https://github.com/mehta-lab/VisCy/pulls). Reference the issue it
+[pull request](https://github.com/Biohub/VisCy/pulls). Reference the issue it
 addresses, or describe the fix or feature in the PR.
 
 !!! tip "Packages vs. applications"

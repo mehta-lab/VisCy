@@ -48,7 +48,7 @@ The DynaCLR-DENV-VS+Ph model only requires label-free (quantitative phase) and f
 To run inference on your own data (Experimental):
 - Convert the label-free images into the OME-Zarr data format using iohub or other
 [tools](https://ngff.openmicroscopy.org/tools/index.html#file-conversion),
-- Run [pre-processing](https://github.com/mehta-lab/VisCy/blob/main/docs/usage.md#preprocessing)
+- Run [pre-processing](https://github.com/Biohub/VisCy/blob/main/docs/usage.md#preprocessing)
 with the `viscy preprocess` CLI
 - Generate pseudo-tracks or tracking data from [Ultrack](https://github.com/royerlab/ultrack)
 """
@@ -72,7 +72,7 @@ Using a GPU significantly speeds up running model inference, but CPU compute can
 """
 # %%
 # Install VisCy with the optional dependencies for this example
-# See the [repository](https://github.com/mehta-lab/VisCy) for more details
+# See the [repository](https://github.com/Biohub/VisCy) for more details
 # !pip install "viscy[metrics,visual,phate]==0.4.0a3"
 
 # %%

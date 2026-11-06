@@ -67,7 +67,7 @@ On Windows, the files can be downloaded manually from the URLs.
 # `cytoland`, `viscy-utils` and `viscy-data` are installed from the GitHub
 # monorepo: the prediction writer needs a viscy-data newer than its PyPI release.
 # Here stackview and ipycanvas are installed for visualization, and iohub provides OME-Zarr access
-# !pip install "viscy-utils @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=packages/viscy-utils" "viscy-data @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=packages/viscy-data" "cytoland @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=applications/cytoland" iohub stackview ipycanvas
+# !pip install "viscy-utils @ git+https://github.com/Biohub/VisCy.git#subdirectory=packages/viscy-utils" "viscy-data @ git+https://github.com/Biohub/VisCy.git#subdirectory=packages/viscy-data" "cytoland @ git+https://github.com/Biohub/VisCy.git#subdirectory=applications/cytoland" iohub stackview ipycanvas
 
 # %%
 # Restart kernel if running in Google Colab

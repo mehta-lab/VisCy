@@ -12,7 +12,7 @@ Written by Eduardo Hirata-Miyasaki, Ziwen Liu, and Shalin Mehta, CZ Biohub San F
 In this exercise, we will predict fluorescence images of nuclei and plasma membrane markers from quantitative phase images of cells, i.e., we will _virtually stain_ the nuclei and plasma membrane visible in the phase image.
 This is an example of an image translation task. We will apply spatial and intensity augmentations to train robust models and evaluate their performance. Finally, we will explore the opposite process of predicting a phase image from a fluorescence membrane label.
 
-[![HEK293T](https://raw.githubusercontent.com/mehta-lab/VisCy/main/docs/figures/svideo_1.png)](https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755)
+[![HEK293T](https://raw.githubusercontent.com/Biohub/VisCy/main/docs/figures/svideo_1.png)](https://github.com/Biohub/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755)
 (Click on image to play video)
 
 ## Goals
@@ -32,7 +32,7 @@ This is an example of an image translation task. We will apply spatial and inten
   - Evaluate the model using pixel-level and instance-level metrics.
 
 
-Checkout [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos),
+Checkout [VisCy](https://github.com/Biohub/VisCy/tree/main/examples/demos),
 our deep learning pipeline for training and deploying computer vision models
 for image-based phenotyping including the robust virtual staining of landmark organelles.
 VisCy exploits recent advances in data and metadata formats
@@ -73,7 +73,7 @@ The script will:
 - Install `cytoland` + `viscy` (`>=0.5.0a0`) plus the tutorial extras:
   `cellpose`, `torchview`, `microssim`, `jupyter`, `ipykernel`,
   `ipywidgets`, `jupytext`. If you ran the script from inside a clone of
-  the [VisCy monorepo](https://github.com/mehta-lab/VisCy), it installs
+  the [VisCy monorepo](https://github.com/Biohub/VisCy), it installs
   `cytoland` editable from the local workspace; otherwise it installs from
   PyPI.
 - Register the venv as a Jupyter kernel named **`06_image_translation`**

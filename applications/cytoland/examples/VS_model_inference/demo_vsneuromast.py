@@ -72,7 +72,7 @@ phase_channel_name = "Phase3D"
 """
 For this example we will use the following parameters:
 ### For more information on the VSNeuromast model:
-See ``viscy.unet.networks.unext2`` ([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/unet/networks/unext2.py)) for configuration details.
+See ``viscy.unet.networks.unext2`` ([source code](https://github.com/Biohub/VisCy/blob/main/viscy/unet/networks/unext2.py)) for configuration details.
 """
 # %%
 # Setup the data module.

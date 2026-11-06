@@ -61,7 +61,7 @@ The VSCyto2D model only requires label-free images for inference.
 To run inference on your own data,
 convert them into the OME-Zarr data format using iohub or other
 [tools](https://ngff.openmicroscopy.org/tools/index.html#file-conversion),
-and run [pre-processing](https://github.com/mehta-lab/VisCy/blob/main/docs/usage.md#preprocessing)
+and run [pre-processing](https://github.com/Biohub/VisCy/blob/main/docs/usage.md#preprocessing)
 with the `viscy preprocess` CLI.
 """
 
@@ -90,7 +90,7 @@ On Windows, the files can be downloaded manually from the URLs.
 # `cytoland`, `viscy-utils` and `viscy-data` are installed from the GitHub
 # monorepo: the prediction writer needs a viscy-data newer than its PyPI
 # release. viscy-models and viscy-transforms resolve from PyPI.
-# !pip install "viscy-utils @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=packages/viscy-utils" "viscy-data @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=packages/viscy-data" "cytoland @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=applications/cytoland" torchview cmap iohub
+# !pip install "viscy-utils @ git+https://github.com/Biohub/VisCy.git#subdirectory=packages/viscy-utils" "viscy-data @ git+https://github.com/Biohub/VisCy.git#subdirectory=packages/viscy-data" "cytoland @ git+https://github.com/Biohub/VisCy.git#subdirectory=applications/cytoland" torchview cmap iohub
 
 # %%
 # restart kernel if running in Google Colab

@@ -18,7 +18,7 @@
 # - Visualize the image transform learned by the model
 # - Understand the failure modes of the trained model
 #
-# [![HEK293T](https://raw.githubusercontent.com/mehta-lab/VisCy/main/docs/figures/svideo_1.png)](https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755)
+# [![HEK293T](https://raw.githubusercontent.com/Biohub/VisCy/main/docs/figures/svideo_1.png)](https://github.com/Biohub/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755)
 # (Click on image to play video)
 #
 # %% [markdown] tags=[]
@@ -43,7 +43,7 @@
 #   - Explore the model's regime of validity by applying blurring and scaling transforms to the input phase image.
 #
 # #### For more information:
-# Checkout [VisCy](https://github.com/mehta-lab/VisCy),
+# Checkout [VisCy](https://github.com/Biohub/VisCy),
 # our deep learning pipeline for training and deploying computer vision models
 # for image-based phenotyping including the robust virtual staining of landmark organelles.
 #
@@ -553,7 +553,7 @@ log_batch_jupyter(batch)
 # [RandAffined](https://docs.monai.io/en/stable/transforms.html#randaffined),
 # [RandGaussianNoised](https://docs.monai.io/en/stable/transforms.html#randgaussiannoised).
 # You can also inspect any transform in a cell with `RandAffined?`.<br><br>
-# [Compare your choice of augmentations against the pretrained models and config files](https://github.com/mehta-lab/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip).
+# [Compare your choice of augmentations against the pretrained models and config files](https://github.com/Biohub/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip).
 # </div>
 # %% tags=["task"]
 # Here we turn on data augmentation and rerun setup
@@ -751,7 +751,7 @@ log_batch_jupyter(augmented_batch)
 # - Start the training <br>
 #
 # <b> Note </b> <br>
-# See ``viscy.translation.engine.VSUNet`` ([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/translation/engine.py)) and ``viscy.unet.networks.fcmae`` ([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/unet/networks/fcmae.py)) to learn more about the configuration parameters and FCMAE architecture.
+# See ``viscy.translation.engine.VSUNet`` ([source code](https://github.com/Biohub/VisCy/blob/main/viscy/translation/engine.py)) and ``viscy.unet.networks.fcmae`` ([source code](https://github.com/Biohub/VisCy/blob/main/viscy/unet/networks/fcmae.py)) to learn more about the configuration parameters and FCMAE architecture.
 # </div>
 
 # %% tags=["task"]

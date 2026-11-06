@@ -2,7 +2,7 @@
 
 Image transforms for virtual staining microscopy.
 
-Part of the [VisCy](https://github.com/mehta-lab/VisCy) project.
+Part of the [VisCy](https://github.com/Biohub/VisCy) project.
 
 ## Installation
 

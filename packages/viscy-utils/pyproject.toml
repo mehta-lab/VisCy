@@ -61,9 +61,9 @@ optional-dependencies.eval = [
   "scikit-learn",
   "umap-learn",
 ]
-urls.Homepage = "https://github.com/mehta-lab/VisCy"
-urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
-urls.Repository = "https://github.com/mehta-lab/VisCy"
+urls.Homepage = "https://github.com/Biohub/VisCy"
+urls.Issues = "https://github.com/Biohub/VisCy/issues"
+urls.Repository = "https://github.com/Biohub/VisCy"
 scripts.viscy = "viscy_utils.cli:main"
 
 [dependency-groups]

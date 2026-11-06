@@ -46,7 +46,7 @@ packages and extras** — that pulls the dynacell `eval` + `eval_gpu` extras (ce
 `cupy-cuda13x`/`cucim-cu13` GPU stack that matches torch 2.12 cu13):
 
 ```sh
-git clone https://github.com/mehta-lab/VisCy.git && cd VisCy
+git clone https://github.com/Biohub/VisCy.git && cd VisCy
 git checkout dynacell-paths-module     # branch carrying the dynacell eval pipeline
 uv venv -p 3.13                        # 3.11 / 3.12 also fine
 uv sync --all-packages --all-extras    # local install of all workspace packages + extras
