@@ -222,12 +222,7 @@ def test_rotation_tta_transforms():
 
 @pytest.mark.parametrize("yx", [(64, 64), (64, 48), (48, 64)])
 def test_predict_sliding_windows_rotation_tta_nonsquare(yx):
-    """Verify rotation TTA + sliding windows works for non-square FOVs.
-
-    Regression test: ``_predict_with_tta`` must crop to the augmented (rotated)
-    shape, otherwise 90/270-degree rotations on non-square inputs produce
-    mismatched shapes and fail to reduce.
-    """
+    """Preserve YX shape across both rotation-TTA prediction paths."""
     z_window, depth, out_channels = 5, 8, 2
     height, width = yx
     model = VSUNet(
@@ -248,4 +243,10 @@ def test_predict_sliding_windows_rotation_tta_nonsquare(yx):
     with torch.inference_mode():
         output = vs.predict_sliding_windows(x, out_channel=out_channels, step=1)
     assert output.shape == (1, out_channels, depth, height, width)
+    assert torch.isfinite(output).all()
+
+    model.on_predict_start()
+    with torch.inference_mode():
+        output = model.perform_test_time_augmentations(x[:, :, :z_window])
+    assert output.shape[-2:] == (height, width)
     assert torch.isfinite(output).all()
