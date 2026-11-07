@@ -195,7 +195,6 @@ def _select_productive_from_zarr(
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
     adata = ad.read_zarr(matches[0])
-    adata.obs_names_make_unique()
     if pred_column not in adata.obs.columns:
         _logger.warning(f"[{dataset_id}] {pred_column} not in {matches[0].name}; productive empty")
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
@@ -296,7 +295,6 @@ def _select_mock_from_zarr(
         return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
     adata = ad.read_zarr(matches[0])
-    adata.obs_names_make_unique()
     obs = adata.obs.copy()
     obs = obs[obs["fov_name"].astype(str).str.contains(fov_pattern, regex=False)]
     if obs.empty:
@@ -413,7 +411,6 @@ def _load_lc_predictions(
         )
 
     adata = ad.read_zarr(matches[0])
-    adata.obs_names_make_unique()
     if pred_column not in adata.obs.columns:
         _logger.warning(f"{pred_column} not in {matches[0]} .obs; LC fallback")
         return pd.DataFrame()

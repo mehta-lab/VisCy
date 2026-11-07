@@ -101,7 +101,6 @@ def _load_lc_predictions(
             f"{[m.name for m in matches]}; using first"
         )
     adata = ad.read_zarr(matches[0])
-    adata.obs_names_make_unique()
     if pred_column not in adata.obs.columns:
         _logger.warning(f"{pred_column} not in {matches[0]} .obs")
         return pd.DataFrame(columns=["fov_name", "track_id", "t", pred_column])

@@ -581,7 +581,6 @@ def run_mmd_pooled(config: MMDPooledConfig) -> pd.DataFrame:
 
     adatas = [ad.read_zarr(p) for p in config.input_paths]
     combined = ad.concat(adatas, join="outer", label="source_experiment")
-    combined.obs_names_make_unique()
 
     if config.obs_filter:
         mask = pd.Series([True] * len(combined), index=combined.obs.index)

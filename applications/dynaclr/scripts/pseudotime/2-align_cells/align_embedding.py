@@ -240,7 +240,6 @@ def _load_query_embeddings(
         zarr_path = find_embedding_zarr(ds_cfg["pred_dir"], prefix + embedding_pattern)
 
         adata = ad.read_zarr(zarr_path)
-        adata.obs_names_make_unique()
 
         # FOV restriction from the dataset config (e.g. "C/2") — keeps us
         # out of control wells unless the user explicitly wants them.
