@@ -1,0 +1,56 @@
+# FNet3D "same-augmentations" recipe (Phase 15 Arm B) on mito (TOMM20 marker) — AICS iPSC confocal.
+# Template baseline for the Spotlight-v2 Stage 2 #5 arms (generate_spotlight_v2_leaves.py emits
+# fnet3d_vscyto3daug_{v2,v2_seed1,segaux,segaux_sauna,segaux_cldice} from it); never run as-is.
+# Same recipe as nucleus/fnet3d_vscyto3daug/ipsc_confocal/train.yml; the target channel is
+# Structure, so the data overlay's Structure-keyed norm/aug/val lists apply unchanged.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_vscyto3daug_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  train_set: ipsc_confocal
+  model_name: fnet3d_vscyto3daug
+  experiment_id: mito__ipsc_confocal__fnet3d_vscyto3daug
+
+trainer:
+  # Switch off the fnet3d_paper 32-true default: bf16-mixed halves the
+  # 384x384x32 activation footprint. MSE loss is immune to the bf16-SSIM
+  # cancellation issue. Must match fnet3d_bigpatch (Arm A) for a clean
+  # augmentation-only comparison.
+  precision: bf16-mixed
+  logger:
+    init_args:
+      name: FNet3D_VSAug_iPSC_TOMM20
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fnet3d_vscyto3daug
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fnet3d_vscyto3daug/checkpoints
+
+launcher:
+  job_name: FNet3DVSAug_iPSC_TOMM20
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fnet3d_vscyto3daug
+  # 384x384x32 at bf16-mixed measured ~41GB GPU on the bigpatch arm, so an
+  # 80GB card (H100) fits with room; allow h100|h200 to schedule sooner. The
+  # vscyto3d aug stack (affine grid_sample + intensity) runs somewhat higher
+  # but still well under 80GB. TOMM20.zarr-backed preload pushes MaxVMSize past
+  # the shared 256G cap; mem 512G matches the fnet3d iPSC headroom.
+  sbatch:
+    constraint: "h100|h200"
+    mem: "512G"

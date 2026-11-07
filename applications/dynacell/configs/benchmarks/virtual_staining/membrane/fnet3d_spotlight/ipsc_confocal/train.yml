@@ -1,0 +1,91 @@
+# FNet3D paper-baseline fit on membrane (Membrane channel of cell.zarr) — AICS iPSC confocal.
+# The overlay's norm/aug/val_aug are keyed on Structure (the SEC61B/TOMM20 target
+# channel). Membrane target_channel is Membrane, so we list-replace those three
+# lists here to re-key them.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_spotlight_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  train_set: ipsc_confocal
+  model_name: fnet3d_spotlight
+  experiment_id: membrane__ipsc_confocal__fnet3d_spotlight
+
+data:
+  init_args:
+    # Spotlight needs the precomputed foreground mask from the store. Setting
+    # fg_mask_key also makes HCSDataModule patch the mask into gpu_augmentations
+    # so it is warped with the image; the engine re-binarizes it at the point of
+    # use, because the affine resamples with bilinear interpolation.
+    fg_mask_key: fg_mask
+    # Coarse FOV-slab floor, NOT a per-patch filter: the fraction is measured on
+    # the full-YX mask slab read before RandWeightedCropd runs, so it will
+    # essentially never reject anything. The real guard against a degenerate
+    # mask is the store-level foreground-fraction check in Phase 1.5.
+    # nonzero_threshold is deliberately omitted: with fg_mask_key set the mask
+    # branch is taken and it is never read.
+    min_nonzero_fraction: 0.001
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      # Target Otsu-centred: the Dice term's tunable sigmoid clamps everything at
+      # or below 0 to 0, so 0 must be the FG/BG boundary in the model's output
+      # space. DIVISOR IS `std`, unchanged from this family's baseline --
+      # change the subtrahend, NEVER the divisor: it sets the scale of the only
+      # band where the Dice term has any gradient.
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Membrane]
+          level: fov_statistics
+          subtrahend: otsu_threshold
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          w_key: Membrane
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          roi_size: [32, 64, 64]
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_iPSC_MEMB_spotlight
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fnet3d_spotlight
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fnet3d_spotlight/checkpoints
+
+launcher:
+  job_name: FNet3DSpotlight_MEMB
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fnet3d_spotlight
+  # cell.zarr-backed preload (same plate as nucleus) puts MaxVMSize over
+  # the shared 256G cap; bump to match nucleus.
+  sbatch:
+    mem: "512G"

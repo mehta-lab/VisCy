@@ -1,0 +1,64 @@
+# SPOTLIGHT ARM. Mechanical copy of the pix2pix3d_unetvit predict leaf: spotlight
+# changes the training objective only, so inference, the predict model overlay
+# and the Phase3D-only predict normalization are all identical to the baseline.
+# Only model_name / experiment_id / ckpt_path / output_store / run_root /
+# job_name differ.
+#
+# ⚠ ckpt_path names `last.ckpt` as a PLACEHOLDER -- the fit has not run yet.
+# It is authored rather than left blank because `--ckpt best` resolves the
+# checkpoint DIRECTORY from this field and exits if it is missing. Always
+# submit with `--ckpt best`, and re-bake this path afterwards.
+#
+# pix2pix3d_unetvit predict: nucleus (Nuclei marker) against ipsc_confocal test_cropped.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit_spotlight
+  experiment_id: nucleus__ipsc_confocal__pix2pix3d_unetvit_spotlight__ipsc_confocal
+
+model:
+  init_args:
+    # Best loss/validate_ema checkpoint, modernized Run-D 40ep run (job
+    # 33501549, converged early at epoch 15). The checkpoint was SELECTED on the
+    # EMA loss but predict runs the raw generator: see the ema_kimg /
+    # use_ema_at_predict block in model_overlays/pix2pix3d_unetvit_predict.yml,
+    # which pins that explicitly.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix3d_unetvit_spotlight/checkpoints/last.ckpt
+
+data:
+  init_args:
+    # override target-inherited normalizations: predict only reads source
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # clear target-inherited RandWeightedCropd; predict has no CPU augs
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit_spotlight/ipsc/ipsc/prediction.zarr
+        # Take each plane from the depth window centred on it instead of the mean
+        # of all 8 covering windows: that mean halves mid-band power (0.045 ->
+        # 0.021 of ground truth on an in-domain membrane FOV) and cancels none of
+        # the XY lattice, since all 8 share one XY grid.
+        z_reduction: center
+
+launcher:
+  job_name: pix2pix3d_unetvit_spotlight_PRED_NUCL
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit_spotlight/ipsc/ipsc
